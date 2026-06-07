@@ -2,7 +2,7 @@ html, body, #root {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: url('/icon-512.png') center/cover no-repeat #0a0a0f;
+  background: url('/icon-192.png') no-repeat center center / cover #0a0a0f;
 }
 
 /* Prevent iOS text-size auto-adjust and tap highlight for an app-like feel */
