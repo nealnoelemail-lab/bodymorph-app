@@ -31,6 +31,17 @@ const GLOBAL_CSS = `
     z-index: -1;
     animation: silhouetteGlow 3s ease-in-out infinite;
   }
+  .watermark-img-plain {
+    position: fixed;
+    top: 42%; left: 50%;
+    transform: translate3d(-50%, -50%, 0);
+    filter: brightness(0.08) saturate(0);
+    height: 88%;
+    width: auto;
+    opacity: 0.45;
+    pointer-events: none;
+    z-index: -1;
+  }
   .hft-bg-img {
     position: fixed;
     top: 50%; left: 50%;
@@ -1380,6 +1391,13 @@ const Watermark = () => (
   </>
 );
 
+const WatermarkPlain = () => (
+  <>
+    <div aria-hidden="true" style={{ position:"fixed", inset:0, zIndex:-2, background:"#0a0a0f", pointerEvents:"none" }} />
+    <img aria-hidden="true" src={WATERMARK_SRC} className="watermark-img-plain" alt="" />
+  </>
+);
+
 const Logo = ({ small }) => (
   <div style={{ lineHeight:1, textAlign:"center" }}>
     <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none" }}>
@@ -1816,7 +1834,7 @@ function FatLossResults({ profile, onContinue }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ padding:"24px 20px 8px", textAlign:"center" }}>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, color:"#e8ff00" }}>YOUR FAT-LOSS TARGET</div>
         <div style={{ color:"#c8c8e0", fontSize:13.5, lineHeight:1.6, marginTop:6, maxWidth:360, marginLeft:"auto", marginRight:"auto" }}>
@@ -1877,7 +1895,7 @@ function Loading({ name }) {
   return (
     <div style={S.center}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <Logo />
       <div style={{ width:60, height:60, border:"3px solid #2a2a3d", borderTop:"3px solid #e8ff00", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
       <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:2 }}>{msgs[i]}</div>
@@ -1968,7 +1986,7 @@ function EditDays({ profile, onSave, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>EDIT TRAINING DAYS</div>
@@ -2009,7 +2027,7 @@ function EditTime({ profile, onSave, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>EDIT SESSION TIME</div>
@@ -2046,7 +2064,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 5% 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>TRAINING WEEK</div>
@@ -2152,7 +2170,7 @@ function ProgramSummary({ profile, program, onReset, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
 
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 0 12px" }}>
@@ -2380,7 +2398,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
@@ -2531,7 +2549,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
     return (
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
         <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
           <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
           <Logo small />
@@ -2605,7 +2623,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 20px 7px", borderBottom:"1px solid #2a2a3d", position:"sticky", top:0, background:"#0a0a0f", zIndex:10 }}>
         <div>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>{day.day}</div>
@@ -2852,7 +2870,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>PROGRESS</div>
@@ -3368,7 +3386,7 @@ function CardioPlanner({ plan, onSave, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>CARDIO</div>
@@ -3711,7 +3729,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack }) {
     return (
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
         <style>{GLOBAL_CSS}</style>
-        <Watermark />
+        <WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
           <button onClick={()=>setEditRoutine(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{routineLabel.toUpperCase()}</div>
@@ -3743,7 +3761,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>STRETCH</div>
@@ -3849,7 +3867,7 @@ function StretchRoutine({ onBack, gender }) {
     return (
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
         <style>{GLOBAL_CSS}</style>
-        <Watermark />
+        <WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
           <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>STRETCH</div>
@@ -3888,7 +3906,7 @@ function StretchRoutine({ onBack, gender }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={()=>setPick(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{label.toUpperCase()} STRETCH</div>
@@ -4304,7 +4322,7 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{title}</div>
@@ -4411,7 +4429,7 @@ function RegimenConfig({ item, kind, caution, existing, onConfirm, onCancel }) {
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onCancel} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{item.name}</div>
@@ -4528,7 +4546,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
-      <Watermark />
+      <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>TO DO DAILY</div>
@@ -4724,7 +4742,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
     const ytUrl = "https://www.youtube.com/results?search_query="+encodeURIComponent(diet.ytQuery);
     return (
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
-        <style>{GLOBAL_CSS}</style><Watermark />
+        <style>{GLOBAL_CSS}</style><WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
           <button onClick={()=>setDiet(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{diet.emoji} {diet.label.toUpperCase()}</div>
@@ -4752,7 +4770,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
 
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
-      <style>{GLOBAL_CSS}</style><Watermark />
+      <style>{GLOBAL_CSS}</style><WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>NUTRITION</div>
@@ -5262,7 +5280,7 @@ export default function BodyMorph() {
     </div>
   ) : null;
 
-  if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><Watermark /><Logo /></div>;
+  if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
@@ -5306,7 +5324,7 @@ export default function BodyMorph() {
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
   if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={()=>setPhase("home")} /></>);
 
-  return <div style={S.center}><style>{GLOBAL_CSS}</style><Watermark /><Logo /></div>;
+  return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
 }
 
 // ── STYLES ────────────────────────────────────────────────────────────────────
