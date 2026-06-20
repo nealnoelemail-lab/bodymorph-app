@@ -2,16 +2,13 @@ html, body, #root {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: linear-gradient(rgba(10,10,15,0.9), rgba(10,10,15,0.9)), url('/icon-512.png') center/cover no-repeat #0a0a0f;
 }
 
-/* Prevent iOS text-size auto-adjust and tap highlight for an app-like feel */
 * {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Allow inputs to use the system look but keep them tappable on mobile */
 input, button, textarea, select {
   font-family: inherit;
 }
