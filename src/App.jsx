@@ -32,7 +32,8 @@ const GLOBAL_CSS = `
   .watermark-img {
     position: fixed;
     top: 42%; left: 50%;
-    transform: translate(-50%, -50%);
+    transform: translate3d(-50%, -50%, 0);
+    will-change: filter;
     height: 88%;
     width: auto;
     opacity: 0.45;
@@ -43,7 +44,8 @@ const GLOBAL_CSS = `
   .hft-bg-img {
     position: fixed;
     top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
+    transform: translate3d(-50%, -50%, 0);
+    will-change: filter;
     height: 84%;
     width: auto;
     max-width: 92%;
