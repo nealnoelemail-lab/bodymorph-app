@@ -24,7 +24,7 @@ const GLOBAL_CSS = `
     position: fixed;
     top: 42%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
-    filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.7) drop-shadow(0 0 14px rgba(232,180,0,0.85));
+    filter: drop-shadow(0 0 14px rgba(232,180,0,0.85));
     height: 88%;
     width: auto;
     pointer-events: none;
@@ -35,7 +35,7 @@ const GLOBAL_CSS = `
     position: fixed;
     top: 50%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
-    filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.7) drop-shadow(0 0 14px rgba(232,180,0,0.85));
+    filter: drop-shadow(0 0 14px rgba(232,180,0,0.85));
     height: 84%;
     width: auto;
     max-width: 92%;
