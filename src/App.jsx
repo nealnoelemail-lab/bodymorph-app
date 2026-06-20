@@ -1385,7 +1385,7 @@ const Logo = ({ small }) => (
     <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none" }}>
       NTF
     </div>
-    <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?61:80, letterSpacing: small?7.5:10.5, lineHeight:1 }}>
+    <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?73:96, letterSpacing: small?7.5:10.5, lineHeight:1 }}>
       BODY<span style={{ color:"#e8ff00" }}>MORPH</span>
     </div>
   </div>
