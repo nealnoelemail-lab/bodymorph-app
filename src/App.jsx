@@ -1649,7 +1649,7 @@ function Wizard({ onComplete }) {
   );
 
   const steps = [
-    <div key="name" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:9, width:"100%" }}>
+    <div key="name" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
       <div style={{ ...S.stepLabel, fontSize:26 }}>WHAT'S YOUR NAME?</div>
       <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Enter your name" value={p.name} onChange={e=>set("name",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.name.trim()) setStep(1); }} />
       <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
@@ -5311,7 +5311,7 @@ export default function BodyMorph() {
 
 // ── STYLES ────────────────────────────────────────────────────────────────────
 const S = {
-  center: { minHeight:"100vh", background:"transparent", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"12px 20px", gap:10, position:"relative" },
+  center: { minHeight:"100vh", background:"transparent", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"12px 20px", gap:20, position:"relative" },
   stepLabel: { fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:3, color:"#c8c8e0", textAlign:"center" },
   inputLabel: { color:"#c8c8e0", fontSize:12.5, letterSpacing:1, marginBottom:6, textTransform:"uppercase" },
   input: { width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px 14px", fontSize:15, fontFamily:"'DM Sans'", outline:"none" },
