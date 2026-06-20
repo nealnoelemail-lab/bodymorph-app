@@ -17,26 +17,16 @@ const GLOBAL_CSS = `
   @keyframes spin { to { transform:rotate(360deg); } }
   .fade-in { animation: fadeIn 0.35s ease both; }
   @keyframes silhouetteGlow {
-    0%, 100% {
-      filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.6)
-              drop-shadow(0 0 1px rgba(232,200,0,0.6))
-              drop-shadow(0 0 3px rgba(232,180,0,0.3));
-    }
-    50% {
-      filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.8)
-              drop-shadow(0 0 3px rgba(255,220,0,1))
-              drop-shadow(0 0 10px rgba(232,180,0,0.7))
-              drop-shadow(0 0 20px rgba(200,150,0,0.3));
-    }
+    0%, 100% { opacity: 0.35; }
+    50%       { opacity: 0.60; }
   }
   .watermark-img {
     position: fixed;
     top: 42%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
-    will-change: filter;
+    filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.7) drop-shadow(0 0 14px rgba(232,180,0,0.85));
     height: 88%;
     width: auto;
-    opacity: 0.45;
     pointer-events: none;
     z-index: -1;
     animation: silhouetteGlow 3s ease-in-out infinite;
@@ -45,7 +35,7 @@ const GLOBAL_CSS = `
     position: fixed;
     top: 50%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
-    will-change: filter;
+    filter: sepia(1) hue-rotate(20deg) saturate(6) brightness(1.7) drop-shadow(0 0 14px rgba(232,180,0,0.85));
     height: 84%;
     width: auto;
     max-width: 92%;
