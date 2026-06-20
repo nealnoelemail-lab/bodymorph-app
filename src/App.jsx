@@ -35,7 +35,7 @@ const GLOBAL_CSS = `
     position: fixed;
     top: 42%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
-    filter: brightness(0.08) saturate(0);
+    filter: brightness(0.35) saturate(0);
     height: 88%;
     width: auto;
     opacity: 0.45;
