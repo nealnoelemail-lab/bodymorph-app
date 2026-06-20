@@ -55,12 +55,16 @@ const GLOBAL_CSS = `
 `;
 
 // ── PERSISTENT STORAGE ──────────────────────────────────────────────────────────
+const _mem = {};
 const Store = {
   async get(key) {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+    try { if (typeof window !== "undefined" && window.storage) { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } }
+    catch (e) {}
+    return key in _mem ? _mem[key] : null;
   },
   async set(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+    _mem[key] = value;
+    try { if (typeof window !== "undefined" && window.storage) { await window.storage.set(key, JSON.stringify(value)); } } catch (e) {}
   },
 };
 const PROFILE_KEY = "bodymorph_profile_v2";
@@ -3631,21 +3635,9 @@ function PoseFigure({ name, size = 64 }) {
 // Plays a bundled pose clip inline; if the file is missing or fails to load,
 // falls back to the YouTube demo link so every pose still has video help.
 function PoseVideo({ name, gender }) {
-  const src = poseVideoSrc(name);
-  const [failed, setFailed] = useState(!src);
-  if (failed || !src) {
-    return <YTButton query={name + " stretch"} gender={gender} />;
-  }
-  return (
-    <video
-      src={src}
-      controls
-      playsInline
-      preload="metadata"
-      onError={() => setFailed(true)}
-      style={{ width:"100%", marginTop:8, borderRadius:10, background:"#000", maxHeight:220 }}
-    />
-  );
+  // Each stretch/yoga pose links directly to a YouTube demo, the same way
+  // the regular exercises do. Reliable and consistent across the app.
+  return <YTButton query={name + " stretch how to"} gender={gender} />;
 }
 
 // Original SVG pose silhouettes for each stretch/yoga type. Drawn in code (legal),
