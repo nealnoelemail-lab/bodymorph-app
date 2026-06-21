@@ -2354,7 +2354,47 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary }) {
+function Settings({ profile, onBack, onResetProfile }) {
+  const items = [
+    { label:"Change Password", icon:"🔒", note:"Coming soon — requires account backend", action: ()=>alert("Coming soon.") },
+    { label:"Update Payment", icon:"💳", note:"Coming soon — requires payment backend", action: ()=>alert("Coming soon.") },
+    { label:"Change Subscription", icon:"📋", note:"Coaching · App Only — coming soon", action: ()=>alert("Coming soon.") },
+    { label:"Contact Us", icon:"✉️", note:"support@bodymorph.info", action: ()=>{ window.location.href="mailto:support@bodymorph.info"; } },
+  ];
+  return (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
+        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>SETTINGS</div>
+      </div>
+      <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
+        <div style={{ color:"#7070a0", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
+        {items.map(item => (
+          <button key={item.label} onClick={item.action} style={{ display:"flex", alignItems:"center", gap:14, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+            <span style={{ fontSize:22 }}>{item.icon}</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>{item.label}</div>
+              <div style={{ fontSize:12, color:"#7070a0", marginTop:2 }}>{item.note}</div>
+            </div>
+            <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
+          </button>
+        ))}
+        <button onClick={onResetProfile} style={{ display:"flex", alignItems:"center", gap:14, background:"rgba(255,60,60,0.08)", border:"1px solid rgba(255,60,60,0.25)", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%", marginTop:8 }}>
+          <span style={{ fontSize:22 }}>🔄</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#ff6060" }}>Reset Profile</div>
+            <div style={{ fontSize:12, color:"#7070a0", marginTop:2 }}>Re-enter your preferences — all logs and data are kept</div>
+          </div>
+          <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -2401,8 +2441,9 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       <WatermarkPlain />
 
       {/* Top bar */}
-      <div style={{ padding:"16px 0 10px" }}>
+      <div style={{ padding:"16px 0 10px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <Logo small />
+        <button onClick={onSettings} style={{ background:"transparent", border:"none", cursor:"pointer", color:"#c8c8e0", fontSize:26, lineHeight:1, padding:"4px 8px" }}>&#9776;</button>
       </div>
 
       {/* Greeting */}
@@ -5125,7 +5166,7 @@ export default function BodyMorph() {
     else setPhase("home");
   };
 
-  const switchUser = async () => {
+  const resetProfile = async () => {
     await Store.set(PROFILE_KEY, null);
     setProfile(null); setProgram(null);
     setPhase("wizard");
@@ -5296,7 +5337,7 @@ export default function BodyMorph() {
         onSupplements={()=>setPhase("supplements")}
         onPeptides={()=>setPhase("peptides")}
         onCalendar={()=>setPhase("calendar")}
-        onReset={switchUser} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} />
+        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")} />
     </>
   );
 
@@ -5315,7 +5356,8 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={switchUser} onBack={()=>setPhase("home")} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} /></>);
+  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} /></>);
