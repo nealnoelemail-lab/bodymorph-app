@@ -2359,7 +2359,7 @@ function Settings({ profile, onBack, onResetProfile }) {
     { label:"Change Password", icon:"🔒", note:"Coming soon — requires account backend", action: ()=>alert("Coming soon.") },
     { label:"Update Payment", icon:"💳", note:"Coming soon — requires payment backend", action: ()=>alert("Coming soon.") },
     { label:"Change Subscription", icon:"📋", note:"Coaching · App Only — coming soon", action: ()=>alert("Coming soon.") },
-    { label:"Contact Us", icon:"✉️", note:"support@bodymorph.info", action: ()=>{ window.location.href="mailto:support@bodymorph.info"; } },
+    { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
   ];
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
