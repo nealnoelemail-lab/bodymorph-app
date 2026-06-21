@@ -1398,10 +1398,13 @@ const WatermarkPlain = () => (
   </>
 );
 
-const Logo = ({ small }) => (
-  <div style={{ lineHeight:1, textAlign:"center" }}>
-    <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none" }}>
+const Logo = ({ small, onSettings }) => (
+  <div style={{ lineHeight:1, textAlign:"center", position:"relative" }}>
+    <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative" }}>
       NTF
+      {onSettings && (
+        <button onClick={onSettings} style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", color:"#c8c8e0", fontSize:22, lineHeight:1, padding:"0 4px" }}>&#9776;</button>
+      )}
     </div>
     <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?73:96, letterSpacing: small?7.5:10.5, lineHeight:1 }}>
       BODY<span style={{ color:"#e8ff00" }}>MORPH</span>
@@ -2441,9 +2444,8 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       <WatermarkPlain />
 
       {/* Top bar */}
-      <div style={{ padding:"16px 0 10px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <Logo small />
-        <button onClick={onSettings} style={{ background:"transparent", border:"none", cursor:"pointer", color:"#c8c8e0", fontSize:26, lineHeight:1, padding:"4px 8px" }}>&#9776;</button>
+      <div style={{ padding:"16px 0 10px" }}>
+        <Logo small onSettings={onSettings} />
       </div>
 
       {/* Greeting */}
