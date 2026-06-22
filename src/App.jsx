@@ -80,6 +80,8 @@ const DIETPREF_KEY = "bodymorph_dietpref_v2";
 const CARDIOPLAN_KEY = "bodymorph_cardioplan_v2";
 const STRETCHPLAN_KEY = "bodymorph_stretchplan_v2";
 const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
+const VIDEO_KEY    = "bodymorph_videos_v2";
+const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 
 const MEDAL_DEFS = [
   { id:"first_log",    label:"First Rep",        emoji:"\uD83C\uDF31", coins:10,  test:(s)=> s.totalLogs >= 1 },
@@ -1434,6 +1436,82 @@ function demoSearchUrl(query, gender) {
   return "https://www.youtube.com/results?search_query=" + encodeURIComponent(q);
 }
 
+function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
+  const pinnedId = videoOverrides && videoOverrides[exName];
+  const [showSearch, setShowSearch] = useState(false);
+  const [query, setQuery] = useState(exName);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const doSearch = async (q) => {
+    setLoading(true); setError(null); setResults([]);
+    try {
+      const isMale = gender === "Male";
+      const bias = isMale ? " form tutorial Athlean-X OR Jeff Nippard OR Jeremy Ethier" : " form tutorial";
+      const encoded = encodeURIComponent((q || exName) + bias);
+      const url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=6&q=" + encoded + "&key=" + YT_API_KEY;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) setError("Search failed — check API quota.");
+      else setResults(data.items || []);
+    } catch(e) { setError("Network error — try again."); }
+    setLoading(false);
+  };
+
+  const pin = (id) => { onSaveVideo(exName, id); setShowSearch(false); setResults([]); };
+  const unpin = () => { onSaveVideo(exName, null); };
+
+  if (showSearch) return (
+    <div style={{ marginTop:10, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:12 }}>
+      <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+        <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") doSearch(query); }}
+          style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", color:"#f0f0f8", fontSize:13 }} />
+        <button onClick={()=>doSearch(query)} style={{ background:"#e8ff00", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
+        <button onClick={()=>{ setShowSearch(false); setResults([]); }} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
+      </div>
+      {loading && <div style={{ color:"#e8ff00", fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
+      {error && <div style={{ color:"#ff7070", fontSize:13, textAlign:"center", padding:10 }}>{error}</div>}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {results.map(item => (
+          <button key={item.id.videoId} onClick={()=>pin(item.id.videoId)}
+            style={{ display:"flex", gap:10, alignItems:"center", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
+            <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
+              <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
+            </div>
+            <span style={{ color:"#e8ff00", fontSize:11, fontWeight:700, flexShrink:0 }}>PIN</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (pinnedId) return (
+    <div style={{ marginTop:10 }}>
+      <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
+        <iframe src={"https://www.youtube.com/embed/" + pinnedId} title="Demo Video" frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
+      </div>
+      <div style={{ display:"flex", gap:8, marginTop:6 }}>
+        <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }}
+          style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>Change Video</button>
+        <button onClick={unpin}
+          style={{ background:"transparent", border:"1px solid rgba(255,60,60,0.3)", borderRadius:6, padding:"4px 10px", color:"#ff7070", fontSize:12, cursor:"pointer" }}>Remove</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }}
+      style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, color:"#e8ff00", fontSize:13, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
+      &#9654; Find Video
+    </button>
+  );
+}
+
 const YTButton = ({ query, gender }) => {
   const url = demoSearchUrl(query, gender);
   return (
@@ -2556,7 +2634,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 // ── SESSION ───────────────────────────────────────────────────────────────────
 // Shows the day's exercise summary + a date picker + START button.
 // After START, reveals set-by-set logging for each exercise.
-function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack }) {
+function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo }) {
   const [started, setStarted] = useState(false);
   const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0,10));
   const workout = day.workout || [];
@@ -2677,7 +2755,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
 
       <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
         {workout.map((ex,i) => (
-          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} />
+          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
         ))}
 
         {/* Cardio for the day */}
@@ -2732,7 +2810,7 @@ function ExtraRow({ icon, iconColor, label, state, onDone, onMins }) {
 }
 
 // One exercise with N set rows. Auto-fills from last session; user adjusts.
-function ExerciseLogger({ index, ex, history, dateStr, onSave, gender }) {
+function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo }) {
   const numSets = Math.max(1, parseInt(ex.sets) || 3);
   const last = history.length ? history[history.length-1] : null;
   const lastSets = last && last.sets ? last.sets : null;
@@ -2824,7 +2902,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender }) {
       </div>
 
       {ex.coachCue && <CoachCue text={ex.coachCue} />}
-      <YTButton query={ex.exercise} gender={gender} />
+      <VideoPanel exName={ex.exercise} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
 
       {/* Set rows */}
       <div style={{ marginTop:10 }}>
@@ -3875,7 +3953,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack }) {
   );
 }
 
-function StretchRoutine({ onBack, gender }) {
+function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
   const [pick, setPick] = useState(null);     // null | "full" | "upper" | "lower"
   const [running, setRunning] = useState(false);
 
@@ -3991,7 +4069,7 @@ function StretchRoutine({ onBack, gender }) {
                 </div>
                 <div style={{ color:"#d6d6ec", fontSize:13, marginTop:3, lineHeight:1.5 }}>{s.benefit}</div>
                 <CoachCue text={s.coachCue} />
-                <PoseVideo name={s.name} gender={gender} />
+                <VideoPanel exName={s.name} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
               </div>
             </div>
             {/* Connector arrow to next step */}
@@ -5059,6 +5137,7 @@ function migrateProfile(p) {
 export default function BodyMorph() {
   const [phase, setPhase]     = useState("init");   // init | wizard | loading | home | session | progress | nutrition
   const [profile, setProfile] = useState(null);
+  const [videoOverrides, setVideoOverrides] = useState({});
   const [program, setProgram] = useState(null);
   const [dayIdx, setDayIdx]   = useState(0);
   const [logs, setLogs]       = useState({});
@@ -5088,6 +5167,8 @@ export default function BodyMorph() {
         const sb = await Store.get(BODY_KEY);
         const sc = await Store.get(CARDIO_KEY);
         const sst = await Store.get(STEPS_KEY);
+        const svid = await Store.get(VIDEO_KEY);
+        if (svid) setVideoOverrides(svid);
         const ssup = await Store.get(SUPP_KEY);
         const spep = await Store.get(PEPTIDE_KEY);
         const smeals = await Store.get(MEALS_KEY);
@@ -5154,6 +5235,14 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(CARDIOPLAN_KEY, cardioPlan); }, [cardioPlan, loaded]);
   useEffect(() => { if (loaded) Store.set(STRETCHPLAN_KEY, stretchPlan); }, [stretchPlan, loaded]);
   useEffect(() => { if (loaded) Store.set(ROUTINES_KEY, stretchRoutines); }, [stretchRoutines, loaded]);
+  useEffect(() => { if (loaded) Store.set(VIDEO_KEY, videoOverrides); }, [videoOverrides, loaded]);
+
+  const saveVideo = (exName, videoId) => {
+    setVideoOverrides(prev => {
+      if (videoId === null) { const n = { ...prev }; delete n[exName]; return n; }
+      return { ...prev, [exName]: videoId };
+    });
+  };
 
   const showToast = (medal) => { setToast(medal); setTimeout(()=>setToast(null), 3500); };
 
@@ -5354,7 +5443,7 @@ export default function BodyMorph() {
       <Session profile={profile} day={(program.weeklySchedule||[])[dayIdx]||{}} logs={logs}
         cardioPlan={cardioPlan} stretchPlan={stretchPlan} stretchRoutines={stretchRoutines}
         onLogExercise={logExercise} onCompleteWorkout={completeWorkout} onSaveExtras={addCardioSessionFromDay}
-        onBack={()=>setPhase("home")} />
+        onBack={()=>setPhase("home")} videoOverrides={videoOverrides} onSaveVideo={saveVideo} />
     </>
   );
 
