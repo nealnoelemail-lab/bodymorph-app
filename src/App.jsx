@@ -1448,7 +1448,9 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
     setLoading(true); setError(null); setResults([]);
     try {
       const isMale = gender === "Male";
-      const bias = isMale ? " form tutorial Athlean-X OR Jeff Nippard OR Jeremy Ethier" : " form tutorial";
+      const isDefault = q.trim().toLowerCase() === exName.trim().toLowerCase();
+      const bias = (isMale && isDefault) ? " form tutorial Charles Glass OR Athlean-X OR Jeff Nippard OR Jeremy Ethier" : "";
+
       const encoded = encodeURIComponent((q || exName) + bias);
       const url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=6&q=" + encoded + "&key=" + YT_API_KEY;
       const res = await fetch(url);
