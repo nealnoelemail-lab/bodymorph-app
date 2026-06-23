@@ -5056,6 +5056,53 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
     onSaveFoodLog(updated);
   };
 
+  // ── Generalized itemized-meal helpers (work for breakfast/lunch/dinner/snacks) ──
+  // Always returns an array. Old single-object data is auto-wrapped so nothing is lost.
+  const slotList = (id) => {
+    const raw = dayLog[id];
+    if (Array.isArray(raw)) return raw.length ? raw : [{}];
+    if (raw && (raw.food || raw.cal || raw.protein || raw.carbs || raw.fats)) return [raw];
+    return [{}];
+  };
+  const setItem = (id, i, field, val) => {
+    const updated = { ...(foodLog||{}) };
+    const arr = [...slotList(id)];
+    arr[i] = { ...(arr[i]||{}), [field]: val };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [id]: arr };
+    onSaveFoodLog(updated);
+  };
+  const addItem = (id, item) => {
+    const updated = { ...(foodLog||{}) };
+    const cur = slotList(id);
+    // If the only row is an empty placeholder, replace it; otherwise append.
+    const base = (cur.length===1 && !cur[0].food && !cur[0].cal) ? [] : cur;
+    updated[dateKey] = { ...(updated[dateKey]||{}), [id]: [...base, item || {}] };
+    onSaveFoodLog(updated);
+  };
+  const removeItem = (id, i) => {
+    const updated = { ...(foodLog||{}) };
+    const arr = slotList(id).filter((_,idx)=>idx!==i);
+    updated[dateKey] = { ...(updated[dateKey]||{}), [id]: arr.length ? arr : [{}] };
+    onSaveFoodLog(updated);
+  };
+  const logSlot = (id, fallback) => {
+    const updated = { ...(foodLog||{}) };
+    let arr = slotList(id);
+    const hasData = arr.some(x => x.food || x.cal);
+    if (!hasData) { if (!fallback) return; arr = [fallback]; }
+    updated[dateKey] = { ...(updated[dateKey]||{}), [id]: arr.map(x => ({ ...x, logged:true })) };
+    onSaveFoodLog(updated);
+  };
+  const unlogSlot = (id) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [id]: slotList(id).map(x => ({ ...x, logged:false })) };
+    onSaveFoodLog(updated);
+  };
+  const slotTotals = (id) => slotList(id).reduce((a,x)=>({
+    cal:a.cal+(parseInt(x.cal)||0), protein:a.protein+(parseInt(x.protein)||0),
+    carbs:a.carbs+(parseInt(x.carbs)||0), fats:a.fats+(parseInt(x.fats)||0),
+  }), {cal:0,protein:0,carbs:0,fats:0});
+
   const calGoal = parseInt(n.dailyCalories)||2000;
   const proteinGoal = parseInt(n.protein)||150;
   const carbsGoal = parseInt(n.carbs)||150;
