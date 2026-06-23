@@ -5528,20 +5528,14 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     </div>
                   )}
                   {/* ROW 3 — Buttons */}
-                  {!open && (
-                    <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
-                      <MacroAI slotLabel="Snacks" onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; const existing=updated["snacks"]||[]; updated["snacks"]=[...existing,{...r,logged:false}]; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
-                      <button onClick={()=>setEditSlot(open?null:"snacks")} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Edit</button>
-                      <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
-                        {snacksLogged?"Unlog":"Log It"}
-                      </button>
-                    </div>
-                  )}
-                  {open && (
-                    <div style={{ display:"flex", justifyContent:"flex-end", padding:"8px 14px 0" }}>
-                      <button onClick={()=>setEditSlot(null)} style={{ background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Done</button>
-                    </div>
-                  )}
+                  <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
+                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:scaleSug(getMealSuggestion(dietPref,sel,"snacks")) })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                      Add Food
+                    </button>
+                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                      {snacksLogged?"Unlog":"Log It"}
+                    </button>
+                  </div>
                   {/* Edit snacks */}
                   {open && (
                     <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
