@@ -3949,7 +3949,7 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
+        <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
           <span style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
             <span>{t.label}</span>
