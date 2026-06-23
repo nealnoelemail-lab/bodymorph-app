@@ -3847,7 +3847,8 @@ function YogaIcon({ id, size = 30 }) {
 // Weekly stretch planner: assign one or more stretches/yoga poses to each day.
 function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStartRoutine, gender }) {
   const [sel, setSel] = useState(new Date().getDay());
-  const [editRoutine, setEditRoutine] = useState(null);  // routine id being configured
+  const [editRoutine, setEditRoutine] = useState(null);
+  const [videoStretch, setVideoStretch] = useState(null);  // routine id being configured
   const dayTypes = (plan && plan[sel]) || [];
   const toggle = (typeId) => {
     const updated = { ...(plan||{}) };
@@ -3956,6 +3957,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {STRETCH_TYPES.filter(t => !ROUTINE_IDS.includes(t.id)).map(t => {
             const on = dayTypes.includes(t.id);
+            const pinnedId = videoOverrides && videoOverrides[t.label];
             return (
               <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
                 <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
@@ -3965,9 +3967,15 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
+                <button onClick={()=>setVideoStretch(videoStretch===t.id ? null : t.id)} style={{ flexShrink:0, background: pinnedId ? "rgba(232,255,0,0.1)" : "transparent", border:"1px solid " + (pinnedId ? "#e8ff00" : "#2a2a3d"), borderRadius:10, color: pinnedId ? "#e8ff00" : "#c8c8e0", padding:"10px 10px", cursor:"pointer", fontSize:11, fontWeight:600 }}>&#9654;</button>
               </div>
             );
           })}
+          {videoStretch && (() => {
+            const t = STRETCH_TYPES.find(x=>x.id===videoStretch);
+            if (!t) return null;
+            return <div style={{ marginTop:4 }}><StretchVideoPanel exName={t.label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} /></div>;
+          })()}
         </div>
         {dayTypes.length === 0 && (
           <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no stretches assigned.</div>
