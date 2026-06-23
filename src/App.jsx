@@ -4005,7 +4005,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
             {POSE_TYPES.map(t => {
               const on = contents.includes(t.id);
               return (
-                <button key={t.id} onClick={()=>togglePose(t.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
+                <button key={t.id} onClick={()=>togglePose(t.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
                   <span style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
                     {t.label}
@@ -4034,7 +4034,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:10 }}>
           Pick a day, then tap the stretches and yoga poses you'll do. Mix and match across the week &mdash; add as many as you like to a day.
         </div>
-        <button onClick={()=>onStartRoutine && onStartRoutine()} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:14, color:"#e8ff00", fontSize:14, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
+        <button onClick={()=>onStartRoutine && onStartRoutine()} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:14, color:"#00d4c8", fontSize:14, fontWeight:600, background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
 
         {/* Day selector */}
         <div style={{ display:"flex", gap:5, marginBottom:16 }}>
@@ -4057,14 +4057,14 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
             const count = ((routines && routines[t.id]) || []).length;
             return (
               <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
+                <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
                   <span style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
                     <span>{t.label}<span style={{ display:"block", fontSize:11.5, opacity:0.7, fontWeight:400 }}>{count} stretch{count===1?"":"es"}</span></span>
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
-                <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#e8ff00", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
+                <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#00d4c8", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
             );
           })}
@@ -4171,8 +4171,8 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
           &#9654; START GUIDED TIMER
         </button>
         <div style={{ color:"#c8c8e0", fontSize:13, textAlign:"center", marginTop:8 }}>Auto-advances through each stretch. Or just read the list below.</div>
-        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#e8ff00", fontSize:14, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
-        <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#e8ff00", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px" }}>
+        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#00d4c8", fontSize:14, fontWeight:600, background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
+        <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#00d4c8", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px" }}>
           &#9654; Watch a full follow-along routine
         </a>
       </div>
@@ -4247,7 +4247,7 @@ function StretchTimer({ segments, routineLabel, onExit, gender }) {
       <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20, padding:24, position:"relative" }}>
         <style>{GLOBAL_CSS}</style>
         <div style={{ fontSize:60 }}>&#129496;</div>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:2, color:"#e8ff00" }}>STRETCH COMPLETE</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:2, color:"#00d4c8" }}>STRETCH COMPLETE</div>
         <div style={{ color:"#d6d6ec", fontSize:15, textAlign:"center" }}>Nice work. Your {routineLabel.toLowerCase()} routine is done &mdash; muscles recovered and mobility maintained.</div>
         <button onClick={onExit} style={{ background:"#e8ff00", color:"#000", border:"none", borderRadius:12, padding:"14px 32px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
       </div>
@@ -4287,7 +4287,7 @@ function StretchTimer({ segments, routineLabel, onExit, gender }) {
         </div>
 
         <div style={{ maxWidth:340, textAlign:"center", color:"#d2d2ec", fontSize:14, lineHeight:1.6, background:"rgba(232,255,0,0.05)", borderRadius:10, padding:"10px 14px" }}>{seg.coachCue}</div>
-        <a href={demoSearchUrl(seg.name + " stretch", gender)} target="_blank" rel="noopener noreferrer" onClick={()=>setPaused(true)} style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:10, color:"#e8ff00", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, padding:"6px 14px" }}>
+        <a href={demoSearchUrl(seg.name + " stretch", gender)} target="_blank" rel="noopener noreferrer" onClick={()=>setPaused(true)} style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:10, color:"#00d4c8", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:8, padding:"6px 14px" }}>
           &#9654; Watch Demo (pauses timer)
         </a>
       </div>
