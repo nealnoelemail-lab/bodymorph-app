@@ -3857,6 +3857,11 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
 
   const YOGA_BIAS = "Yoga with Adriene OR Boho Beautiful OR SarahBethYoga OR Fightmaster Yoga OR Kassandra Yoga";
 
+  useEffect(() => {
+    if (!pinnedId) { setShowSearch(true); doSearch(exName); }
+    else { setShowVideo(true); }
+  }, []);
+
   const doSearch = async (q) => {
     setLoading(true); setError(null); setResults([]); setPreviewId(null);
     try {
