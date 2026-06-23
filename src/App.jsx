@@ -5237,34 +5237,44 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
             const isLogged = !!(edit && edit.logged);
             return (
               <div key={slot.id} style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(isLogged?"#3ddc84":hasEdit?"#e8ff00":"#2a2a3d") }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px" }}>
-                  <span style={{ fontSize:20, flexShrink:0 }}>{slot.emoji}</span>
+                {/* ROW 1 — Meal name + description */}
+                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px 10px" }}>
+                  <span style={{ fontSize:22, flexShrink:0 }}>{slot.emoji}</span>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <span style={{ fontWeight:700, fontSize:14 }}>{slot.label}</span>
+                      <span style={{ fontWeight:700, fontSize:15 }}>{slot.label}</span>
                       {isLogged && <span style={{ fontSize:10, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
                       {!isLogged && hasEdit && <span style={{ fontSize:10, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
                     </div>
-                    {display && <div style={{ color:"#c8c8e0", fontSize:12.5, marginTop:2, lineHeight:1.4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{display.food}</div>}
-                  </div>
-                  <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                    <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flexShrink:0, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
-                      {open?"Done":"Edit"}
-                    </button>
-                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
-                    <button onClick={()=>{ if(isLogged){unlogMeal(slot.id);}else{logMeal(slot.id,sug);} }} style={{ background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
-                      {isLogged?"Unlog":"Log It"}
-                    </button>
+                    {display && <div style={{ color:"#c8c8e0", fontSize:13, marginTop:3, lineHeight:1.5 }}>{display.food}</div>}
                   </div>
                 </div>
+                {/* ROW 2 — Macros */}
                 {display && !open && (
-                  <div style={{ display:"flex", gap:0, borderTop:"1px solid #2a2a3d" }}>
+                  <div style={{ display:"flex", gap:0, borderTop:"1px solid #2a2a3d", borderBottom:"1px solid #2a2a3d" }}>
                     {[["cal",display.cal,"#e8ff00"],["P",display.protein+"g","#3d8eff"],["C",display.carbs+"g","#9b5de5"],["F",display.fats+"g","#3ddc84"]].map(([k,v,col])=>(
-                      <div key={k} style={{ flex:1, textAlign:"center", padding:"7px 4px", borderRight:"1px solid #2a2a3d" }}>
-                        <div style={{ color: k==="cal" ? "#e8ff00" : "#f0f0f8", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:15 }}>{v}</div>
+                      <div key={k} style={{ flex:1, textAlign:"center", padding:"8px 4px", borderRight:"1px solid #2a2a3d" }}>
+                        <div style={{ color: k==="cal" ? "#e8ff00" : "#f0f0f8", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:16 }}>{v}</div>
                         <div style={{ color:"#7070a0", fontSize:10, letterSpacing:0.3 }}>{k}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {/* ROW 3 — Buttons */}
+                {!open && (
+                  <div style={{ display:"flex", gap:8, padding:"10px 14px", justifyContent:"space-between" }}>
+                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
+                    <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                      Edit
+                    </button>
+                    <button onClick={()=>{ if(isLogged){unlogMeal(slot.id);}else{logMeal(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                      {isLogged?"Unlog":"Log It"}
+                    </button>
+                  </div>
+                )}
+                {open && (
+                  <div style={{ display:"flex", justifyContent:"flex-end", padding:"8px 14px 0" }}>
+                    <button onClick={()=>setEditSlot(null)} style={{ background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Done</button>
                   </div>
                 )}
                 {open && (
