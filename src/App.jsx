@@ -3912,9 +3912,10 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
       </div>
 
       <div style={{ padding:"8px 20px 0" }}>
-        <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:14 }}>
+        <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:10 }}>
           Pick a day, then tap the stretches and yoga poses you'll do. Mix and match across the week &mdash; add as many as you like to a day.
         </div>
+        <button onClick={()=>onStartRoutine && onStartRoutine()} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:14, color:"#e8ff00", fontSize:14, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
 
         {/* Day selector */}
         <div style={{ display:"flex", gap:5, marginBottom:16 }}>
