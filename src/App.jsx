@@ -5204,6 +5204,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [sel, setSel] = useState(new Date().getDay());
   const [editSlot, setEditSlot] = useState(null);  // which meal slot is being edited
   const [confirmDelete, setConfirmDelete] = useState(null); // slot id pending delete confirmation
+  const [foodLogger, setFoodLogger] = useState(null);
 
   const MEAL_SLOTS = [
     { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
@@ -5354,6 +5355,13 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   }
   const calLeft = Math.max(calGoal-totalCal,0);
   const calOver = totalCal > calGoal;
+
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
 
   const ProgressBar = ({ val, max, color }) => (
     <div style={{ height:5, background:"#2a2a3d", borderRadius:3, marginTop:6, overflow:"hidden" }}>
@@ -5613,35 +5621,15 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   </div>
                 )}
                 {/* ROW 3 — Buttons */}
-                {!open && (
-                  <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
-                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ addItem(slot.id, {...r, logged:false}); setEditSlot(slot.id); }} />
-                    <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
-                      Edit
-                    </button>
-                    <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
-                      {isLogged?"Unlog":"Log It"}
-                    </button>
-                  </div>
-                )}
-                {open && (
-                  <div style={{ display:"flex", justifyContent:"flex-end", padding:"8px 14px 0" }}>
-                    <button onClick={()=>setEditSlot(null)} style={{ background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Done</button>
-                  </div>
-                )}
-                {open && (
-                  <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
-                    {!hasData && sug && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sug.food}</div>}
-                    {items.map((it,i) => (
-                      <FoodItemRow key={i} it={it} index={i} canRemove={items.length > 1}
-                        onField={(field,val)=>setItem(slot.id,i,field,val)}
-                        onRemove={()=>removeItem(slot.id,i)} />
-                    ))}
-                    <button onClick={()=>addItem(slot.id)} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px dashed #3a3a4d", borderRadius:10, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:14, letterSpacing:0.5 }}>
-                      + Add Food ({items.filter(x=>x.food||x.cal).length})
-                    </button>
-                  </div>
-                )}
+                <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
+                  <button onClick={()=>setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    Add Food
+                  </button>
+                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    {isLogged?"Unlog":"Log It"}
+                  </button>
+                </div>
+
               </div>
             );
           })}
