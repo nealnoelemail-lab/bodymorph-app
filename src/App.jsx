@@ -1439,18 +1439,19 @@ function demoSearchUrl(query, gender) {
 function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
   const pinnedId = videoOverrides && videoOverrides[exName];
   const [showSearch, setShowSearch] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
+  const [previewId, setPreviewId] = useState(null);
   const [query, setQuery] = useState(exName);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const doSearch = async (q) => {
-    setLoading(true); setError(null); setResults([]);
+    setLoading(true); setError(null); setResults([]); setPreviewId(null);
     try {
       const isMale = gender === "Male";
       const isDefault = q.trim().toLowerCase() === exName.trim().toLowerCase();
       const bias = (isMale && isDefault) ? " form tutorial Charles Glass OR Athlean-X OR Jeff Nippard OR Jeremy Ethier" : "";
-
       const encoded = encodeURIComponent((q || exName) + bias);
       const url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=6&q=" + encoded + "&key=" + YT_API_KEY;
       const res = await fetch(url);
@@ -1461,36 +1462,56 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
     setLoading(false);
   };
 
-  const pin = (id) => { onSaveVideo(exName, id); setShowSearch(false); setResults([]); };
-  const unpin = () => { onSaveVideo(exName, null); };
+  const pin = (id) => { onSaveVideo(exName, id); setShowSearch(false); setPreviewId(null); setResults([]); setShowVideo(true); };
+  const unpin = () => { onSaveVideo(exName, null); setShowVideo(false); };
+  const close = () => { setShowVideo(false); setShowSearch(false); setPreviewId(null); setResults([]); };
 
+  /* ── Search panel with inline preview ── */
   if (showSearch) return (
     <div style={{ marginTop:10, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:12 }}>
       <div style={{ display:"flex", gap:6, marginBottom:10 }}>
         <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") doSearch(query); }}
           style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", color:"#f0f0f8", fontSize:13 }} />
         <button onClick={()=>doSearch(query)} style={{ background:"#e8ff00", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
-        <button onClick={()=>{ setShowSearch(false); setResults([]); }} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
+        <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
       </div>
       {loading && <div style={{ color:"#e8ff00", fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
       {error && <div style={{ color:"#ff7070", fontSize:13, textAlign:"center", padding:10 }}>{error}</div>}
+
+      {/* Inline preview of selected result */}
+      {previewId && (
+        <div style={{ marginBottom:10 }}>
+          <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
+            <iframe src={"https://www.youtube.com/embed/" + previewId + "?autoplay=1"} title="Preview" frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
+          </div>
+          <div style={{ display:"flex", gap:8, marginTop:6 }}>
+            <button onClick={()=>pin(previewId)} style={{ flex:1, background:"#e8ff00", color:"#000", border:"none", borderRadius:8, padding:"8px", cursor:"pointer", fontWeight:700, fontSize:13 }}>&#128204; Pin This Video</button>
+            <button onClick={()=>setPreviewId(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 12px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Search results */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {results.map(item => (
-          <button key={item.id.videoId} onClick={()=>pin(item.id.videoId)}
-            style={{ display:"flex", gap:10, alignItems:"center", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
+          <button key={item.id.videoId} onClick={()=>setPreviewId(item.id.videoId)}
+            style={{ display:"flex", gap:10, alignItems:"center", background: previewId===item.id.videoId ? "rgba(232,255,0,0.08)" : "#1a1a26", border:"1px solid " + (previewId===item.id.videoId ? "#e8ff00" : "#2a2a3d"), borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
             <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
               <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
             </div>
-            <span style={{ color:"#e8ff00", fontSize:11, fontWeight:700, flexShrink:0 }}>PIN</span>
+            <span style={{ color:"#e8ff00", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
           </button>
         ))}
       </div>
     </div>
   );
 
-  if (pinnedId) return (
+  /* ── Pinned video expanded ── */
+  if (pinnedId && showVideo) return (
     <div style={{ marginTop:10 }}>
       <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
         <iframe src={"https://www.youtube.com/embed/" + pinnedId} title="Demo Video" frameBorder="0"
@@ -1498,18 +1519,18 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
           allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
       </div>
       <div style={{ display:"flex", gap:8, marginTop:6 }}>
-        <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }}
-          style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>Change Video</button>
-        <button onClick={unpin}
-          style={{ background:"transparent", border:"1px solid rgba(255,60,60,0.3)", borderRadius:6, padding:"4px 10px", color:"#ff7070", fontSize:12, cursor:"pointer" }}>Remove</button>
+        <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>✕ Close</button>
+        <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>Change</button>
+        <button onClick={unpin} style={{ background:"transparent", border:"1px solid rgba(255,60,60,0.3)", borderRadius:6, padding:"4px 10px", color:"#ff7070", fontSize:12, cursor:"pointer" }}>Remove</button>
       </div>
     </div>
   );
 
+  /* ── Default button — Video or show pinned ── */
   return (
-    <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }}
+    <button onClick={()=>{ if(pinnedId){ setShowVideo(true); } else { setQuery(exName); setShowSearch(true); doSearch(exName); } }}
       style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, color:"#e8ff00", fontSize:13, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
-      &#9654; Find Video
+      &#9654; {pinnedId ? "Show Video" : "Video"}
     </button>
   );
 }
