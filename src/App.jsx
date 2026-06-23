@@ -5180,7 +5180,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                       <button onClick={()=>setEditSlot(open?null:"snacks")} style={{ flexShrink:0, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                         {open?"Done":"Edit"}
                       </button>
-                      <MacroAI slotLabel="Snacks" onResult={(r)=>{ const updated={...(foodLog[today]||{})}; const existing=updated["snacks"]||[]; updated["snacks"]=[...existing,{...r,logged:false}]; onSaveFoodLog({...foodLog,[today]:updated}); setEditSlot(null); }} />
+                      <MacroAI slotLabel="Snacks" onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; const existing=updated["snacks"]||[]; updated["snacks"]=[...existing,{...r,logged:false}]; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
                       <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                         {snacksLogged?"Unlog":"Log It"}
                       </button>
@@ -5251,7 +5251,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flexShrink:0, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                       {open?"Done":"Edit"}
                     </button>
-                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const updated={...(foodLog[today]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[today]:updated}); setEditSlot(null); }} />
+                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
                     <button onClick={()=>{ if(isLogged){unlogMeal(slot.id);}else{logMeal(slot.id,sug);} }} style={{ background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                       {isLogged?"Unlog":"Log It"}
                     </button>
