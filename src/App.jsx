@@ -5403,6 +5403,15 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
       <style>{GLOBAL_CSS}</style><WatermarkPlain />
+      {foodLogger && (
+        <FoodLogger
+          slotLabel={foodLogger.slotLabel}
+          items={slotList(foodLogger.slotId)}
+          sug={foodLogger.sug}
+          onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+          onClose={()=>setFoodLogger(null)}
+        />
+      )}
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>NUTRITION</div>
