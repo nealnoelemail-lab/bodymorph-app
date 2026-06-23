@@ -1464,7 +1464,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
 
   const pin = (id) => { onSaveVideo(exName, id); setShowSearch(false); setPreviewId(null); setResults([]); setShowVideo(true); };
   const unpin = () => { onSaveVideo(exName, null); setShowVideo(false); };
-  const close = () => { setShowVideo(false); setShowSearch(false); setPreviewId(null); setResults([]); };
+  const close = () => { setShowVideo(false); setShowSearch(false); setPreviewId(null); setResults([]); if(onClose) onClose(); };
 
   /* ── Search panel with inline preview ── */
   if (showSearch) return (
@@ -3845,7 +3845,7 @@ function YogaIcon({ id, size = 30 }) {
 }
 
 // Weekly stretch planner: assign one or more stretches/yoga poses to each day.
-function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
+function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClose }) {
   const pinnedId = videoOverrides && videoOverrides[exName];
   const [showSearch, setShowSearch] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
@@ -3879,7 +3879,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
 
   const pin = (id) => { onSaveVideo(exName, id); setShowSearch(false); setPreviewId(null); setResults([]); setShowVideo(true); };
   const unpin = () => { onSaveVideo(exName, null); setShowVideo(false); };
-  const close = () => { setShowVideo(false); setShowSearch(false); setPreviewId(null); setResults([]); };
+  const close = () => { setShowVideo(false); setShowSearch(false); setPreviewId(null); setResults([]); if(onClose) onClose(); };
 
   if (showSearch) return (
     <div style={{ marginTop:8, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:12 }}>
@@ -3958,7 +3958,7 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
         </button>
         <button onClick={()=>setOpen(o=>!o)} style={{ flexShrink:0, background: pinnedId ? "rgba(232,255,0,0.1)" : "transparent", border:"1px solid " + (pinnedId ? "#e8ff00" : "#2a2a3d"), borderRadius:10, color: pinnedId ? "#e8ff00" : "#c8c8e0", padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>&#9654; Video</button>
       </div>
-      {open && <div style={{ marginTop:4 }}><StretchVideoPanel exName={t.label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} /></div>}
+      {open && <div style={{ marginTop:4 }}><StretchVideoPanel exName={t.label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} onClose={()=>setOpen(false)} /></div>}
     </div>
   );
 }
