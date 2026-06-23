@@ -3596,7 +3596,7 @@ function Cardio({ profile, onSaveSession, stepEntries, onSaveSteps, cardioPlan, 
 // Legal & original (drawn in code) — no external images.
 function PoseFigure({ name, size = 64 }) {
   const stroke = "#0a0a0f";
-  const skin = "#e8ff00";
+  const skin = "#00d4c8";
   // shared props for limbs
   const L = { stroke: skin, strokeWidth: 5, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
   const head = (cx, cy, r=7) => <circle cx={cx} cy={cy} r={r} fill={skin} />;
@@ -3805,7 +3805,7 @@ function PoseVideo({ name, gender }) {
 // Original SVG pose silhouettes for each stretch/yoga type. Drawn in code (legal),
 // showing a figure performing that specific movement. Yellow on dark, ~28px.
 function YogaIcon({ id, size = 30 }) {
-  const skin = "#e8ff00";
+  const skin = "#00d4c8";
   const L = { stroke: skin, strokeWidth: 5, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
   const head = (cx, cy, r=6) => <circle cx={cx} cy={cy} r={r} fill={skin} />;
 
