@@ -4911,14 +4911,14 @@ function MacroAI({ slotLabel, onResult }) {
   };
 
   return (
-    <div style={{ display:"flex", flex:1, flexDirection:"column", alignItems:"stretch" }}>
+    <>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]) analyze(e.target.files[0]); }} />
       <button onClick={()=>fileRef.current.click()} disabled={scanning}
-        style={{ flex:1, background: scanning ? "transparent" : "rgba(61,142,255,0.15)", color: scanning ? "#7070a0" : "#3d8eff", border:"2px solid " + (scanning?"#3a3a4d":"#3d8eff"), borderRadius:20, padding:"8px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
+        style={{ flex:1, width:"100%", background: scanning ? "transparent" : "rgba(61,142,255,0.15)", color: scanning ? "#7070a0" : "#3d8eff", border:"2px solid " + (scanning?"#3a3a4d":"#3d8eff"), borderRadius:20, padding:"8px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
         {scanning ? "Scanning..." : "Macro AI"}
       </button>
-      {error && <div style={{ color:"#ff7070", fontSize:10, marginTop:3, textAlign:"center" }}>{error}</div>}
-    </div>
+      {error && <div style={{ position:"absolute", bottom:-18, left:0, right:0, color:"#ff7070", fontSize:10, textAlign:"center" }}>{error}</div>}
+    </>
   );
 }
 
@@ -5191,7 +5191,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   )}
                   {/* ROW 3 — Buttons */}
                   {!open && (
-                    <div style={{ display:"flex", gap:8, padding:"10px 14px", justifyContent:"space-between" }}>
+                    <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
                       <MacroAI slotLabel="Snacks" onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; const existing=updated["snacks"]||[]; updated["snacks"]=[...existing,{...r,logged:false}]; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
                       <button onClick={()=>setEditSlot(open?null:"snacks")} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Edit</button>
                       <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
@@ -5269,7 +5269,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                 )}
                 {/* ROW 3 — Buttons */}
                 {!open && (
-                  <div style={{ display:"flex", gap:8, padding:"10px 14px", justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
                     <MacroAI slotLabel={slot.label} onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
                     <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Edit
