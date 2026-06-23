@@ -4007,6 +4007,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
             ))}
           </div>
           <div style={{ color:"#7070a0", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
+          <button onClick={()=>setEditRoutine(null)} style={{ width:"100%", marginTop:16, background:"#00d4c8", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
         </div>
       </div>
     );
