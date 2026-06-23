@@ -3845,7 +3845,7 @@ function YogaIcon({ id, size = 30 }) {
 }
 
 // Weekly stretch planner: assign one or more stretches/yoga poses to each day.
-function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack }) {
+function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStartRoutine, gender }) {
   const [sel, setSel] = useState(new Date().getDay());
   const [editRoutine, setEditRoutine] = useState(null);  // routine id being configured
   const dayTypes = (plan && plan[sel]) || [];
@@ -4062,6 +4062,7 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
           &#9654; START GUIDED TIMER
         </button>
         <div style={{ color:"#c8c8e0", fontSize:13, textAlign:"center", marginTop:8 }}>Auto-advances through each stretch. Or just read the list below.</div>
+        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#e8ff00", fontSize:14, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
         <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#e8ff00", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:10, padding:"10px" }}>
           &#9654; Watch a full follow-along routine
         </a>
@@ -5474,7 +5475,8 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} onStartRoutine={()=>setPhase("stretchroutine")} gender={profile.gender} /></>);
+  if (phase === "stretchroutine") return (<><Toast /><StretchRoutine onBack={()=>setPhase("stretch")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
