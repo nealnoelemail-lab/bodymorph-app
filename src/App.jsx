@@ -5538,7 +5538,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   )}
                   {/* ROW 3 — Buttons */}
                   <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:scaleSug(getMealSuggestion(dietPref,sel,"snacks")) })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Add Food
                     </button>
                     <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
@@ -5625,7 +5625,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                 )}
                 {/* ROW 3 — Buttons */}
                 <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                  <button onClick={()=>setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     Add Food
                   </button>
                   <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
