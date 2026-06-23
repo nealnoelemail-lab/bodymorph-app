@@ -4865,19 +4865,25 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
 }
 
 function MacroAI({ slotLabel, onResult }) {
+  const [imgSrc, setImgSrc] = useState(null);
   const [scanning, setScanning] = useState(false);
+  const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const fileRef = useRef();
 
+  const reset = () => { setImgSrc(null); setScanning(false); setResult(null); setError(null); };
+
   const analyze = async (file) => {
-    setScanning(true); setError(null);
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+    setImgSrc(dataUrl);
+    setScanning(true); setError(null); setResult(null);
     try {
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result.split(",")[1]);
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.readAsDataURL(file);
-      });
+      const base64 = dataUrl.split(",")[1];
       const mediaType = file.type || "image/jpeg";
       const body = {
         model: "claude-sonnet-4-6",
@@ -4903,21 +4909,73 @@ function MacroAI({ slotLabel, onResult }) {
       const clean = text.replace(/```json|```/g, "").trim();
       let parsed;
       try { parsed = JSON.parse(clean); } catch(pe) { throw new Error("Parse error: " + clean.slice(0,80)); }
-      onResult(parsed);
+      setResult(parsed);
       setScanning(false);
     } catch(e) {
       setError(e.message || "Unknown error"); setScanning(false);
     }
   };
 
+  const handleFile = (e) => { if(e.target.files[0]) analyze(e.target.files[0]); fileRef.current.value = ""; };
+
   return (
     <>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]) analyze(e.target.files[0]); }} />
-      <button onClick={()=>fileRef.current.click()} disabled={scanning}
-        style={{ flex:1, width:"100%", background: scanning ? "transparent" : "rgba(61,142,255,0.15)", color: scanning ? "#7070a0" : "#3d8eff", border:"2px solid " + (scanning?"#3a3a4d":"#3d8eff"), borderRadius:20, padding:"8px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
-        {scanning ? "Scanning..." : "Macro AI"}
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={handleFile} />
+      <button onClick={()=>fileRef.current.click()}
+        style={{ flex:1, width:"100%", background:"rgba(61,142,255,0.15)", color:"#3d8eff", border:"2px solid #3d8eff", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
+        Macro AI
       </button>
-      {error && <div style={{ position:"absolute", bottom:-18, left:0, right:0, color:"#ff7070", fontSize:10, textAlign:"center" }}>{error}</div>}
+
+      {/* Full-screen overlay */}
+      {imgSrc && (
+        <div style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column" }}>
+          {/* X button */}
+          <button onClick={reset} style={{ position:"absolute", top:16, right:16, zIndex:310, background:"rgba(0,0,0,0.6)", border:"1px solid #444", borderRadius:"50%", width:36, height:36, color:"#fff", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+
+          {/* Image */}
+          <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
+            <img src={imgSrc} alt="meal" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+
+            {/* Scanning overlay */}
+            {scanning && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14 }}>
+                <div style={{ width:48, height:48, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
+                <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:2 }}>Analyzing Meal...</div>
+                <div style={{ color:"#c8c8e0", fontSize:13 }}>Estimating calories &amp; macros</div>
+              </div>
+            )}
+
+            {/* Results overlay */}
+            {result && !scanning && (
+              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.92)", padding:"16px 20px" }}>
+                <div style={{ color:"#f0f0f8", fontWeight:700, fontSize:15, marginBottom:10 }}>{result.food}</div>
+                <div style={{ display:"flex", gap:0, marginBottom:14 }}>
+                  {[["cal",result.cal,"#e8ff00"],["P",result.protein+"g","#3d8eff"],["C",result.carbs+"g","#9b5de5"],["F",result.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                    <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
+                      <div style={{ color:col, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:20 }}>{v}</div>
+                      <div style={{ color:"#7070a0", fontSize:11 }}>{k}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ color:"#7070a0", fontSize:11, textAlign:"center", marginBottom:12 }}>AI estimate — tap Edit to adjust</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
+                  <button onClick={()=>{ onResult({...result, _openEdit:true}); reset(); }} style={{ flex:1, background:"transparent", border:"2px solid #e8ff00", borderRadius:20, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Edit</button>
+                  <button onClick={()=>{ onResult(result); reset(); }} style={{ flex:1, background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Log It</button>
+                </div>
+              </div>
+            )}
+
+            {/* Error overlay */}
+            {error && !scanning && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:20 }}>
+                <div style={{ color:"#ff7070", fontSize:14, textAlign:"center" }}>{error}</div>
+                <button onClick={()=>fileRef.current.click()} style={{ background:"#3d8eff", border:"none", borderRadius:20, color:"#fff", padding:"10px 24px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Try Again</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
