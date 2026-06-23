@@ -4883,7 +4883,7 @@ function MacroAI({ slotLabel, onResult }) {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-              { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {"food":"meal name","cal":000,"protein":00,"carbs":00,"fats":00}. Estimate for a typical single serving shown in the image." }
+              { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
             ]
           }]
         };
