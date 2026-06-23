@@ -4988,6 +4988,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [diet, setDiet] = useState(null);
   const [sel, setSel] = useState(new Date().getDay());
   const [editSlot, setEditSlot] = useState(null);  // which meal slot is being edited
+  const [confirmDelete, setConfirmDelete] = useState(null); // slot id pending delete confirmation
 
   const MEAL_SLOTS = [
     { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
@@ -5235,6 +5236,16 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                       </div>
                       {!open && displaySnacks.map((s,i)=>s.food&&(<div key={i} style={{ color:"#c8c8e0", fontSize:13, marginTop:2, lineHeight:1.5 }}>{s.food}</div>))}
                     </div>
+                    {snackHasData && confirmDelete !== "snacks" && (
+                      <button onClick={()=>setConfirmDelete("snacks")} style={{ background:"transparent", border:"none", color:"#4a4a6a", fontSize:18, cursor:"pointer", padding:"4px", lineHeight:1 }}>✕</button>
+                    )}
+                    {confirmDelete === "snacks" && (
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ color:"#ff7070", fontSize:11 }}>Delete?</span>
+                        <button onClick={()=>{ const updated={...(foodLog||{})}; const dk=new Date().toISOString().slice(0,10); updated[dk]={...(updated[dk]||{}), snacks:[]}; onSaveFoodLog(updated); setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
+                        <button onClick={()=>setConfirmDelete(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"4px 8px", cursor:"pointer", fontSize:11 }}>No</button>
+                      </div>
+                    )}
                   </div>
                   {/* ROW 2 — Macros */}
                   {!open && totalSnackCal > 0 && (
@@ -5313,6 +5324,16 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     </div>
                     {display && <div style={{ color:"#c8c8e0", fontSize:13, marginTop:3, lineHeight:1.5 }}>{display.food}</div>}
                   </div>
+                  {hasEdit && confirmDelete !== slot.id && (
+                    <button onClick={()=>setConfirmDelete(slot.id)} style={{ background:"transparent", border:"none", color:"#4a4a6a", fontSize:18, cursor:"pointer", padding:"4px", lineHeight:1 }}>✕</button>
+                  )}
+                  {confirmDelete === slot.id && (
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ color:"#ff7070", fontSize:11 }}>Delete?</span>
+                      <button onClick={()=>{ clearEdit(slot.id); setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
+                      <button onClick={()=>setConfirmDelete(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"4px 8px", cursor:"pointer", fontSize:11 }}>No</button>
+                    </div>
+                  )}
                 </div>
                 {/* ROW 2 — Macros */}
                 {display && !open && (
