@@ -4911,10 +4911,10 @@ function MacroAI({ slotLabel, onResult }) {
   };
 
   return (
-    <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center" }}>
+    <div style={{ display:"flex", flex:1, flexDirection:"column", alignItems:"stretch" }}>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]) analyze(e.target.files[0]); }} />
       <button onClick={()=>fileRef.current.click()} disabled={scanning}
-        style={{ background: scanning ? "transparent" : "rgba(157,78,221,0.15)", color: scanning ? "#7070a0" : "#9d4edd", border:"2px solid " + (scanning?"#3a3a4d":"#9d4edd"), borderRadius:20, padding:"6px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12, whiteSpace:"nowrap" }}>
+        style={{ flex:1, background: scanning ? "transparent" : "rgba(61,142,255,0.15)", color: scanning ? "#7070a0" : "#3d8eff", border:"2px solid " + (scanning?"#3a3a4d":"#3d8eff"), borderRadius:20, padding:"8px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
         {scanning ? "Scanning..." : "Macro AI"}
       </button>
       {error && <div style={{ color:"#ff7070", fontSize:10, marginTop:3, textAlign:"center" }}>{error}</div>}
