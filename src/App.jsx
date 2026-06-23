@@ -4872,40 +4872,41 @@ function MacroAI({ slotLabel, onResult }) {
   const analyze = async (file) => {
     setScanning(true); setError(null);
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64 = e.target.result.split(",")[1];
-        const mediaType = file.type || "image/jpeg";
-        const body = {
-          model: "claude-opus-4-6",
-          max_tokens: 300,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-              { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
-            ]
-          }]
-        };
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-          body: JSON.stringify(body)
-        });
-        if (!res.ok) { const errText = await res.text(); throw new Error("API error " + res.status + ": " + errText); }
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message || "API error");
-        const text = (data.content && data.content[0] && data.content[0].text) || "";
-        if (!text) throw new Error("Empty response from API");
-        const clean = text.replace(/```json|```/g, "").trim();
-        let parsed;
-        try { parsed = JSON.parse(clean); } catch(pe) { throw new Error("Could not parse: " + clean); }
-        onResult(parsed);
-        setScanning(false);
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(",")[1]);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+      const mediaType = file.type || "image/jpeg";
+      const body = {
+        model: "claude-sonnet-4-6",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+            { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
+          ]
+        }]
       };
-      reader.readAsDataURL(file);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) { const errText = await res.text(); throw new Error("API " + res.status + ": " + errText.slice(0,100)); }
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || "API error");
+      const text = (data.content && data.content[0] && data.content[0].text) || "";
+      if (!text) throw new Error("Empty response");
+      const clean = text.replace(/```json|```/g, "").trim();
+      let parsed;
+      try { parsed = JSON.parse(clean); } catch(pe) { throw new Error("Parse error: " + clean.slice(0,80)); }
+      onResult(parsed);
+      setScanning(false);
     } catch(e) {
-      setError("Could not analyze photo — try again."); setScanning(false);
+      setError(e.message || "Unknown error"); setScanning(false);
     }
   };
 
