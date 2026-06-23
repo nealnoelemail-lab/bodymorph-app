@@ -5340,13 +5340,12 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   // Totals: only count meals marked as logged
   let totalCal=0, totalP=0, totalC=0, totalF=0;
   MEAL_SLOTS.filter(s=>s.id!=="snacks").forEach(s => {
-    const entry = dayLog[s.id];
-    if (entry && entry.logged) {
-      totalCal += parseInt(entry.cal)||0;
-      totalP += parseInt(entry.protein)||0;
-      totalC += parseInt(entry.carbs)||0;
-      totalF += parseInt(entry.fats)||0;
-    }
+    slotList(s.id).filter(x=>x.logged).forEach(x => {
+      totalCal += parseInt(x.cal)||0;
+      totalP += parseInt(x.protein)||0;
+      totalC += parseInt(x.carbs)||0;
+      totalF += parseInt(x.fats)||0;
+    });
   });
   // Add logged snacks
   const snackHasData = snackList.some(s=>s.food||s.cal);
