@@ -4002,18 +4002,9 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
             Choose which stretches are part of your {routineLabel}. This set is reused whenever you add this routine to a day.
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {POSE_TYPES.map(t => {
-              const on = contents.includes(t.id);
-              return (
-                <button key={t.id} onClick={()=>togglePose(t.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
-                  <span style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
-                    {t.label}
-                  </span>
-                  <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
-                </button>
-              );
-            })}
+            {POSE_TYPES.map(t => (
+              <StretchCard key={t.id} t={t} on={contents.includes(t.id)} toggle={togglePose} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
+            ))}
           </div>
           <div style={{ color:"#7070a0", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
         </div>
