@@ -3963,7 +3963,7 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   );
 }
 
-function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStartRoutine, gender, videoOverrides, onSaveVideo }) {
+function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo }) {
   const [sel, setSel] = useState(new Date().getDay());
   const [editRoutine, setEditRoutine] = useState(null);
   const [videoStretch, setVideoStretch] = useState(null);  // routine id being configured
@@ -4034,7 +4034,6 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:10 }}>
           Pick a day, then tap the stretches and yoga poses you'll do. Mix and match across the week &mdash; add as many as you like to a day.
         </div>
-        <button onClick={()=>onStartRoutine && onStartRoutine()} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:14, color:"#00d4c8", fontSize:14, fontWeight:600, background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
 
         {/* Day selector */}
         <div style={{ display:"flex", gap:5, marginBottom:16 }}>
@@ -5584,8 +5583,7 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} onStartRoutine={()=>setPhase("stretchroutine")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
-  if (phase === "stretchroutine") return (<><Toast /><StretchRoutine onBack={()=>setPhase("stretch")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
