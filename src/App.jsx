@@ -4892,10 +4892,14 @@ function MacroAI({ slotLabel, onResult }) {
           headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
           body: JSON.stringify(body)
         });
+        if (!res.ok) { const errText = await res.text(); throw new Error("API error " + res.status + ": " + errText); }
         const data = await res.json();
+        if (data.error) throw new Error(data.error.message || "API error");
         const text = (data.content && data.content[0] && data.content[0].text) || "";
+        if (!text) throw new Error("Empty response from API");
         const clean = text.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(clean);
+        let parsed;
+        try { parsed = JSON.parse(clean); } catch(pe) { throw new Error("Could not parse: " + clean); }
         onResult(parsed);
         setScanning(false);
       };
