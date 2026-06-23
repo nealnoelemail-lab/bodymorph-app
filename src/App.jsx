@@ -1936,7 +1936,24 @@ function Wizard({ onComplete }) {
 function FatLossResults({ profile, onContinue }) {
   const [deficit, setDeficit] = useState("moderate");
   const t = calorieTargets(profile, deficit);
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2006,6 +2023,7 @@ function Loading({ name }) {
       <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:2 }}>{msgs[i]}</div>
       <div style={{ color:"#c8c8e0", fontSize:14 }}>{name ? name + ", building your 5-day plan" : "Building your 5-day plan"}</div>
     </div>
+  </>
   );
 }
 
@@ -2030,7 +2048,24 @@ function ChangeProgram({ profile, onSave, onBack }) {
     return "";
   };
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <Watermark />
@@ -2088,7 +2123,24 @@ function EditDays({ profile, onSave, onBack }) {
   const toggle = (d) => setDays(prev => prev.includes(d) ? prev.filter(x=>x!==d) : [...prev, d]);
   const changed = JSON.stringify([...days].sort()) !== JSON.stringify([...(profile.trainingDays||DEFAULT_DAYS)].sort());
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2129,7 +2181,24 @@ function EditTime({ profile, onSave, onBack }) {
   const changed = time !== current;
   const opts = [[30,"30 minutes","Quick — 4 exercises"],[45,"45 minutes","Standard — 5 exercises"],[60,"60+ minutes","Full — 6 exercises"]];
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2166,7 +2235,24 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
   const todayIdx = sched.findIndex(d => d.day === todayName);
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2272,7 +2358,24 @@ function ProgramSummary({ profile, program, onReset, onBack }) {
     </div>
   );
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2466,7 +2569,24 @@ function Settings({ profile, onBack, onResetProfile }) {
     { label:"Change Subscription", icon:"📋", note:"Coaching · App Only — coming soon", action: ()=>alert("Coming soon.") },
     { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
   ];
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2540,7 +2660,24 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
   const calPct = Math.min(100, Math.round((totalCal/calGoal)*100));
   const calOver = totalCal > calGoal;
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -2768,7 +2905,24 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
   }
 
   // Active session: set-by-set logging
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -3015,7 +3169,24 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
     return isNaN(dt) ? d : dt.toLocaleDateString(undefined, { month:"short", day:"numeric" });
   };
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -3531,7 +3702,24 @@ function CardioPlanner({ plan, onSave, onBack }) {
     onSave(updated);
   };
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -4017,7 +4205,24 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
     );
   }
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -4151,7 +4356,24 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
   // ── Routine detail / list screen ──
   const list = STRETCHES[pick] || [];
   const label = ROUTINES.find(r=>r.id===pick).label;
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -4249,7 +4471,24 @@ function StretchTimer({ segments, routineLabel, onExit, gender }) {
     );
   }
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", padding:"20px 20px 32px", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
 
@@ -4568,7 +4807,24 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
   // Items scheduled for the selected day
   const todayEntries = entries.filter(e => (e.days||[]).includes(sel));
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -4675,7 +4931,24 @@ function RegimenConfig({ item, kind, caution, existing, onConfirm, onCancel }) {
   const toggleDay = (d) => setDays(p => p.includes(d) ? p.filter(x=>x!==d) : [...p, d]);
   const input = { width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"12px 14px", fontSize:16, fontFamily:"'DM Sans'", outline:"none" };
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -4792,7 +5065,24 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
     </div>
   );
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
@@ -5204,6 +5494,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [sel, setSel] = useState(new Date().getDay());
   const [editSlot, setEditSlot] = useState(null);  // which meal slot is being edited
   const [confirmDelete, setConfirmDelete] = useState(null); // slot id pending delete confirmation
+  const [foodLogger, setFoodLogger] = useState(null); // { slotId, slotLabel, sug } when open
 
   const MEAL_SLOTS = [
     { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
@@ -5393,7 +5684,24 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
     );
   }
 
+  const saveFoodLogger = (slotId, newItems) => {
+    const updated = { ...(foodLog||{}) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    onSaveFoodLog(updated);
+    setFoodLogger(null);
+  };
+
   return (
+    <>
+    {foodLogger && (
+      <FoodLogger
+        slotLabel={foodLogger.slotLabel}
+        items={slotList(foodLogger.slotId)}
+        sug={foodLogger.sug}
+        onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+        onClose={()=>setFoodLogger(null)}
+      />
+    )}
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
       <style>{GLOBAL_CSS}</style><WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
@@ -5614,35 +5922,14 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   </div>
                 )}
                 {/* ROW 3 — Buttons */}
-                {!open && (
-                  <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
-                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ addItem(slot.id, {...r, logged:false}); setEditSlot(slot.id); }} />
-                    <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
-                      Edit
-                    </button>
-                    <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
-                      {isLogged?"Unlog":"Log It"}
-                    </button>
-                  </div>
-                )}
-                {open && (
-                  <div style={{ display:"flex", justifyContent:"flex-end", padding:"8px 14px 0" }}>
-                    <button onClick={()=>setEditSlot(null)} style={{ background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Done</button>
-                  </div>
-                )}
-                {open && (
-                  <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
-                    {!hasData && sug && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sug.food}</div>}
-                    {items.map((it,i) => (
-                      <FoodItemRow key={i} it={it} index={i} canRemove={items.length > 1}
-                        onField={(field,val)=>setItem(slot.id,i,field,val)}
-                        onRemove={()=>removeItem(slot.id,i)} />
-                    ))}
-                    <button onClick={()=>addItem(slot.id)} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px dashed #3a3a4d", borderRadius:10, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:14, letterSpacing:0.5 }}>
-                      + Add Food ({items.filter(x=>x.food||x.cal).length})
-                    </button>
-                  </div>
-                )}
+                <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
+                  <button onClick={()=>setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    {hasData ? "Add Food" : "Add Food"}
+                  </button>
+                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    {isLogged?"Unlog":"Log It"}
+                  </button>
+                </div>
               </div>
             );
           })}
