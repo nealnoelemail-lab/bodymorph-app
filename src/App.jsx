@@ -5011,6 +5011,144 @@ async function lookupFoodMacros(name) {
 }
 
 // One food line: name + macro inputs, with debounced auto-fill of blank macro fields.
+function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
+  const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
+  const fileRef = useRef();
+  const [scanning, setScanning] = useState(false);
+  const [imgSrc, setImgSrc] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanError, setScanError] = useState(null);
+
+  const setField = (i, field, val) => {
+    setLocalItems(prev => { const a=[...prev]; a[i]={...a[i],[field]:val}; return a; });
+  };
+  const addBlank = () => setLocalItems(prev => [...prev, {}]);
+  const removeLocal = (i) => setLocalItems(prev => prev.filter((_,idx)=>idx!==i).length ? prev.filter((_,idx)=>idx!==i) : []);
+
+  const handlePhoto = async (file) => {
+    const dataUrl = await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=e=>resolve(e.target.result); r.onerror=()=>reject(); r.readAsDataURL(file); });
+    setImgSrc(dataUrl); setScanning(true); setScanResult(null); setScanError(null);
+    try {
+      const base64=dataUrl.split(",")[1]; const mediaType=file.type||"image/jpeg";
+      const body={ model:"claude-sonnet-4-6", max_tokens:300, messages:[{ role:"user", content:[
+        { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
+        { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
+      ]}]};
+      const res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{ "Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" }, body:JSON.stringify(body) });
+      if(!res.ok) throw new Error("API error");
+      const data=await res.json();
+      const text=(data.content&&data.content[0]&&data.content[0].text)||"";
+      const clean=text.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      setScanResult(parsed); setScanning(false);
+    } catch(e) { setScanError("Could not analyze — try again."); setScanning(false); }
+  };
+
+  const confirmScan = () => {
+    if (scanResult) { setLocalItems(prev=>[...prev, {...scanResult, logged:false}]); }
+    setImgSrc(null); setScanResult(null); setScanError(null);
+  };
+
+  const done = () => { onSave(localItems.filter(x=>x.food||x.cal)); };
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column" }}>
+      <style>{GLOBAL_CSS}</style>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", borderBottom:"1px solid #1a1a26" }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{slotLabel.toUpperCase()}</div>
+        <div style={{ display:"flex", gap:10 }}>
+          <button onClick={done} style={{ background:"#e8ff00", border:"none", borderRadius:20, color:"#000", padding:"8px 20px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Done</button>
+          <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:"50%", color:"#c8c8e0", width:36, height:36, cursor:"pointer", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
+
+        {/* Two main options */}
+        <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+          <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"rgba(61,142,255,0.12)", border:"2px solid #3d8eff", borderRadius:14, color:"#3d8eff", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:28 }}>📷</span>
+            <span>Macro AI</span>
+            <span style={{ fontSize:11, fontWeight:400, color:"#7070a0" }}>Snap a photo</span>
+          </button>
+          <button onClick={addBlank} style={{ flex:1, background:"rgba(232,255,0,0.07)", border:"2px solid #e8ff00", borderRadius:14, color:"#e8ff00", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:28 }}>✏️</span>
+            <span>Type It</span>
+            <span style={{ fontSize:11, fontWeight:400, color:"#7070a0" }}>Enter food name</span>
+          </button>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />
+
+        {/* Photo scan overlay within page */}
+        {imgSrc && (
+          <div style={{ borderRadius:14, overflow:"hidden", background:"#000", marginBottom:16, position:"relative" }}>
+            <img src={imgSrc} alt="meal" style={{ width:"100%", maxHeight:260, objectFit:"contain", display:"block" }} />
+            {scanning && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10 }}>
+                <div style={{ width:40, height:40, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
+                <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2 }}>Analyzing…</div>
+              </div>
+            )}
+            {scanResult && !scanning && (
+              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.92)", padding:"12px 14px" }}>
+                <div style={{ color:"#f0f0f8", fontWeight:700, fontSize:14, marginBottom:8 }}>{scanResult.food}</div>
+                <div style={{ display:"flex", gap:0, marginBottom:10 }}>
+                  {[["cal",scanResult.cal,"#e8ff00"],["P",scanResult.protein+"g","#3d8eff"],["C",scanResult.carbs+"g","#9b5de5"],["F",scanResult.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                    <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
+                      <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:18 }}>{v}</div>
+                      <div style={{ color:"#7070a0", fontSize:10 }}>{k}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>{ setImgSrc(null); setScanResult(null); fileRef.current.click(); }} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
+                  <button onClick={confirmScan} style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Add to {slotLabel}</button>
+                </div>
+              </div>
+            )}
+            {scanError && !scanning && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, padding:16 }}>
+                <div style={{ color:"#ff7070", fontSize:13, textAlign:"center" }}>{scanError}</div>
+                <button onClick={()=>fileRef.current.click()} style={{ background:"#3d8eff", border:"none", borderRadius:20, color:"#fff", padding:"8px 20px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700 }}>Try Again</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Current items */}
+        {localItems.length > 0 && (
+          <div>
+            <div style={{ color:"#7070a0", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:8 }}>ITEMS ADDED</div>
+            {localItems.map((it,i) => (
+              <FoodItemRow key={i} it={it} index={i} canRemove={true}
+                onField={(field,val)=>setField(i,field,val)}
+                onRemove={()=>removeLocal(i)} />
+            ))}
+          </div>
+        )}
+
+        {!imgSrc && localItems.length === 0 && sug && (
+          <div style={{ background:"#1a1a26", borderRadius:12, padding:"12px 14px", marginTop:8 }}>
+            <div style={{ color:"#7070a0", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:6 }}>TODAY'S SUGGESTION</div>
+            <div style={{ color:"#c8c8e0", fontSize:13 }}>{sug.food}</div>
+            <div style={{ display:"flex", gap:0, marginTop:8 }}>
+              {[["cal",sug.cal,"#e8ff00"],["P",sug.protein+"g","#3d8eff"],["C",sug.carbs+"g","#9b5de5"],["F",sug.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                <div key={k} style={{ flex:1, textAlign:"center" }}>
+                  <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:16 }}>{v}</div>
+                  <div style={{ color:"#7070a0", fontSize:10 }}>{k}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>setLocalItems([{...sug,logged:false}])} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#e8ff00", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:13 }}>Use This Suggestion</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   const [looking, setLooking] = useState(false);
   const timer = useRef(null);
