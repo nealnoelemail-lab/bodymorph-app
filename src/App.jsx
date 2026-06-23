@@ -1473,7 +1473,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
       <div style={{ display:"flex", gap:6, marginBottom:10 }}>
         <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") doSearch(query); }}
           style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", color:"#f0f0f8", fontSize:13 }} />
-        <button onClick={()=>doSearch(query)} style={{ background:"#00d4c8", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
+        <button onClick={()=>doSearch(query)} style={{ background:"#3d8eff", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
         <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
       </div>
       {loading && <div style={{ color:"#e8ff00", fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
@@ -1488,7 +1488,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
               allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
           </div>
           <div style={{ display:"flex", gap:8, marginTop:6 }}>
-            <button onClick={()=>pin(previewId)} style={{ flex:1, background:"#00d4c8", color:"#000", border:"none", borderRadius:8, padding:"8px", cursor:"pointer", fontWeight:700, fontSize:13 }}>&#128204; Pin This Video</button>
+            <button onClick={()=>pin(previewId)} style={{ flex:1, background:"#3d8eff", color:"#000", border:"none", borderRadius:8, padding:"8px", cursor:"pointer", fontWeight:700, fontSize:13 }}>&#128204; Pin This Video</button>
             <button onClick={()=>setPreviewId(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 12px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>Close</button>
           </div>
         </div>
@@ -1498,13 +1498,13 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {results.map(item => (
           <button key={item.id.videoId} onClick={()=>setPreviewId(item.id.videoId)}
-            style={{ display:"flex", gap:10, alignItems:"center", background: previewId===item.id.videoId ? "rgba(0,212,200,0.08)" : "#1a1a26", border:"1px solid " + (previewId===item.id.videoId ? "#00d4c8" : "#2a2a3d"), borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
+            style={{ display:"flex", gap:10, alignItems:"center", background: previewId===item.id.videoId ? "rgba(61,142,255,0.08)" : "#1a1a26", border:"1px solid " + (previewId===item.id.videoId ? "#3d8eff" : "#2a2a3d"), borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
             <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
               <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
             </div>
-            <span style={{ color:"#00d4c8", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
+            <span style={{ color:"#3d8eff", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
           </button>
         ))}
       </div>
@@ -3597,7 +3597,7 @@ function Cardio({ profile, onSaveSession, stepEntries, onSaveSteps, cardioPlan, 
 // Legal & original (drawn in code) — no external images.
 function PoseFigure({ name, size = 64 }) {
   const stroke = "#0a0a0f";
-  const skin = "#00d4c8";
+  const skin = "#3d8eff";
   // shared props for limbs
   const L = { stroke: skin, strokeWidth: 5, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
   const head = (cx, cy, r=7) => <circle cx={cx} cy={cy} r={r} fill={skin} />;
@@ -3806,7 +3806,7 @@ function PoseVideo({ name, gender }) {
 // Original SVG pose silhouettes for each stretch/yoga type. Drawn in code (legal),
 // showing a figure performing that specific movement. Yellow on dark, ~28px.
 function YogaIcon({ id, size = 30 }) {
-  const skin = "#00d4c8";
+  const skin = "#3d8eff";
   const L = { stroke: skin, strokeWidth: 5, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
   const head = (cx, cy, r=6) => <circle cx={cx} cy={cy} r={r} fill={skin} />;
 
@@ -3887,7 +3887,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
       <div style={{ display:"flex", gap:6, marginBottom:10 }}>
         <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") doSearch(query); }}
           style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", color:"#f0f0f8", fontSize:13 }} />
-        <button onClick={()=>doSearch(query)} style={{ background:"#00d4c8", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
+        <button onClick={()=>doSearch(query)} style={{ background:"#3d8eff", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
         <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
       </div>
       {loading && <div style={{ color:"#e8ff00", fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
@@ -3900,7 +3900,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
               allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
           </div>
           <div style={{ display:"flex", gap:8, marginTop:6 }}>
-            <button onClick={()=>pin(previewId)} style={{ flex:1, background:"#00d4c8", color:"#000", border:"none", borderRadius:8, padding:"8px", cursor:"pointer", fontWeight:700, fontSize:13 }}>&#128204; Pin This Video</button>
+            <button onClick={()=>pin(previewId)} style={{ flex:1, background:"#3d8eff", color:"#000", border:"none", borderRadius:8, padding:"8px", cursor:"pointer", fontWeight:700, fontSize:13 }}>&#128204; Pin This Video</button>
             <button onClick={()=>setPreviewId(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 12px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>Close</button>
           </div>
         </div>
@@ -3908,13 +3908,13 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {results.map(item => (
           <button key={item.id.videoId} onClick={()=>setPreviewId(item.id.videoId)}
-            style={{ display:"flex", gap:10, alignItems:"center", background: previewId===item.id.videoId ? "rgba(0,212,200,0.08)" : "#1a1a26", border:"1px solid " + (previewId===item.id.videoId ? "#00d4c8" : "#2a2a3d"), borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
+            style={{ display:"flex", gap:10, alignItems:"center", background: previewId===item.id.videoId ? "rgba(61,142,255,0.08)" : "#1a1a26", border:"1px solid " + (previewId===item.id.videoId ? "#3d8eff" : "#2a2a3d"), borderRadius:10, padding:8, cursor:"pointer", textAlign:"left", width:"100%" }}>
             <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
               <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
             </div>
-            <span style={{ color:"#00d4c8", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
+            <span style={{ color:"#3d8eff", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
           </button>
         ))}
       </div>
@@ -3938,7 +3938,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
 
   return (
     <button onClick={()=>{ if(pinnedId){ setShowVideo(true); } else { setQuery(exName); setShowSearch(true); doSearch(exName); } }}
-      style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:6, color:"#00d4c8", fontSize:12, fontWeight:600, background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:6, padding:"3px 9px", cursor:"pointer" }}>
+      style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:6, color:"#3d8eff", fontSize:12, fontWeight:600, background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:6, padding:"3px 9px", cursor:"pointer" }}>
       &#9654; {pinnedId ? "Show Video" : "Video"}
     </button>
   );
@@ -3950,14 +3950,14 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
+        <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#3d8eff" : "#1a1a26", border:"1px solid " + (on ? "#3d8eff" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
           <span style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
             <span>{t.label}</span>
           </span>
           <span style={{ fontSize:18 }}>{on ? "✓" : "+"}</span>
         </button>
-        <button onClick={()=>setOpen(o=>!o)} style={{ flexShrink:0, background: pinnedId ? "rgba(0,212,200,0.1)" : "transparent", border:"1px solid " + (pinnedId ? "#00d4c8" : "#2a2a3d"), borderRadius:10, color: pinnedId ? "#00d4c8" : "#c8c8e0", padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>&#9654; Video</button>
+        <button onClick={()=>setOpen(o=>!o)} style={{ flexShrink:0, background: pinnedId ? "rgba(61,142,255,0.1)" : "transparent", border:"1px solid " + (pinnedId ? "#3d8eff" : "#2a2a3d"), borderRadius:10, color: pinnedId ? "#3d8eff" : "#c8c8e0", padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>&#9654; Video</button>
       </div>
       {open && <div style={{ marginTop:4 }}><StretchVideoPanel exName={t.label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} onClose={()=>setOpen(false)} /></div>}
     </div>
@@ -4008,7 +4008,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
             ))}
           </div>
           <div style={{ color:"#7070a0", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
-          <button onClick={()=>setEditRoutine(null)} style={{ width:"100%", marginTop:16, background:"#00d4c8", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
+          <button onClick={()=>setEditRoutine(null)} style={{ width:"100%", marginTop:16, background:"#3d8eff", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
         </div>
       </div>
     );
@@ -4049,14 +4049,14 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
             const count = ((routines && routines[t.id]) || []).length;
             return (
               <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#00d4c8" : "#1a1a26", border:"1px solid " + (on ? "#00d4c8" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
+                <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#3d8eff" : "#1a1a26", border:"1px solid " + (on ? "#3d8eff" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
                   <span style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
                     <span>{t.label}<span style={{ display:"block", fontSize:11.5, opacity:0.7, fontWeight:400 }}>{count} stretch{count===1?"":"es"}</span></span>
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
-                <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#00d4c8", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
+                <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#3d8eff", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
             );
           })}
@@ -4163,8 +4163,8 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
           &#9654; START GUIDED TIMER
         </button>
         <div style={{ color:"#c8c8e0", fontSize:13, textAlign:"center", marginTop:8 }}>Auto-advances through each stretch. Or just read the list below.</div>
-        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#00d4c8", fontSize:14, fontWeight:600, background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
-        <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#00d4c8", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:10, padding:"10px" }}>
+        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#3d8eff", fontSize:14, fontWeight:600, background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
+        <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#3d8eff", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:10, padding:"10px" }}>
           &#9654; Watch a full follow-along routine
         </a>
       </div>
@@ -4239,7 +4239,7 @@ function StretchTimer({ segments, routineLabel, onExit, gender }) {
       <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20, padding:24, position:"relative" }}>
         <style>{GLOBAL_CSS}</style>
         <div style={{ fontSize:60 }}>&#129496;</div>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:2, color:"#00d4c8" }}>STRETCH COMPLETE</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:2, color:"#3d8eff" }}>STRETCH COMPLETE</div>
         <div style={{ color:"#d6d6ec", fontSize:15, textAlign:"center" }}>Nice work. Your {routineLabel.toLowerCase()} routine is done &mdash; muscles recovered and mobility maintained.</div>
         <button onClick={onExit} style={{ background:"#e8ff00", color:"#000", border:"none", borderRadius:12, padding:"14px 32px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
       </div>
@@ -4279,7 +4279,7 @@ function StretchTimer({ segments, routineLabel, onExit, gender }) {
         </div>
 
         <div style={{ maxWidth:340, textAlign:"center", color:"#d2d2ec", fontSize:14, lineHeight:1.6, background:"rgba(232,255,0,0.05)", borderRadius:10, padding:"10px 14px" }}>{seg.coachCue}</div>
-        <a href={demoSearchUrl(seg.name + " stretch", gender)} target="_blank" rel="noopener noreferrer" onClick={()=>setPaused(true)} style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:10, color:"#00d4c8", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(0,212,200,0.06)", border:"1px solid rgba(0,212,200,0.2)", borderRadius:8, padding:"6px 14px" }}>
+        <a href={demoSearchUrl(seg.name + " stretch", gender)} target="_blank" rel="noopener noreferrer" onClick={()=>setPaused(true)} style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:10, color:"#3d8eff", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:8, padding:"6px 14px" }}>
           &#9654; Watch Demo (pauses timer)
         </a>
       </div>
