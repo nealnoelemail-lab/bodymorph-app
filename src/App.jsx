@@ -3865,7 +3865,7 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   );
 }
 
-function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStartRoutine, gender }) {
+function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStartRoutine, gender, videoOverrides, onSaveVideo }) {
   const [sel, setSel] = useState(new Date().getDay());
   const [editRoutine, setEditRoutine] = useState(null);
   const [videoStretch, setVideoStretch] = useState(null);  // routine id being configured
@@ -3975,20 +3975,9 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         {/* STRETCHES subsection */}
 
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {STRETCH_TYPES.filter(t => !ROUTINE_IDS.includes(t.id)).map(t => {
-            const on = dayTypes.includes(t.id);
-            return (
-              <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <button onClick={()=>toggle(t.id)} style={{ flex:1, display:"flex", justifyContent:"space-between", alignItems:"center", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'", fontWeight: on?600:400 }}>
-                  <span style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex" }}><YogaIcon id={t.id} size={30} /></span>
-                    <span>{t.label}</span>
-                  </span>
-                  <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
-                </button>
-              </div>
-            );
-          })}
+          {STRETCH_TYPES.filter(t => !ROUTINE_IDS.includes(t.id)).map(t => (
+            <StretchCard key={t.id} t={t} on={dayTypes.includes(t.id)} toggle={toggle} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
+          ))}
         </div>
         {dayTypes.length === 0 && (
           <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no stretches assigned.</div>
@@ -5497,7 +5486,7 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} onStartRoutine={()=>setPhase("stretchroutine")} gender={profile.gender} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} onStartRoutine={()=>setPhase("stretchroutine")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
   if (phase === "stretchroutine") return (<><Toast /><StretchRoutine onBack={()=>setPhase("stretch")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
