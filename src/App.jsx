@@ -3931,7 +3931,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         </div>
 
         {/* ROUTINES subsection */}
-        <div style={{ ...S.sectionTitle }}>{DAY_NAMES[sel].toUpperCase()} — ROUTINES</div>
+        <div style={{ ...S.sectionTitle }}>SELECT STRETCHES</div>
         <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
           {STRETCH_TYPES.filter(t => ROUTINE_IDS.includes(t.id)).map(t => {
             const on = dayTypes.includes(t.id);
@@ -3952,7 +3952,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
         </div>
 
         {/* STRETCHES subsection */}
-        <div style={{ ...S.sectionTitle }}>{DAY_NAMES[sel].toUpperCase()} — STRETCHES</div>
+
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {STRETCH_TYPES.filter(t => !ROUTINE_IDS.includes(t.id)).map(t => {
             const on = dayTypes.includes(t.id);
