@@ -4867,7 +4867,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
 function MacroAI({ slotLabel, onResult }) {
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState(null);
-  const fileRef = React.useRef();
+  const fileRef = useRef();
 
   const analyze = async (file) => {
     setScanning(true); setError(null);
