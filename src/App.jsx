@@ -2604,15 +2604,18 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"9px 14px" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0", marginBottom:8 }}>TODAY'S MACROS</div>
           <div style={{ display:"flex", gap:8 }}>
-            {[["PROTEIN", totalP, macros.protein||0, "#3d8eff"],["CARBS", totalC, macros.carbs||0, "#e8ff00"],["FATS", totalF, macros.fats||0, "#3ddc84"]].map(([label,val,goal,color])=>(
+            {[["PROTEIN", totalP, macros.protein||0, "#3d8eff"],["CARBS", totalC, macros.carbs||0, "#e8ff00"],["FATS", totalF, macros.fats||0, "#3ddc84"]].map(([label,val,goal,color])=>{
+              const over = goal > 0 && val > goal;
+              return (
               <div key={label} style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color }}>{val}<span style={{ fontSize:10, color:"#9898b8" }}>/{goal}g</span></div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:10, color:"#9898b8" }}>/{goal}g</span></div>
                 <div style={{ background:"#1e1e2e", borderRadius:99, height:5, overflow:"hidden", margin:"3px 0 3px" }}>
-                  <div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background:color, borderRadius:99 }} />
+                  <div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background: over?"#ff7070":color, borderRadius:99 }} />
                 </div>
-                <div style={{ color:"#9898b8", fontSize:10, letterSpacing:0.5 }}>{label}</div>
+                <div style={{ color: over?"#ff7070":"#9898b8", fontSize:10, letterSpacing:0.5 }}>{label}{over?" ▲":""}</div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
