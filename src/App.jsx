@@ -4983,6 +4983,80 @@ function MacroAI({ slotLabel, onResult }) {
   );
 }
 
+// Looks up calories + macros for a food name via Claude. Returns {cal,protein,carbs,fats} or null.
+async function lookupFoodMacros(name) {
+  try {
+    const body = {
+      model: "claude-sonnet-4-6",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: "Give typical nutrition for a single standard serving of this food: " + name +
+          ". Reply ONLY with a JSON object (no markdown, no words) using exactly these keys: {cal: 000, protein: 00, carbs: 00, fats: 00}. Numbers only, grams for macros."
+      }]
+    };
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = (data.content && data.content[0] && data.content[0].text) || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+    if (parsed && (parsed.cal!==undefined)) return parsed;
+    return null;
+  } catch (e) { return null; }
+}
+
+// One food line: name + macro inputs, with debounced auto-fill of blank macro fields.
+function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
+  const [looking, setLooking] = useState(false);
+  const timer = useRef(null);
+
+  const onName = (val) => {
+    onField("food", val);
+    if (timer.current) clearTimeout(timer.current);
+    const q = val.trim();
+    if (q.length < 3) return;
+    timer.current = setTimeout(async () => {
+      // Only auto-fill if all macro fields are currently blank — never overwrite the user.
+      if ((it.cal && String(it.cal).length) || (it.protein && String(it.protein).length) ||
+          (it.carbs && String(it.carbs).length) || (it.fats && String(it.fats).length)) return;
+      setLooking(true);
+      const r = await lookupFoodMacros(q);
+      setLooking(false);
+      if (r) {
+        if (r.cal!==undefined)     onField("cal", String(r.cal));
+        if (r.protein!==undefined) onField("protein", String(r.protein));
+        if (r.carbs!==undefined)   onField("carbs", String(r.carbs));
+        if (r.fats!==undefined)    onField("fats", String(r.fats));
+      }
+    }, 1100);
+  };
+
+  return (
+    <div style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+        <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>ITEM {index+1}{looking && <span style={{ color:"#3d8eff", fontWeight:600, marginLeft:8 }}>· looking up…</span>}</span>
+        {canRemove && <button onClick={onRemove} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:16, cursor:"pointer", padding:0 }}>&times;</button>}
+      </div>
+      <input value={it.food||""} onChange={e=>onName(e.target.value)} placeholder="Type a food, e.g. boiled egg" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
+      <div style={{ display:"flex", gap:6, marginTop:6 }}>
+        {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
+          <div key={id} style={{ flex:1 }}>
+            <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
+            <input value={it[id]||""} onChange={e=>onField(id, e.target.value)} placeholder="0" type="number" inputMode="numeric"
+              style={{ width:"100%", background:"#1a1a26", border:"1px solid "+col, borderRadius:6, color:"#f0f0f8", padding:"6px 4px", fontSize:12, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ color:"#7070a0", fontSize:10, marginTop:6, textAlign:"center" }}>Auto-filled estimate — edit any value (e.g. 2 eggs)</div>
+    </div>
+  );
+}
+
 function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onBack }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
