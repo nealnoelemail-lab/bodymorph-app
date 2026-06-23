@@ -5354,15 +5354,16 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
               );
             }
 
-            // Regular meal slots (breakfast, lunch, dinner)
-            const edit = dayLog[slot.id];
+            // Regular meal slots (breakfast, lunch, dinner) — now itemized lists
+            const items = slotList(slot.id);
             const sug = scaleSug(getMealSuggestion(dietPref, sel, slot.id));
-            const hasEdit = edit && (edit.food||edit.cal);
-            const display = hasEdit ? edit : sug;
+            const hasData = items.some(x => x.food || x.cal);
+            const tot = slotTotals(slot.id);
             const open = editSlot===slot.id;
-            const isLogged = !!(edit && edit.logged);
+            const isLogged = hasData && items.every(x => x.logged);
+            const namesLine = items.filter(x=>x.food).map(x=>x.food).join(", ");
             return (
-              <div key={slot.id} style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(isLogged?"#3ddc84":hasEdit?"#e8ff00":"#2a2a3d") }}>
+              <div key={slot.id} style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(isLogged?"#3ddc84":hasData?"#e8ff00":"#2a2a3d") }}>
                 {/* ROW 1 — Meal name + description */}
                 <div style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px 10px" }}>
                   <span style={{ fontSize:22, flexShrink:0 }}>{slot.emoji}</span>
@@ -5370,25 +5371,29 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <span style={{ fontWeight:700, fontSize:15 }}>{slot.label}</span>
                       {isLogged && <span style={{ fontSize:10, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
-                      {!isLogged && hasEdit && <span style={{ fontSize:10, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
+                      {!isLogged && hasData && <span style={{ fontSize:10, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
+                      {hasData && items.length > 1 && <span style={{ fontSize:12, color:"#7070a0" }}>({items.filter(x=>x.food||x.cal).length})</span>}
                     </div>
-                    {display && <div style={{ color:"#c8c8e0", fontSize:13, marginTop:3, lineHeight:1.5 }}>{display.food}</div>}
+                    <div style={{ color:"#c8c8e0", fontSize:13, marginTop:3, lineHeight:1.5 }}>{hasData ? namesLine : (sug && sug.food)}</div>
                   </div>
-                  {hasEdit && confirmDelete !== slot.id && (
+                  {hasData && confirmDelete !== slot.id && (
                     <button onClick={()=>setConfirmDelete(slot.id)} style={{ background:"transparent", border:"none", color:"#4a4a6a", fontSize:18, cursor:"pointer", padding:"4px", lineHeight:1 }}>✕</button>
                   )}
                   {confirmDelete === slot.id && (
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <span style={{ color:"#ff7070", fontSize:11 }}>Delete?</span>
-                      <button onClick={()=>{ clearEdit(slot.id); setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
+                      <button onClick={()=>{ const u={...(foodLog||{})}; if(u[dateKey]){ delete u[dateKey][slot.id]; onSaveFoodLog(u); } setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
                       <button onClick={()=>setConfirmDelete(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"4px 8px", cursor:"pointer", fontSize:11 }}>No</button>
                     </div>
                   )}
                 </div>
-                {/* ROW 2 — Macros */}
-                {display && !open && (
+                {/* ROW 2 — Macros (summed) */}
+                {(hasData || sug) && !open && (
                   <div style={{ display:"flex", gap:0, borderTop:"1px solid #2a2a3d", borderBottom:"1px solid #2a2a3d" }}>
-                    {[["cal",display.cal,"#e8ff00"],["P",display.protein+"g","#3d8eff"],["C",display.carbs+"g","#9b5de5"],["F",display.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                    {(hasData
+                      ? [["cal",tot.cal,"#e8ff00"],["P",tot.protein+"g","#3d8eff"],["C",tot.carbs+"g","#9b5de5"],["F",tot.fats+"g","#3ddc84"]]
+                      : [["cal",sug.cal,"#e8ff00"],["P",sug.protein+"g","#3d8eff"],["C",sug.carbs+"g","#9b5de5"],["F",sug.fats+"g","#3ddc84"]]
+                    ).map(([k,v,col])=>(
                       <div key={k} style={{ flex:1, textAlign:"center", padding:"8px 4px", borderRight:"1px solid #2a2a3d" }}>
                         <div style={{ color: k==="cal" ? "#e8ff00" : "#f0f0f8", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:16 }}>{v}</div>
                         <div style={{ color:"#7070a0", fontSize:10, letterSpacing:0.3 }}>{k}</div>
@@ -5399,11 +5404,11 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                 {/* ROW 3 — Buttons */}
                 {!open && (
                   <div style={{ display:"flex", gap:8, padding:"10px 14px", position:"relative" }}>
-                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const td=new Date().toISOString().slice(0,10); const updated={...(foodLog[td]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[td]:updated}); setEditSlot(null); }} />
+                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ addItem(slot.id, {...r, logged:false}); setEditSlot(slot.id); }} />
                     <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flex:1, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Edit
                     </button>
-                    <button onClick={()=>{ if(isLogged){unlogMeal(slot.id);}else{logMeal(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       {isLogged?"Unlog":"Log It"}
                     </button>
                   </div>
@@ -5415,19 +5420,28 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                 )}
                 {open && (
                   <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
-                    {sug && !hasEdit && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:8 }}>Suggestion: {sug.food}</div>}
-                    <input value={(edit&&edit.food)||""} onChange={e=>setSlot(slot.id,"food",e.target.value)}
-                      placeholder="What are you eating?" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"9px 10px", fontSize:13.5, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box", marginTop:10 }} />
-                    <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                      {[["Cal","cal","#e8ff00"],["Protein g","protein","#3d8eff"],["Carbs g","carbs","#9b5de5"],["Fats g","fats","#3ddc84"]].map(([label,id,col])=>(
-                        <div key={id} style={{ flex:1 }}>
-                          <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:3 }}>{label.toUpperCase()}</div>
-                          <input value={(edit&&edit[id])||""} onChange={e=>setSlot(slot.id,id,e.target.value)} placeholder="0" type="number" inputMode="numeric"
-                            style={{ width:"100%", background:"#0e0e16", border:"1px solid "+col, borderRadius:8, color:"#f0f0f8", padding:"7px 4px", fontSize:13, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
+                    {!hasData && sug && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sug.food}</div>}
+                    {items.map((it,i) => (
+                      <div key={i} style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                          <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>ITEM {i+1}</span>
+                          {items.length > 1 && <button onClick={()=>removeItem(slot.id,i)} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:16, cursor:"pointer", padding:0 }}>&times;</button>}
                         </div>
-                      ))}
-                    </div>
-                    {hasEdit && <button onClick={()=>clearEdit(slot.id)} style={{ marginTop:10, background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#ff7070", padding:"6px 12px", cursor:"pointer", fontSize:12, width:"100%" }}>Reset to suggestion</button>}
+                        <input value={it.food||""} onChange={e=>setItem(slot.id,i,"food",e.target.value)} placeholder="What are you eating?" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
+                        <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                          {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
+                            <div key={id} style={{ flex:1 }}>
+                              <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
+                              <input value={it[id]||""} onChange={e=>setItem(slot.id,i,id,e.target.value)} placeholder="0" type="number" inputMode="numeric"
+                                style={{ width:"100%", background:"#1a1a26", border:"1px solid "+col, borderRadius:6, color:"#f0f0f8", padding:"6px 4px", fontSize:12, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={()=>addItem(slot.id)} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px dashed #3a3a4d", borderRadius:10, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:14, letterSpacing:0.5 }}>
+                      + Add Food ({items.filter(x=>x.food||x.cal).length})
+                    </button>
                   </div>
                 )}
               </div>
