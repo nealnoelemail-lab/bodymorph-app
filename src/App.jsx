@@ -82,6 +82,7 @@ const STRETCHPLAN_KEY = "bodymorph_stretchplan_v2";
 const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
 const VIDEO_KEY    = "bodymorph_videos_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
+const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
 const MEDAL_DEFS = [
   { id:"first_log",    label:"First Rep",        emoji:"\uD83C\uDF31", coins:10,  test:(s)=> s.totalLogs >= 1 },
@@ -4863,6 +4864,59 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
   );
 }
 
+function MacroAI({ slotLabel, onResult }) {
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState(null);
+  const fileRef = React.useRef();
+
+  const analyze = async (file) => {
+    setScanning(true); setError(null);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target.result.split(",")[1];
+        const mediaType = file.type || "image/jpeg";
+        const body = {
+          model: "claude-opus-4-6",
+          max_tokens: 300,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+              { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {"food":"meal name","cal":000,"protein":00,"carbs":00,"fats":00}. Estimate for a typical single serving shown in the image." }
+            ]
+          }]
+        };
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        const text = (data.content && data.content[0] && data.content[0].text) || "";
+        const clean = text.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(clean);
+        onResult(parsed);
+        setScanning(false);
+      };
+      reader.readAsDataURL(file);
+    } catch(e) {
+      setError("Could not analyze photo — try again."); setScanning(false);
+    }
+  };
+
+  return (
+    <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center" }}>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]) analyze(e.target.files[0]); }} />
+      <button onClick={()=>fileRef.current.click()} disabled={scanning}
+        style={{ background: scanning ? "transparent" : "rgba(157,78,221,0.15)", color: scanning ? "#7070a0" : "#9d4edd", border:"2px solid " + (scanning?"#3a3a4d":"#9d4edd"), borderRadius:20, padding:"6px 12px", cursor: scanning?"not-allowed":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12, whiteSpace:"nowrap" }}>
+        {scanning ? "Scanning..." : "Macro AI"}
+      </button>
+      {error && <div style={{ color:"#ff7070", fontSize:10, marginTop:3, textAlign:"center" }}>{error}</div>}
+    </div>
+  );
+}
+
 function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onBack }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
@@ -5121,6 +5175,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                       <button onClick={()=>setEditSlot(open?null:"snacks")} style={{ flexShrink:0, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                         {open?"Done":"Edit"}
                       </button>
+                      <MacroAI slotLabel="Snacks" onResult={(r)=>{ const updated={...(foodLog[today]||{})}; const existing=updated["snacks"]||[]; updated["snacks"]=[...existing,{...r,logged:false}]; onSaveFoodLog({...foodLog,[today]:updated}); setEditSlot(null); }} />
                       <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                         {snacksLogged?"Unlog":"Log It"}
                       </button>
@@ -5191,6 +5246,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     <button onClick={()=>setEditSlot(open?null:slot.id)} style={{ flexShrink:0, background:"transparent", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                       {open?"Done":"Edit"}
                     </button>
+                    <MacroAI slotLabel={slot.label} onResult={(r)=>{ const updated={...(foodLog[today]||{})}; updated[slot.id]={...r,logged:false}; onSaveFoodLog({...foodLog,[today]:updated}); setEditSlot(null); }} />
                     <button onClick={()=>{ if(isLogged){unlogMeal(slot.id);}else{logMeal(slot.id,sug);} }} style={{ background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"6px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12 }}>
                       {isLogged?"Unlog":"Log It"}
                     </button>
