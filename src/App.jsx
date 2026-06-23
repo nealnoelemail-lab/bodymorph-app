@@ -3971,11 +3971,11 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, onStar
               </div>
             );
           })}
-          {videoStretch && (() => {
-            const t = STRETCH_TYPES.find(x=>x.id===videoStretch);
-            if (!t) return null;
-            return <div style={{ marginTop:4 }}><StretchVideoPanel exName={t.label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} /></div>;
-          })()}
+          {videoStretch && STRETCH_TYPES.find(x=>x.id===videoStretch) && (
+            <div style={{ marginTop:4 }}>
+              <StretchVideoPanel exName={STRETCH_TYPES.find(x=>x.id===videoStretch).label} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
+            </div>
+          )}
         </div>
         {dayTypes.length === 0 && (
           <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no stretches assigned.</div>
