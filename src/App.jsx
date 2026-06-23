@@ -5496,22 +5496,9 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
                     {!hasData && sug && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sug.food}</div>}
                     {items.map((it,i) => (
-                      <div key={i} style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                          <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>ITEM {i+1}</span>
-                          {items.length > 1 && <button onClick={()=>removeItem(slot.id,i)} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:16, cursor:"pointer", padding:0 }}>&times;</button>}
-                        </div>
-                        <input value={it.food||""} onChange={e=>setItem(slot.id,i,"food",e.target.value)} placeholder="What are you eating?" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
-                        <div style={{ display:"flex", gap:6, marginTop:6 }}>
-                          {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
-                            <div key={id} style={{ flex:1 }}>
-                              <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
-                              <input value={it[id]||""} onChange={e=>setItem(slot.id,i,id,e.target.value)} placeholder="0" type="number" inputMode="numeric"
-                                style={{ width:"100%", background:"#1a1a26", border:"1px solid "+col, borderRadius:6, color:"#f0f0f8", padding:"6px 4px", fontSize:12, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <FoodItemRow key={i} it={it} index={i} canRemove={items.length > 1}
+                        onField={(field,val)=>setItem(slot.id,i,field,val)}
+                        onRemove={()=>removeItem(slot.id,i)} />
                     ))}
                     <button onClick={()=>addItem(slot.id)} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px dashed #3a3a4d", borderRadius:10, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:14, letterSpacing:0.5 }}>
                       + Add Food ({items.filter(x=>x.food||x.cal).length})
