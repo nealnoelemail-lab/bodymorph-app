@@ -31,13 +31,13 @@ const GLOBAL_CSS = `
   .silver-edge { position: relative; }
   .silver-edge::before {
     content:""; position:absolute; inset:0; border-radius:inherit; padding:1.6px;
-    background: conic-gradient(from var(--vc-angle), transparent 0 60%, rgba(210,213,226,0.45) 74%, #ffffff 84%, rgba(210,213,226,0.45) 90%, transparent 100%);
+    background: conic-gradient(from var(--vc-angle), transparent 0%, transparent 50%, rgba(206,210,224,0.12) 63%, rgba(228,231,240,0.4) 74%, rgba(245,246,250,0.8) 82%, #ffffff 87%, rgba(245,246,250,0.8) 92%, rgba(228,231,240,0.4) 97%, transparent 100%);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor; mask-composite: exclude;
     pointer-events:none;
   }
-  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 1.18s linear infinite; }
+  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 0.95s linear infinite; }
   .silver-edge.vc-idle::before { animation: vcSweep 6s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
