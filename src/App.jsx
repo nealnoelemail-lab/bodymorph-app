@@ -3071,8 +3071,8 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
         silenceTimer = null;
         setInterim("🎙 Hearing you…");
       } else if (hasAudio && !silenceTimer) {
-        // 1.5s silence after speech → stop and transcribe
-        silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 1500);
+        // End-of-speech: stop & transcribe after a short silence (snappy response).
+        silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 700);
       }
       if (recorder.state === "recording") requestAnimationFrame(checkSilence);
     };
