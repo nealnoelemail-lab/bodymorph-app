@@ -28,9 +28,14 @@ const GLOBAL_CSS = `
     58%  { stroke-dashoffset: -100; opacity: 0; }
     100% { stroke-dashoffset: -100; opacity: 0; }
   }
-  .vc-edge-dash { fill:none; stroke:#eef0f6; stroke-width:1.8; stroke-linecap:round; stroke-dasharray:20 80; filter: drop-shadow(0 0 2.5px rgba(255,255,255,0.6)); }
-  .vc-edge-dash.vc-on   { stroke:#ffffff; filter: drop-shadow(0 0 3.5px rgba(255,255,255,0.85)); animation: vcDashOn 1.1s linear infinite; }
-  .vc-edge-dash.vc-idle { animation: vcDashIdle 6s linear infinite; }
+  /* Twinkle: pulse the glow so the moving point shimmers like a spark of light */
+  @keyframes vcShimmer {
+    0%, 100% { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px rgba(255,255,255,0.8)); }
+    50%      { filter: drop-shadow(0 0 4px #fff) drop-shadow(0 0 12px rgba(255,255,255,0.95)) drop-shadow(0 0 18px rgba(205,228,255,0.6)); }
+  }
+  .vc-edge-dash { fill:none; stroke:#ffffff; stroke-width:2.4; stroke-linecap:round; stroke-dasharray:9 91; }
+  .vc-edge-dash.vc-on   { animation: vcDashOn 1.1s linear infinite, vcShimmer 0.5s ease-in-out infinite; }
+  .vc-edge-dash.vc-idle { animation: vcDashIdle 6s linear infinite, vcShimmer 0.75s ease-in-out infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
     50%       { opacity: 0.60; }
