@@ -16,3 +16,6 @@ dist
 
 # Claude Code local settings
 .claude/
+
+# Local HTTPS tunnel binary (do not commit)
+cloudflared

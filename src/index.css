@@ -4,6 +4,22 @@ html, body, #root {
   height: 100%;
 }
 
+/* Dark page background so desktop gutters around the centered app stay dark.
+   Keep this on html ONLY — putting it on body too paints over the z-index:-1
+   watermark image and hides it. html covers the full viewport, so the desktop
+   gutters around the centered #root column still show dark. */
+html {
+  background: #0a0a0f;
+}
+
+/* Mobile-first app: cap the whole UI to a phone-width column and center it
+   on wider (desktop) screens. Below 480px this is a no-op, so phones are
+   unaffected. Caps every screen at once — no per-screen maxWidth needed. */
+#root {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
 * {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;

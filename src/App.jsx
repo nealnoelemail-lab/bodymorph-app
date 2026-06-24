@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -9,13 +9,15 @@ const C = {
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=Oswald:wght@500;600;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0a0a0f; color: #f0f0f8; font-family: 'DM Sans', sans-serif; }
+  body { color: #f0f0f8; font-family: 'DM Sans', sans-serif; }
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: #12121a; }
   ::-webkit-scrollbar-thumb { background: #2a2a3d; border-radius: 2px; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
   @keyframes spin { to { transform:rotate(360deg); } }
   .fade-in { animation: fadeIn 0.35s ease both; }
+  @keyframes voiceSlide { 0% { transform:translateX(-100%); } 100% { transform:translateX(330%); } }
+  .voice-bar-seg { animation: voiceSlide 1.1s ease-in-out infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
     50%       { opacity: 0.60; }
@@ -81,8 +83,25 @@ const CARDIOPLAN_KEY = "bodymorph_cardioplan_v2";
 const STRETCHPLAN_KEY = "bodymorph_stretchplan_v2";
 const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
 const VIDEO_KEY    = "bodymorph_videos_v2";
+const HYDRATION_KEY = "bodymorph_hydration_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
+const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
+const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
+const APP_PINK = "#ff79c6";
+
+// Unlock iOS speech synthesis. MUST be called synchronously inside a user-gesture
+// handler (a tap) — speaking a short line here lets later programmatic speech play.
+function primeTTS() {
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance("Let's go.");
+    const voices = window.speechSynthesis.getVoices();
+    const pv = voices.find(v => v.lang === "en-US" && v.localService) || voices.find(v => v.lang.startsWith("en"));
+    if (pv) u.voice = pv;
+    window.speechSynthesis.speak(u);
+  } catch {}
+}
 
 const MEDAL_DEFS = [
   { id:"first_log",    label:"First Rep",        emoji:"\uD83C\uDF31", coins:10,  test:(s)=> s.totalLogs >= 1 },
@@ -842,13 +861,27 @@ function sessionTemplates(focus, count, goal, gender) {
 }
 
 // Assign session templates to the chosen weekday numbers (0=Sun..6=Sat).
+function toValidDayIndex(d) {
+  // Accept number 0-6, or a day name string like "Monday"
+  if (typeof d === 'number' && d >= 0 && d <= 6) return d;
+  const asInt = parseInt(d, 10);
+  if (!isNaN(asInt) && asInt >= 0 && asInt <= 6) return asInt;
+  const nameIdx = DAY_NAMES.indexOf(String(d));
+  return nameIdx >= 0 ? nameIdx : null;
+}
+
 function buildWeek(profile) {
-  const days = (profile.trainingDays && profile.trainingDays.length)
-    ? [...profile.trainingDays].sort((a,b)=>a-b)
+  const raw = (profile.trainingDays && profile.trainingDays.length)
+    ? [...profile.trainingDays]
     : DEFAULT_DAYS;
-  const templates = sessionTemplates(profile.focus, days.length, profile.goal, profile.gender);
+  const days = raw
+    .map(toValidDayIndex)
+    .filter(d => d !== null)
+    .sort((a,b)=>a-b);
+  const validDays = days.length ? days : DEFAULT_DAYS;
+  const templates = sessionTemplates(profile.focus, validDays.length, profile.goal, profile.gender);
   const target = exercisesForTime(profile.sessionTime);
-  return days.map((dayNum, i) => {
+  return validDays.map((dayNum, i) => {
     const t = templates[i % templates.length];
     return dayPlan(DAY_NAMES[dayNum], t.type, t.focusText, t.primary, t.accessory, target);
   });
@@ -1321,6 +1354,14 @@ function buildGLBProgram(profile) {
   const phase = getGLBPhase(profile.glbStartDate);
   const info  = getGLBPhaseInfo(phase);
   const labels = GLB_DAY_LABELS[phase];
+  const rawUserDays = (profile.trainingDays && profile.trainingDays.length)
+    ? [...profile.trainingDays]
+    : [1,3,5];
+  const userDays = rawUserDays
+    .map(toValidDayIndex)
+    .filter(d => d !== null)
+    .sort((a,b)=>a-b)
+    .filter((v,i,a)=>a.indexOf(v)===i); // dedupe
 
   const sessionKeys = {
     1: ["glb1A","glb1B","glb1C"],
@@ -1329,12 +1370,16 @@ function buildGLBProgram(profile) {
     4: ["glb4GlutePeak","glb4LegPeak","glb4HamPeak","glb4Sculpt","glb4Burn"],
   }[phase];
 
-  const weeklySchedule = sessionKeys.map((key, i) => ({
-    day:    labels[i].day,
-    type:   labels[i].type,
-    focus:  labels[i].focus,
-    workout: GLB_EX[key],
-  }));
+  const weeklySchedule = userDays.map((dayNum, i) => {
+    const key   = sessionKeys[i % sessionKeys.length];
+    const label = labels[i % labels.length];
+    return {
+      day:     DAY_NAMES[dayNum],
+      type:    label.type,
+      focus:   label.focus,
+      workout: GLB_EX[key],
+    };
+  });
 
   return {
     glbPhase: phase,
@@ -1415,9 +1460,9 @@ const Logo = ({ small, onSettings }) => (
   </div>
 );
 
-const CoachCue = ({ text }) => (
-  <div style={{ marginTop:8, fontSize:14.5, lineHeight:1.7, color:"#d2d2ec", background:"rgba(232,255,0,0.05)", borderLeft:"3px solid #e8ff00", borderRadius:"0 6px 6px 0", padding:"8px 10px" }}>
-    <span style={{ display:"inline-block", background:"#e8ff00", color:"#000", fontSize:11, fontWeight:700, letterSpacing:1, padding:"2px 5px", borderRadius:3, marginRight:6, verticalAlign:"middle" }}>COACH CUE</span>
+const CoachCue = ({ text, accent="#e8ff00" }) => (
+  <div style={{ marginTop:8, fontSize:14.5, lineHeight:1.7, color:"#d2d2ec", background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+accent, borderRadius:"0 6px 6px 0", padding:"8px 10px" }}>
+    <span style={{ display:"inline-block", background:accent, color:"#000", fontSize:11, fontWeight:700, letterSpacing:1, padding:"2px 5px", borderRadius:3, marginRight:6, verticalAlign:"middle" }}>COACH CUE</span>
     {text}
   </div>
 );
@@ -1438,6 +1483,7 @@ function demoSearchUrl(query, gender) {
 }
 
 function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
+  const vpAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   const pinnedId = videoOverrides && videoOverrides[exName];
   const [showSearch, setShowSearch] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
@@ -1476,7 +1522,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
         <button onClick={()=>doSearch(query)} style={{ background:"#3d8eff", color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Search</button>
         <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 10px", cursor:"pointer", color:"#c8c8e0", fontSize:13 }}>✕</button>
       </div>
-      {loading && <div style={{ color:"#e8ff00", fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
+      {loading && <div style={{ color:vpAccent, fontSize:13, textAlign:"center", padding:10 }}>Searching...</div>}
       {error && <div style={{ color:"#ff7070", fontSize:13, textAlign:"center", padding:10 }}>{error}</div>}
 
       {/* Inline preview of selected result */}
@@ -1502,7 +1548,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
             <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
-              <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
+              <div style={{ fontSize:11, color:"#9898b8", marginTop:3 }}>{item.snippet.channelTitle}</div>
             </div>
             <span style={{ color:"#3d8eff", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
           </button>
@@ -1530,7 +1576,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
   /* ── Default button — Video or show pinned ── */
   return (
     <button onClick={()=>{ if(pinnedId){ setShowVideo(true); } else { setQuery(exName); setShowSearch(true); doSearch(exName); } }}
-      style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, color:"#e8ff00", fontSize:13, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
+      style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, color:vpAccent, fontSize:13, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
       &#9654; {pinnedId ? "Show Video" : "Video"}
     </button>
   );
@@ -1584,7 +1630,7 @@ function HFTInfo({ onClose }) {
   ];
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:1000, background:"#0a0a0f", overflowY:"auto", paddingBottom:40 }}>
+    <div style={{ position:"fixed", inset:0, zIndex:1000, background:"#0a0a0f", overflowY:"auto", paddingBottom:40, maxWidth:480, margin:"0 auto" }}>
       <style>{GLOBAL_CSS}</style>
       <HFTBackground />
       {/* Top bar with close */}
@@ -1634,7 +1680,7 @@ function HFTInfo({ onClose }) {
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
                   <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:0.5, color:ph.color }}>PHASE {ph.num}: {ph.name}</div>
                 </div>
-                <div style={{ fontSize:11.5, color:"#7070a0", fontFamily:"'Oswald',sans-serif", fontWeight:600, letterSpacing:0.5, marginBottom:5 }}>{ph.weeks} · {ph.days}</div>
+                <div style={{ fontSize:11.5, color:"#9898b8", fontFamily:"'Oswald',sans-serif", fontWeight:600, letterSpacing:0.5, marginBottom:5 }}>{ph.weeks} · {ph.days}</div>
                 <div style={{ fontSize:13, color:"#c8c8e0", lineHeight:1.55 }}>{ph.text}</div>
               </div>
             </div>
@@ -1660,7 +1706,7 @@ function HFTInfo({ onClose }) {
 
 // ── GLUTE & LOWER BODY — INFO PAGE ───────────────────────────────────────────
 function GLBInfo({ onClose }) {
-  const PINK = "#ff5fa2";
+  const PINK = APP_PINK;
   const benefits = [
     { icon:"🍑", title:"Round, Lifted Glutes", text:"Hip thrusts, bridges and targeted isolation build the gluteus maximus and the upper-side glute that create that rounded, lifted C-curve shape." },
     { icon:"⌛", title:"A Smaller-Looking Waist", text:"Deep-core vacuum training tightens your natural corset, while fuller hips and glutes make the waist look tiny by contrast — the hourglass effect." },
@@ -1674,7 +1720,7 @@ function GLBInfo({ onClose }) {
   ];
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:1000, background:"#0a0a0f", overflowY:"auto", paddingBottom:40 }}>
+    <div style={{ position:"fixed", inset:0, zIndex:1000, background:"#0a0a0f", overflowY:"auto", paddingBottom:40, maxWidth:480, margin:"0 auto" }}>
       <style>{GLOBAL_CSS}</style>
       <GLBBackground />
       {/* Top bar with close */}
@@ -1720,7 +1766,7 @@ function GLBInfo({ onClose }) {
               </div>
               <div style={{ paddingBottom:18, flex:1 }}>
                 <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:0.5, color:ph.color }}>PHASE {ph.num}: {ph.name}</div>
-                <div style={{ fontSize:11.5, color:"#7070a0", fontFamily:"'Oswald',sans-serif", fontWeight:600, letterSpacing:0.5, marginBottom:5 }}>{ph.weeks} · {ph.days}</div>
+                <div style={{ fontSize:11.5, color:"#9898b8", fontFamily:"'Oswald',sans-serif", fontWeight:600, letterSpacing:0.5, marginBottom:5 }}>{ph.weeks} · {ph.days}</div>
                 <div style={{ fontSize:13, color:"#c8c8e0", lineHeight:1.55 }}>{ph.text}</div>
               </div>
             </div>
@@ -1966,7 +2012,7 @@ function FatLossResults({ profile, onContinue }) {
           <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1 }}>DAILY CALORIE TARGET</div>
           <div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:48, color:"#e8ff00", lineHeight:1.1 }}>{t.target}</div>
           <div style={{ color:"#c8c8e0", fontSize:12.5 }}>calories / day</div>
-          <div style={{ display:"flex", justifyContent:"center", gap:16, marginTop:10, color:"#7070a0", fontSize:12 }}>
+          <div style={{ display:"flex", justifyContent:"center", gap:16, marginTop:10, color:"#9898b8", fontSize:12 }}>
             <span>Maintenance: {t.tdee}</span><span>BMR: {t.bmr}</span>
           </div>
         </div>
@@ -1981,7 +2027,7 @@ function FatLossResults({ profile, onContinue }) {
           ))}
         </div>
 
-        <div style={{ color:"#7070a0", fontSize:11.5, lineHeight:1.6, textAlign:"center", marginBottom:18 }}>
+        <div style={{ color:"#9898b8", fontSize:11.5, lineHeight:1.6, textAlign:"center", marginBottom:18 }}>
           These are science-based estimates (Mifflin-St Jeor). Real results vary &mdash; adjust based on weekly progress. This is guidance, not medical advice.
         </div>
 
@@ -2075,7 +2121,7 @@ function ChangeProgram({ profile, onSave, onBack }) {
           </div>
         )}
 
-        <button onClick={()=> changed && onSave(focus)} disabled={!changed} style={{ width:"100%", maxWidth:360, margin:"18px auto 0", display:"block", background: changed ? "#e8ff00" : "#2a2a3d", color: changed ? "#000" : "#7070a0", border:"none", borderRadius:12, padding:"16px", cursor: changed?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
+        <button onClick={()=> changed && onSave(focus)} disabled={!changed} style={{ width:"100%", maxWidth:360, margin:"18px auto 0", display:"block", background: changed ? "#e8ff00" : "#2a2a3d", color: changed ? "#000" : "#9898b8", border:"none", borderRadius:12, padding:"16px", cursor: changed?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
           {changed ? "SWITCH TO THIS PROGRAM" : "THIS IS YOUR CURRENT PROGRAM"}
         </button>
       </div>
@@ -2115,7 +2161,7 @@ function EditDays({ profile, onSave, onBack }) {
           {days.length ? days.length + " day" + (days.length>1?"s":"") + " per week" : "Pick at least one day"}
         </div>
 
-        <button onClick={()=> days.length && onSave([...days].sort((a,b)=>a-b))} disabled={!days.length || !changed} style={{ width:"100%", background: (days.length && changed) ? "#e8ff00" : "#2a2a3d", color: (days.length && changed) ? "#000" : "#7070a0", border:"none", borderRadius:12, padding:"16px", cursor: (days.length && changed)?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
+        <button onClick={()=> days.length && onSave([...days].sort((a,b)=>a-b))} disabled={!days.length || !changed} style={{ width:"100%", background: (days.length && changed) ? "#e8ff00" : "#2a2a3d", color: (days.length && changed) ? "#000" : "#9898b8", border:"none", borderRadius:12, padding:"16px", cursor: (days.length && changed)?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
           SAVE CHANGES
         </button>
       </div>
@@ -2154,7 +2200,7 @@ function EditTime({ profile, onSave, onBack }) {
           })}
         </div>
 
-        <button onClick={()=> onSave(time)} disabled={!changed} style={{ width:"100%", marginTop:18, background: changed ? "#e8ff00" : "#2a2a3d", color: changed ? "#000" : "#7070a0", border:"none", borderRadius:12, padding:"16px", cursor: changed?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
+        <button onClick={()=> onSave(time)} disabled={!changed} style={{ width:"100%", marginTop:18, background: changed ? "#e8ff00" : "#2a2a3d", color: changed ? "#000" : "#9898b8", border:"none", borderRadius:12, padding:"16px", cursor: changed?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
           SAVE CHANGES
         </button>
       </div>
@@ -2166,6 +2212,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
   const todayIdx = sched.findIndex(d => d.day === todayName);
+  const trainAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
@@ -2176,70 +2223,24 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
       </div>
 
       <div style={{ padding:"6px 5% 6px", display:"flex", justifyContent:"flex-end", gap:8, flexWrap:"wrap" }}>
-        <button onClick={onChangeProgram} style={{ background:"rgba(232,255,0,0.1)", border:"1px solid #e8ff00", borderRadius:8, color:"#e8ff00", padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Change Program</button>
-        <button onClick={onEditTime} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#e8ff00", padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Time</button>
-        <button onClick={onEditDays} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#e8ff00", padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Days</button>
+        <button onClick={onChangeProgram} style={{ background:"transparent", border:"1px solid "+trainAccent, borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Change Program</button>
+        <button onClick={onEditTime} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Time</button>
+        <button onClick={onEditDays} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Days</button>
       </div>
-
-      {/* HFT Phase Banner */}
-      {profile.focus && profile.focus.includes("HFT") && (() => {
-        const phase = getHFTPhase(profile.hftStartDate);
-        const info  = getHFTPhaseInfo(phase);
-        const start = profile.hftStartDate ? new Date(profile.hftStartDate) : new Date();
-        const dayNum = Math.floor((new Date() - start) / (1000*60*60*24)) + 1;
-        const weekNum = Math.ceil(dayNum / 7);
-        const daysLeft = phase < 4 ? (phase * 21) - (dayNum - 1) : Math.max(0, 90 - (dayNum - 1));
-        return (
-          <div style={{ margin:"2px 5% 8px", background:"rgba(0,0,0,0.3)", border:"1px solid " + info.color, borderRadius:12, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
-            <div>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:12, letterSpacing:3, color:info.color }}>90-DAY ICONIC PHYSIQUE — PHASE {phase} OF 4</div>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1, color:"#f0f0f8", lineHeight:1.1 }}>{info.name}</div>
-              <div style={{ fontSize:11, color:"#9898b8", marginTop:2 }}>{info.weeks} · {info.days} days/week · Week {Math.min(weekNum,12)} of 12</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:28, color:info.color, lineHeight:1 }}>Day {Math.min(dayNum,90)}</div>
-              <div style={{ fontSize:11, color:"#9898b8" }}>{daysLeft > 0 ? daysLeft + " days to next phase" : "Final phase"}</div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Glute & Lower Body Phase Banner */}
-      {profile.focus && profile.focus.includes("Booty") && (() => {
-        const phase = getGLBPhase(profile.glbStartDate);
-        const info  = getGLBPhaseInfo(phase);
-        const start = profile.glbStartDate ? new Date(profile.glbStartDate) : new Date();
-        const dayNum = Math.floor((new Date() - start) / (1000*60*60*24)) + 1;
-        const weekNum = Math.ceil(dayNum / 7);
-        const daysLeft = phase < 4 ? (phase * 21) - (dayNum - 1) : Math.max(0, 90 - (dayNum - 1));
-        return (
-          <div style={{ margin:"2px 5% 8px", background:"rgba(0,0,0,0.3)", border:"1px solid " + info.color, borderRadius:12, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
-            <div>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:12, letterSpacing:3, color:info.color }}>90-DAY TIGHT WAIST & BOOTY — PHASE {phase} OF 4</div>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1, color:"#f0f0f8", lineHeight:1.1 }}>{info.name}</div>
-              <div style={{ fontSize:11, color:"#9898b8", marginTop:2 }}>{info.weeks} · {info.days} days/week · Week {Math.min(weekNum,12)} of 12</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:28, color:info.color, lineHeight:1 }}>Day {Math.min(dayNum,90)}</div>
-              <div style={{ fontSize:11, color:"#9898b8" }}>{daysLeft > 0 ? daysLeft + " days to next phase" : "Final phase"}</div>
-            </div>
-          </div>
-        );
-      })()}
 
       <div style={{ display:"flex", flexDirection:"column", gap:9, padding:"6px 5% 0" }}>
         {sched.map((d,i) => {
           const isToday = i === todayIdx;
           const count = d.workout ? d.workout.length : 0;
           return (
-            <button key={i} onClick={() => onPickDay(i)} style={{ textAlign:"left", background:"#1a1a26", border:"1px solid " + (isToday ? "#e8ff00" : "#2a2a3d"), borderRadius:12, padding:"13px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+            <button key={i} onClick={() => onPickDay(i)} style={{ textAlign:"left", background:"#1a1a26", border:"1px solid " + (isToday ? trainAccent : "#2a2a3d"), borderRadius:12, padding:"13px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
               <div style={{ minWidth:0, flex:1 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontFamily:"'Bebas Neue'", fontSize:27, letterSpacing:1 }}>{d.day}</span>
-                  {isToday && <span style={{ background:"#e8ff00", color:"#000", fontSize:10, fontWeight:700, letterSpacing:1, padding:"2px 5px", borderRadius:4 }}>TODAY</span>}
+                  <span style={{ fontFamily:"'Bebas Neue'", fontSize:27, letterSpacing:1, color:"#f0f0f8" }}>{d.day}</span>
+                  {isToday && <span style={{ background:trainAccent, color:"#000", fontSize:12, fontWeight:700, letterSpacing:1, padding:"2px 5px", borderRadius:4 }}>TODAY</span>}
                 </div>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10, marginTop:2 }}>
-                  <span style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:0.5 }}>{d.type}</span>
+                  <span style={{ color:trainAccent, fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:0.5 }}>{d.type}</span>
                   <span style={{ color:"#c8c8e0", fontSize:11.5, whiteSpace:"nowrap" }}>{count} exercises &middot; {d.focus}</span>
                 </div>
                 {cardioPlanLabel(cardioPlan, DAY_NAMES.indexOf(d.day)) && (
@@ -2249,7 +2250,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
                   <div style={{ color:"#9b5de5", fontSize:11.5, marginTop:2 }}>🧘 {stretchPlanLabel(stretchPlan, DAY_NAMES.indexOf(d.day))}</div>
                 )}
               </div>
-              <span style={{ color:"#e8ff00", fontSize:20, flexShrink:0 }}>&#8250;</span>
+              <span style={{ color:trainAccent, fontSize:20, flexShrink:0 }}>&#8250;</span>
             </button>
           );
         })}
@@ -2341,8 +2342,8 @@ const IconToDo = ({ color="#3ddc84" }) => (
   </svg>
 );
 
-const IconTraining = () => (
-  <svg width="26" height="26" viewBox="0 0 32 32" fill="none" stroke="#e8ff00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+const IconTraining = ({ color="#e8ff00" }) => (
+  <svg width="26" height="26" viewBox="0 0 32 32" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="10" y1="16" x2="22" y2="16"/>
     <rect x="5" y="11" width="5" height="10" rx="2"/>
     <rect x="2" y="13" width="4" height="6" rx="1.5"/>
@@ -2475,13 +2476,13 @@ function Settings({ profile, onBack, onResetProfile }) {
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>SETTINGS</div>
       </div>
       <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
-        <div style={{ color:"#7070a0", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
+        <div style={{ color:"#9898b8", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
         {items.map(item => (
           <button key={item.label} onClick={item.action} style={{ display:"flex", alignItems:"center", gap:14, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%" }}>
             <span style={{ fontSize:22 }}>{item.icon}</span>
             <div style={{ flex:1 }}>
               <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>{item.label}</div>
-              <div style={{ fontSize:12, color:"#7070a0", marginTop:2 }}>{item.note}</div>
+              <div style={{ fontSize:12, color:"#9898b8", marginTop:2 }}>{item.note}</div>
             </div>
             <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
           </button>
@@ -2490,7 +2491,7 @@ function Settings({ profile, onBack, onResetProfile }) {
           <span style={{ fontSize:22 }}>🔄</span>
           <div style={{ flex:1 }}>
             <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#ff6060" }}>Reset Profile</div>
-            <div style={{ fontSize:12, color:"#7070a0", marginTop:2 }}>Re-enter your preferences — all logs and data are kept</div>
+            <div style={{ fontSize:12, color:"#9898b8", marginTop:2 }}>Re-enter your preferences — all logs and data are kept</div>
           </div>
           <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
         </button>
@@ -2499,13 +2500,13 @@ function Settings({ profile, onBack, onResetProfile }) {
   );
 }
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings }) {
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
   const todayIdx = sched.findIndex(d => d.day === todayName);
   const dayCount = sched.length;
-  const accent = "#e8ff00";
+  const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const today = new Date().toISOString().slice(0,10);
 
   // Steps state
@@ -2520,6 +2521,17 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
     const updated = [...(stepEntries||[]).filter(e=>e.date!==today), { date:today, steps:val }];
     onSaveSteps(updated);
     setEditingSteps(false);
+  };
+
+  // Hydration state (mirrors Steps): tap to type cups, check to save. Goal = 8 cups/day.
+  const HYD_GOAL = (hydration && hydration.goal) || 8;
+  const todayCups = (hydration && hydration.cups) || 0;
+  const [editingHyd, setEditingHyd] = useState(false);
+  const [hydInput, setHydInput] = useState(String(todayCups||""));
+  const hydPct = Math.min(100, Math.round((todayCups/HYD_GOAL)*100));
+  const saveHyd = () => {
+    onSetCups(parseInt(hydInput)||0);
+    setEditingHyd(false);
   };
 
   // Today's nutrition totals from food log
@@ -2552,11 +2564,55 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
       {/* Greeting */}
       <div style={{ padding:"6px 0 0" }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>Welcome back, <span style={{ color:"#e8ff00" }}>{profile.name}</span></div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>Welcome back, <span style={{ color:accent }}>{profile.name}</span></div>
       </div>
 
       {/* Daily Dashboard Strip */}
       <div style={{ margin:"0 0 14px", display:"flex", flexDirection:"column", gap:8 }}>
+
+        {/* Voice Coach + Hydration side by side */}
+        <div style={{ display:"flex", gap:8 }}>
+
+          {/* Voice Coach — tap to start/stop. Active indicator is a small bar at the card bottom. */}
+          <button onClick={onVoiceCoach} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid "+(voiceActive?accent:"#2a2a3d"), borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+              <span style={{ fontSize:20 }}>🎙️</span>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:accent }}>VOICE COACH</span>
+            </div>
+            <div style={{ color:"#9898b8", fontSize:12.5 }}>{voiceActive ? (voiceState==="speaking"?"Coaching…":voiceState==="processing"?"Thinking…":voiceState==="listening"?"Listening…":"Connecting…")+"  ·  tap to stop" : "Tap to talk with your coach"}</div>
+            {voiceActive && (
+              <div style={{ position:"absolute", left:0, right:0, bottom:0, height:4, background:"#101018", overflow:"hidden" }}>
+                <div className="voice-bar-seg" style={{ width:"30%", height:"100%", background: voiceState==="listening" ? "#3ddc84" : voiceState==="processing" ? "#3d8eff" : accent, borderRadius:99 }} />
+              </div>
+            )}
+          </button>
+
+          {/* Hydration — built exactly like Steps: tap to type cups, ✓ to save */}
+          <div style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"8px 10px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+              <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
+                <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0" }}>💧 HYDRATION</span>
+              </button>
+              {editingHyd ? (
+                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                  <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }}
+                    style={{ width:50, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"3px 6px", fontSize:15.6, fontFamily:"'Oswald',sans-serif", fontWeight:600, textAlign:"center", outline:"none" }} />
+                  <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"3px 7px", cursor:"pointer", fontSize:13.2, fontWeight:700 }}>✓</button>
+                  <button onClick={()=>setEditingHyd(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#c8c8e0", padding:"3px 6px", cursor:"pointer", fontSize:13.2 }}>✕</button>
+                </div>
+              ) : (
+                <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color:"#3d8eff" }}>{todayCups}</span>
+                </button>
+              )}
+            </div>
+            <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
+              <div style={{ width:hydPct+"%", height:"100%", background:"#3d8eff", borderRadius:99, transition:"width 0.4s" }} />
+            </div>
+            <div style={{ color:"#9898b8", fontSize:13.2 }}>{hydPct>=100?"🎉 Goal reached!":`${todayCups} / ${HYD_GOAL} cups`}</div>
+          </div>
+        </div>
 
         {/* Steps + Calories side by side */}
         <div style={{ display:"flex", gap:8 }}>
@@ -2577,12 +2633,12 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
                 </div>
               ) : (
                 <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: stepPct>=100?"#3ddc84":accent }}>{todaySteps.toLocaleString()}</span>
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
                 </button>
               )}
             </div>
             <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
-              <div style={{ width:stepPct+"%", height:"100%", background: stepPct>=100?"#3ddc84":accent, borderRadius:99, transition:"width 0.4s" }} />
+              <div style={{ width:stepPct+"%", height:"100%", background:"#3ddc84", borderRadius:99, transition:"width 0.4s" }} />
             </div>
             <div style={{ color:"#9898b8", fontSize:13.2 }}>{stepPct>=100?"🎉 Goal reached!":`${todaySteps.toLocaleString()} / ${STEP_GOAL.toLocaleString()}`}</div>
           </div>
@@ -2591,10 +2647,10 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
           <div style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"8px 10px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
               <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0" }}>🔥 CALORIES</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: calOver?"#ff7070":"#3ddc84" }}>{totalCal.toLocaleString()}</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
             </div>
             <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
-              <div style={{ width:calPct+"%", height:"100%", background: calOver?"#ff7070":"#3ddc84", borderRadius:99, transition:"width 0.4s" }} />
+              <div style={{ width:calPct+"%", height:"100%", background: calOver?"#ff7070":"#e8ff00", borderRadius:99, transition:"width 0.4s" }} />
             </div>
             <div style={{ color:"#9898b8", fontSize:13.2 }}>{calOver ? `${(totalCal-calGoal).toLocaleString()} over` : `${(calGoal-totalCal).toLocaleString()} of ${calGoal.toLocaleString()} remaining`}</div>
           </div>
@@ -2604,15 +2660,15 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"9px 14px" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0", marginBottom:8 }}>TODAY'S MACROS</div>
           <div style={{ display:"flex", gap:8 }}>
-            {[["PROTEIN", totalP, macros.protein||0, "#3d8eff"],["CARBS", totalC, macros.carbs||0, "#e8ff00"],["FATS", totalF, macros.fats||0, "#3ddc84"]].map(([label,val,goal,color])=>{
+            {[["PROTEIN", totalP, macros.protein||0, "#3ddc84"],["CARBS", totalC, macros.carbs||0, "#3d8eff"],["FATS", totalF, macros.fats||0, "#e8ff00"]].map(([label,val,goal,color])=>{
               const over = goal > 0 && val > goal;
               return (
               <div key={label} style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:10, color:"#9898b8" }}>/{goal}g</span></div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:12, color:"#9898b8" }}>/{goal}g</span></div>
                 <div style={{ background:"#1e1e2e", borderRadius:99, height:5, overflow:"hidden", margin:"3px 0 3px" }}>
                   <div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background: over?"#ff7070":color, borderRadius:99 }} />
                 </div>
-                <div style={{ color: over?"#ff7070":"#9898b8", fontSize:10, letterSpacing:0.5 }}>{label}{over?" ▲":""}</div>
+                <div style={{ color: over?"#ff7070":"#9898b8", fontSize:12, letterSpacing:0.5 }}>{label}{over?" ▲":""}</div>
               </div>
               );
             })}
@@ -2626,7 +2682,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
           <IconToDo color="#3ddc84" /><span style={{ flex:1, textAlign:"center", color:"#3ddc84" }}>TO DO DAILY</span>
         </button>
         <button onClick={onTrainingWeek} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconTraining /><span style={{ flex:1, textAlign:"center", color:"#e8ff00" }}>TRAINING</span>
+          <IconTraining color={accent} /><span style={{ flex:1, textAlign:"center", color:accent }}>TRAINING</span>
         </button>
         <button onClick={onCardio} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
           <IconCardio /><span style={{ flex:1, textAlign:"center" }}>CARDIO</span>
@@ -2658,11 +2714,516 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
   );
 }
 
+// ── YOUTUBE FORM CUE EXTRACTOR ────────────────────────────────────────────────
+const formCueCache = new Map(); // videoId → extracted cue string
+
+async function fetchFormCues(videoId, exerciseName) {
+  if (formCueCache.has(videoId)) return formCueCache.get(videoId);
+
+  let context = "";
+
+  // 1. Try YouTube's timedtext endpoint for auto-generated captions
+  try {
+    const ttRes = await fetch(
+      `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (ttRes.ok) {
+      const ttData = await ttRes.json();
+      const transcript = (ttData.events || [])
+        .filter(e => e.segs)
+        .map(e => e.segs.map(s => s.utf8 || "").join(""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (transcript.length > 100) context = "VIDEO TRANSCRIPT:\n" + transcript.slice(0, 3000);
+    }
+  } catch {}
+
+  // 2. Fall back to video title + description via YouTube Data API
+  if (!context) {
+    try {
+      const ytRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YT_API_KEY}`
+      );
+      const ytData = await ytRes.json();
+      const s = ytData.items?.[0]?.snippet;
+      if (s) context = `VIDEO TITLE: ${s.title}\n\nDESCRIPTION:\n${(s.description || "").slice(0, 2000)}`;
+    } catch {}
+  }
+
+  if (!context) {
+    formCueCache.set(videoId, "");
+    return "";
+  }
+
+  // 3. Ask Claude to extract the 3 most important form cues
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 120,
+        system: "You extract the 3 most important form cues from fitness video content. Return ONLY 3 short, specific, actionable cues as a single paragraph. No lists, no headers, no intro. Write as if a coach is speaking them aloud.",
+        messages: [{ role: "user", content: `Exercise: ${exerciseName}\n\n${context}\n\nExtract the 3 most important form cues.` }],
+      }),
+    });
+    const data = await res.json();
+    const cues = data.content?.[0]?.text?.trim() || "";
+    formCueCache.set(videoId, cues);
+    return cues;
+  } catch {
+    formCueCache.set(videoId, "");
+    return "";
+  }
+}
+
+// ── VOICE AI COACH ────────────────────────────────────────────────────────────
+function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater }) {
+  const [vs, setVs]           = useState("idle");
+  const [armed, setArmed]     = useState(false); // mic permission granted + session started
+  const [lastUser, setLastUser] = useState("");
+  const [lastAI, setLastAI]   = useState("");
+  const [interim, setInterim] = useState("");
+  const [logConfirm, setLogConfirm] = useState(null);
+  const [error, setError] = useState(null);
+  const [micLevel, setMicLevel] = useState(0); // live input level for the meter
+  const [dbg, setDbg] = useState([]); // on-screen diagnostic log
+  const log = useCallback((m) => setDbg(d => [...d.slice(-4), m]), []);
+
+  const vsRef        = useRef("idle");
+  const messagesRef  = useRef([]);
+  const recogRef     = useRef(null);
+  const speakingRef  = useRef(false);
+  const closedRef    = useRef(false);
+  const askRef       = useRef(null);
+  const formCuesRef  = useRef({}); // exerciseName → extracted cue string
+  const micStreamRef = useRef(null); // persistent mic stream (requested once, reused)
+  const audioCtxRef  = useRef(null);
+  const analyserRef  = useRef(null);
+
+  const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
+
+  // ── Arm: auto-runs on mount. TTS was already unlocked by primeTTS() in the
+  // parent's tap handler, so here we just grab the mic + start the greeting. ───
+  const arm = useCallback(async () => {
+    setError(null);
+    try {
+      // echoCancellation keeps the coach's own voice from triggering false barge-ins.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+      micStreamRef.current = stream;
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await ctx.resume();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+      setArmed(true);
+      closedRef.current = false;
+      askRef.current?.(null, true); // greeting
+    } catch {
+      setError("Microphone blocked. In Safari, tap 'aA' in the address bar → Website Settings → Microphone → Allow, then reopen the coach.");
+    }
+  }, []);
+
+  // ── System prompt ──────────────────────────────────────────────────────────
+  const isWorkout = !companion && !!(day && day.workout && day.workout.length);
+
+  const PERSONA = `YOUR PERSONALITY — motivating but never annoying:
+• Warm, confident, and supportive — like a great trainer who genuinely believes in their client. NOT a drill sergeant. Never yell, never use harsh "push harder, no excuses" clichés, never be over-the-top hype.
+• Encourage naturally and specifically, not with empty cheerleading. A little encouragement goes a long way; don't overdo it.
+• Be calm, present, and steady — confidence, not pressure.
+
+ABSOLUTE RULES — NEVER BREAK THESE:
+• Never give medical advice, diagnose injuries, or recommend any supplements, medications, or treatments. Coaching on exercise form is fine; anything medical is not.
+• If pain seems serious or persists, tell them to stop and check with a doctor or licensed professional.
+• If asked about health, medical, or supplement topics, say: "That's outside what I can help with — best to check with your doctor or a licensed pro." Then redirect.
+• Keep EVERY response to 1-3 short, natural sentences. This is live voice — no lists, no markdown.
+• Use ${profile.name}'s name occasionally, not in every response.`;
+
+  const buildSysPrompt = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (!isWorkout) {
+      // ── Daily companion check-in (covers all aspects of health) ──
+      const cd = companionData || {};
+      const h = cd.hydration || { cups:0, goal:8 };
+      const m = cd.meals || {};
+      const mealLine = (label, info) => `${label}: ${info && info.logged ? `${info.name} (~${info.cal} cal)` : "not logged yet"}`;
+      const w = cd.workout;
+      const workoutLine = w
+        ? `Today is a training day — ${w.type}${w.focus ? " ("+w.focus+")" : ""}, ${w.count} exercises.`
+        : "Today is a rest day — no training scheduled.";
+
+      return `You are ${profile.name}'s personal health companion and coach, checking in by voice. This is a relaxed daily check-in — NOT a live workout. Be a warm, caring friend who happens to be a great coach.
+
+${PERSONA}
+
+RIGHT NOW IT IS ${(cd.timeOfDay||"day").toUpperCase()}.
+
+TODAY'S STATUS (use this; don't ask about things you already know):
+• Hydration: ${h.cups} of ${h.goal} cups logged.
+• Breakfast — ${mealLine("breakfast", m.breakfast)}.
+• Lunch — ${mealLine("lunch", m.lunch)}.
+• Dinner — ${mealLine("dinner", m.dinner)}.
+• Snacks — ${mealLine("snacks", m.snacks)}.
+• Calories so far: ${cd.calories?.total||0} of ${cd.calories?.goal||0}. Protein: ${cd.protein?.total||0} of ${cd.protein?.goal||0}g.
+• ${workoutLine}
+
+RUN A NATURAL CHECK-IN — ONE topic at a time, short turns, and WAIT for their reply before moving to the next. Flow:
+1. Greet ${profile.name} by name for the ${cd.timeOfDay||"day"} and ask how they're doing.
+2. HYDRATION: if they're below their water goal, warmly encourage a glass. If they say they drank water, log it (see WATER tag).
+3. FEELINGS: ask how they're feeling today; have a brief, caring exchange; offer a word of encouragement if they need it.
+4. MOVEMENT: ask if they've stretched. If not, suggest they tap the Stretch button for a quick routine.
+5. NUTRITION: look at what's logged above. Acknowledge meals already logged. Ask about meals not logged yet. If they tell you what they ate, LOG IT for them (see FOOD tag) and confirm warmly. Nudge gently toward their protein goal if they're low.
+6. WORKOUT: give a short, upbeat overview of today's training (or affirm the rest day). Then hand off: "When you're at the gym and ready, just tap Training and start your session — I'll coach you through every set."
+
+Move through these conversationally based on their answers — do NOT dump all topics at once. Keep each turn to 1-3 sentences.
+
+LOGGING FOOD — when ${profile.name} tells you what they ate, estimate reasonable macros and append this tag at the very END of your response, after your spoken words:
+|||FOOD:{"slot":"breakfast","name":"Oatmeal with banana","cal":320,"protein":10,"carbs":58,"fats":6}|||
+slot must be one of: breakfast, lunch, dinner, snacks. Never say or read the tag aloud.
+
+LOGGING WATER — when ${profile.name} says they drank water, append at the very end:
+|||WATER:{"cups":1}|||
+Use the number of cups/glasses they mention. Never say or read the tag aloud.
+
+Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} and asking how they're doing.`;
+    }
+
+    // ── Workout mode ──
+    const exLines = day.workout.map((ex, i) => {
+      const hist = logs[ex.exercise] || [];
+      const todayEntry = hist.find(h => h.date === today);
+      const lastEntry  = hist.length ? hist[hist.length - 1] : null;
+      const doneSets   = todayEntry?.sets?.filter(s => s.weight || s.reps).length || 0;
+      const lastPerf   = lastEntry?.sets?.length
+        ? "Last session: " + lastEntry.sets.slice(0, 3).map(s => `${s.weight||"?"}lbs×${s.reps||"?"}`).join(", ")
+        : "No history yet";
+      const cues = formCuesRef.current[ex.exercise];
+      const cueLine = cues ? `\n   FORM CUES (from coach's video): ${cues}` : "";
+      return `${i + 1}. ${ex.exercise} — target ${ex.sets} sets × ${ex.reps} reps | Done today: ${doneSets}/${ex.sets} sets | ${lastPerf}${cueLine}`;
+    }).join("\n");
+
+    return `You are ${profile.name}'s personal training coach, talking them through their workout in real time by voice.
+
+${PERSONA}
+
+YOUR JOB EACH EXERCISE:
+• BEFORE a set: give one short, useful form cue (use the coach's video cues below when available) and a word of encouragement.
+• DURING/BETWEEN sets: keep them focused, remind them of the target, and check in.
+• AFTER a set: acknowledge the effort, note progress vs. their target or last session, and set up the next one.
+• SAFETY/FORM: if ${profile.name} mentions pain, or describes something that sounds like bad form, calmly tell them to stop, reset, and fix the form cue — better to drop the weight than get hurt. (Coaching on form, NOT medical advice.)
+
+CLIENT: ${profile.name} | Goal: ${profile.goal} | Fitness Level: ${profile.fitnessLevel}
+TODAY: ${day.day} — ${day.type}${day.focus ? " | Focus: " + day.focus : ""}
+
+EXERCISES:
+${exLines}
+
+LOGGING SETS — When ${profile.name} tells you they completed a set (stating weight and reps), append this tag on a new line at the very end of your response, after your coaching words:
+|||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
+Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
+
+Start by greeting ${profile.name} warmly by name, naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
+  }, [profile, day, logs, isWorkout, PERSONA, companionData]);
+
+  // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
+  const processActions = (text) => {
+    const re = /\|\|\|(LOG|FOOD|WATER):(\{[^}]*\})\|\|\|/g;
+    let m, confirm = null;
+    while ((m = re.exec(text))) {
+      let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
+      if (m[1] === "LOG" && onLogSet) { onLogSet(obj); confirm = `✓ Logged ${obj.weight}lbs × ${obj.reps}`; }
+      else if (m[1] === "FOOD" && onLogFood) { onLogFood(obj); confirm = `✓ Logged ${obj.name || "food"}`; }
+      else if (m[1] === "WATER" && onAddWater) { onAddWater(obj.cups || obj.add || 1); confirm = `✓ Water logged`; }
+    }
+    return confirm;
+  };
+  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER):\{[^}]*\}\|\|\|/g, "").trim();
+
+  // ── TTS ───────────────────────────────────────────────────────────────────
+  const speak = useCallback((raw, onDone) => {
+    const text = cleanSpeak(raw);
+    if (!text || closedRef.current) { onDone?.(); return; }
+    speakingRef.current = true;
+    setState("speaking");
+    window.speechSynthesis.cancel();
+
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.rate = 1.05;
+    utt.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const pick = voices.find(v => v.lang === "en-US" && v.name.includes("Samantha"))
+              || voices.find(v => v.lang === "en-US" && v.localService)
+              || voices.find(v => v.lang.startsWith("en"));
+    if (pick) utt.voice = pick;
+
+    // iOS Safari frequently never fires onend. Guard with a poll + a hard cap so
+    // the listen loop always resumes. `finish` runs exactly once.
+    let done = false;
+    let pollId = null, capId = null, bargeRaf = null;
+    const finish = (barged) => {
+      if (done) return;
+      done = true;
+      clearInterval(pollId);
+      clearTimeout(capId);
+      if (bargeRaf) cancelAnimationFrame(bargeRaf);
+      window.speechSynthesis.cancel(); // stop talking immediately (esp. on barge-in)
+      speakingRef.current = false;
+      onDone?.(barged === true);
+    };
+    utt.onend = finish;
+    utt.onerror = finish;
+
+    window.speechSynthesis.speak(utt);
+
+    // Poll: once it has actually started and then stops speaking, we're done.
+    let started = false;
+    pollId = setInterval(() => {
+      if (closedRef.current) { finish(); return; }
+      if (window.speechSynthesis.speaking) started = true;
+      else if (started) finish();
+    }, 250);
+    // Hard cap based on word count (~2.8 words/sec) + buffer.
+    const secs = Math.min(30, Math.max(4, (text.split(/\s+/).length / 2.8) + 2));
+    capId = setTimeout(finish, secs * 1000);
+
+    // ── BARGE-IN: if the user starts talking over the coach, stop and listen ──
+    // Grace period so the coach's own audio (echo) doesn't trigger it instantly.
+    const an = analyserRef.current;
+    if (an) {
+      const buf = new Uint8Array(an.frequencyBinCount);
+      let loud = 0;
+      const graceUntil = performance.now() + 700;
+      const watch = () => {
+        if (done || closedRef.current) return;
+        an.getByteFrequencyData(buf);
+        const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setMicLevel(vol);
+        if (performance.now() > graceUntil && vol > 32) {
+          if (++loud >= 6) { log("barge-in → listening"); finish(true); return; } // ~100ms of speech
+        } else { loud = 0; }
+        bargeRaf = requestAnimationFrame(watch);
+      };
+      bargeRaf = requestAnimationFrame(watch);
+    }
+  }, [log]);
+
+  // ── Whisper-based recorder (works on iOS + Android + desktop) ────────────────
+  // Reuses the persistent mic stream + analyser created in arm() — no re-prompt.
+  const startListening = useCallback(() => {
+    if (closedRef.current || speakingRef.current) { log("listen skipped (busy)"); return; }
+    const stream = micStreamRef.current;
+    const analyser = analyserRef.current;
+    if (!stream || !analyser) { log("no stream/analyser"); return; }
+    setState("listening");
+    setInterim("🎙 Listening…");
+
+    const mimeType = ["audio/webm", "audio/mp4", "audio/ogg"].find(m => MediaRecorder.isTypeSupported(m)) || "";
+    log("recording (" + (mimeType || "default") + ")");
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+    } catch (e) {
+      log("recorder fail: " + e.message);
+      if (!closedRef.current) setTimeout(startListening, 500);
+      return;
+    }
+    recogRef.current = { stop: () => { try { recorder.stop(); } catch {} } };
+
+    const chunks = [];
+    let silenceTimer = null;
+    let hasAudio = false;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    const checkSilence = () => {
+      if (closedRef.current) { try { recorder.stop(); } catch {} return; }
+      analyser.getByteFrequencyData(data);
+      const vol = data.reduce((a, b) => a + b, 0) / data.length;
+      if (vol > 8) {
+        hasAudio = true;
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+        setInterim("🎙 Hearing you…");
+      } else if (hasAudio && !silenceTimer) {
+        // 1.5s silence after speech → stop and transcribe
+        silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 1500);
+      }
+      if (recorder.state === "recording") requestAnimationFrame(checkSilence);
+    };
+
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.onstop = async () => {
+      clearTimeout(silenceTimer);
+      const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+      log("stopped: " + blob.size + " bytes, audio=" + hasAudio);
+      if (!hasAudio || closedRef.current) {
+        if (!closedRef.current && !speakingRef.current) setTimeout(startListening, 300);
+        return;
+      }
+      setState("processing");
+      setInterim("");
+      const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const formData = new FormData();
+      formData.append("file", blob, `audio.${ext}`);
+      formData.append("model", "whisper-1");
+      formData.append("language", "en");
+      log("sending to Whisper…");
+      try {
+        const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${OPENAI_KEY}` },
+          body: formData,
+        });
+        if (!res.ok) { log("Whisper HTTP " + res.status); }
+        const data = await res.json();
+        const text = data.text?.trim();
+        log(text ? ("heard: " + text) : ("Whisper empty" + (data.error ? ": " + data.error.message : "")));
+        if (text && !closedRef.current) {
+          setLastUser(text);
+          askRef.current?.(text, false);
+        } else if (!closedRef.current) {
+          setTimeout(startListening, 300);
+        }
+      } catch (e) {
+        log("Whisper error: " + e.message);
+        if (!closedRef.current) setTimeout(startListening, 500);
+      }
+    };
+
+    recorder.start();
+    requestAnimationFrame(checkSilence);
+  }, [log]);
+
+  // ── Claude API ─────────────────────────────────────────────────────────────
+  const askClaude = useCallback(async (userText, isInit = false) => {
+    if (closedRef.current) return;
+    setState("processing");
+    if (!isInit) setLastUser(userText);
+
+    const msgs = isInit
+      ? [{ role: "user", content: "Begin the session." }]
+      : [...messagesRef.current, { role: "user", content: userText }];
+    if (!isInit) messagesRef.current = msgs;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 220,
+          system: buildSysPrompt(),
+          messages: msgs,
+        }),
+      });
+      if (closedRef.current) return;
+      const data = await res.json();
+      const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+
+      const confirm = processActions(aiText);
+      if (confirm) {
+        setLogConfirm(confirm);
+        setTimeout(() => setLogConfirm(null), 3500);
+      }
+
+      setLastAI(cleanSpeak(aiText));
+      messagesRef.current = isInit
+        ? [{ role: "user", content: "Begin the session." }, { role: "assistant", content: aiText }]
+        : [...msgs, { role: "assistant", content: aiText }];
+
+      log("coach replied → speaking");
+      speak(aiText, () => { log("done speaking → listen"); if (!closedRef.current) startListening(); });
+    } catch (e) {
+      if (closedRef.current) return;
+      log("Claude error: " + e.message);
+      const fallback = "Trouble connecting — keep going, I'm here.";
+      setLastAI(fallback);
+      speak(fallback, () => { if (!closedRef.current) startListening(); });
+    }
+  }, [buildSysPrompt, speak, startListening, onLogSet, log]);
+
+  // Keep stable ref so startListening/onresult can call askClaude without stale closure
+  useEffect(() => { askRef.current = askClaude; }, [askClaude]);
+
+  // ── Pre-fetch form cues for all pinned videos ──────────────────────────────
+  useEffect(() => {
+    if (!videoOverrides || !day || !day.workout) return;
+    day.workout.forEach((ex) => {
+      const videoId = videoOverrides[ex.exercise];
+      if (!videoId) return;
+      fetchFormCues(videoId, ex.exercise).then(cues => {
+        if (cues) formCuesRef.current[ex.exercise] = cues;
+      });
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Mount/unmount: auto-start coaching, tear down on close ──────────────────
+  // The parent already called primeTTS() inside the tap, so we can arm immediately
+  // — no second "Start Coaching" screen needed.
+  useEffect(() => {
+    closedRef.current = false;
+    window.speechSynthesis.getVoices();
+    arm();
+    return () => {
+      closedRef.current = true;
+      try { recogRef.current?.stop(); } catch {}
+      window.speechSynthesis.cancel();
+      try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+      try { audioCtxRef.current?.close(); } catch {}
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── UI ───────────────────────────────────────────────────────────────────────
+  // No screen overlay anymore. The only visible indicator is a small animated bar
+  // rendered INSIDE the Voice Coach card (see Home). Here we render only the
+  // mic-error message; otherwise nothing.
+  if (error) return (
+    <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"#0e0e16", borderTop:"2px solid #ff3d3d", padding:"16px 18px 28px", textAlign:"center" }}>
+      <div style={{ color:"#ff7070", fontSize:13, marginBottom:12, lineHeight:1.5 }}>{error}</div>
+      <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+        <button onClick={arm} style={{ background:APP_PINK, border:"none", borderRadius:6, color:"#000", padding:"8px 18px", cursor:"pointer", fontSize:13, fontWeight:700 }}>Try Again</button>
+        <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#c8c8e0", padding:"8px 16px", cursor:"pointer", fontSize:13 }}>Close</button>
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
 // ── SESSION ───────────────────────────────────────────────────────────────────
 // Shows the day's exercise summary + a date picker + START button.
 // After START, reveals set-by-set logging for each exercise.
 function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo }) {
+  const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+
+  const handleAILog = useCallback(({ ex, weight, reps }) => {
+    const exercise = (day.workout || [])[ex];
+    if (!exercise) return;
+    const today = new Date().toISOString().slice(0, 10);
+    onLogExercise(exercise.exercise, {
+      date: today,
+      sets: [{ weight: String(weight), reps: String(reps) }],
+      weight: String(weight),
+      reps: String(reps),
+    });
+  }, [day, onLogExercise]);
   const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0,10));
   const workout = day.workout || [];
   const weekdayIdx = DAY_NAMES.indexOf(day.day);
@@ -2705,7 +3266,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
 
         <div style={{ padding:"8px 18px 0" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:27, letterSpacing:1 }}>{day.day}</div>
-          <div style={{ color:"#e8ff00", fontSize:13.5, marginTop:2 }}>{day.type}</div>
+          <div style={{ color:sessionAccent, fontSize:13.5, marginTop:2 }}>{day.type}</div>
           <div style={{ color:"#c8c8e0", fontSize:12.5, marginTop:2 }}>{day.focus}</div>
         </div>
 
@@ -2723,7 +3284,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
           {workout.map((ex,i) => (
             <div key={i} style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ minWidth:0 }}>
-                <div style={{ fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:22 }}>{i+1}. {ex.exercise}</div>
+                <div style={{ fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:22, color:sessionAccent }}>{i+1}. {ex.exercise}</div>
                 <div style={{ color:"#d6d6ec", fontSize:14, marginTop:2, fontFamily:"'Oswald', sans-serif" }}>Target {ex.sets} sets &times; {ex.reps} reps</div>
               </div>
             </div>
@@ -2759,7 +3320,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
         )}
 
         <div style={{ padding:"0 20px" }}>
-          <button onClick={() => setStarted(true)} style={{ width:"100%", background:"#e8ff00", color:"#000", border:"none", borderRadius:12, padding:"16px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:3, fontSize:23 }}>
+          <button onClick={() => setStarted(true)} style={{ width:"100%", background:sessionAccent, color:"#000", border:"none", borderRadius:12, padding:"16px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:3, fontSize:23 }}>
             &#9654; START WORKOUT
           </button>
         </div>
@@ -2775,12 +3336,17 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 20px 7px", borderBottom:"1px solid #2a2a3d", position:"sticky", top:0, background:"#0a0a0f", zIndex:10 }}>
         <div>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>{day.day}</div>
-          <div style={{ color:"#e8ff00", fontSize:12 }}>{day.type}</div>
+          <div style={{ color:sessionAccent, fontSize:12 }}>{day.type}</div>
         </div>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={() => setVoiceActive(v => { if (!v) primeTTS(); return !v; })} style={{ background: voiceActive ? APP_PINK : "transparent", border:`1px solid ${APP_PINK}`, borderRadius:8, color: voiceActive ? "#000" : APP_PINK, padding:"6px 11px", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans'", fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
+            🎙 {voiceActive ? "Coach On" : "AI Coach"}
+          </button>
+          <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
+        </div>
       </div>
 
-      <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
+      <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px", paddingBottom: voiceActive ? 90 : 14 }}>
         {workout.map((ex,i) => (
           <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
         ))}
@@ -2804,17 +3370,28 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
             <div style={S.sectionTitle}>STRETCH</div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {stretchItems.map((it,i) => (
-                <ExtraRow key={i} icon={"\uD83E\uDDD8"} iconColor="#e8ff00" label={it.label}
+                <ExtraRow key={i} icon={"\uD83E\uDDD8"} iconColor={sessionAccent} label={it.label}
                   state={stretchState[it.id]||{}} onDone={(v)=>setStretch(it.id,"done",v)} onMins={(v)=>setStretch(it.id,"mins",v)} />
               ))}
             </div>
           </div>
         )}
 
-        <button onClick={finishAndSave} style={{ marginTop:4, background:"#3ddc84", color:"#000", border:"none", borderRadius:12, padding:"14px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
+        <button onClick={finishAndSave} style={{ marginTop:4, background:sessionAccent, color:"#000", border:"none", borderRadius:12, padding:"14px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
           &#10003; FINISH &amp; SAVE WORKOUT
         </button>
       </div>
+
+      {voiceActive && (
+        <VoiceCoach
+          profile={profile}
+          day={day}
+          logs={logs}
+          onLogSet={handleAILog}
+          onClose={() => setVoiceActive(false)}
+          videoOverrides={videoOverrides}
+        />
+      )}
     </div>
   );
 }
@@ -2838,6 +3415,7 @@ function ExtraRow({ icon, iconColor, label, state, onDone, onMins }) {
 
 // One exercise with N set rows. Auto-fills from last session; user adjusts.
 function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo }) {
+  const loggerAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   const numSets = Math.max(1, parseInt(ex.sets) || 3);
   const last = history.length ? history[history.length-1] : null;
   const lastSets = last && last.sets ? last.sets : null;
@@ -2925,10 +3503,10 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
           <div style={{ fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:23 }}>{index+1}. {ex.exercise}</div>
           <div style={{ color:"#d6d6ec", fontSize:14, marginTop:2, fontFamily:"'Oswald', sans-serif" }}>Target {ex.sets} &times; {ex.reps} &middot; Tempo {ex.tempo} &middot; Rest {ex.rest}</div>
         </div>
-        {pr > 0 && <div style={{ color:"#e8ff00", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:12.5, flexShrink:0 }}>PR {pr}</div>}
+        {pr > 0 && <div style={{ color:loggerAccent, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:12.5, flexShrink:0 }}>PR {pr}</div>}
       </div>
 
-      {ex.coachCue && <CoachCue text={ex.coachCue} />}
+      {ex.coachCue && <CoachCue text={ex.coachCue} accent={loggerAccent} />}
       <VideoPanel exName={ex.exercise} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
 
       {/* Set rows */}
@@ -2941,24 +3519,24 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
         </div>
         {rows.map((r,i) => (
           <div key={i} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:7 }}>
-            <div style={{ width:38, textAlign:"center", fontFamily:"'Bebas Neue'", fontSize:18, color:"#e8ff00" }}>{i+1}</div>
+            <div style={{ width:38, textAlign:"center", fontFamily:"'Bebas Neue'", fontSize:18, color:loggerAccent }}>{i+1}</div>
             <input style={inputStyle} type="number" inputMode="decimal" placeholder="0" value={r.weight} onChange={e=>setRow(i,"weight",e.target.value)} />
             <input style={inputStyle} type="number" inputMode="numeric" placeholder={String(ex.reps).split("-")[0]} value={r.reps} onChange={e=>setRow(i,"reps",e.target.value)} />
-            <button onClick={()=>removeSet(i)} disabled={rows.length<=1} title="Remove set" style={{ width:30, height:30, flexShrink:0, borderRadius:8, background:"transparent", border:"1px solid #2a2a3d", color: rows.length<=1 ? "#3a3a4d" : "#ff7070", fontSize:16, cursor: rows.length<=1?"not-allowed":"pointer", lineHeight:1 }}>&times;</button>
+            <button onClick={()=>removeSet(i)} disabled={rows.length<=1} title="Remove set" style={{ width:44, height:44, flexShrink:0, borderRadius:8, background:"transparent", border:"1px solid #2a2a3d", color: rows.length<=1 ? "#3a3a4d" : "#ff2222", fontSize:28, cursor: rows.length<=1?"not-allowed":"pointer", lineHeight:1 }}>&times;</button>
           </div>
         ))}
-        <button onClick={addSet} style={{ width:"100%", marginTop:2, background:"transparent", border:"1px dashed #3a3a4d", color:"#e8ff00", borderRadius:8, padding:"8px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:13, letterSpacing:0.5 }}>
+        <button onClick={addSet} style={{ width:"100%", marginTop:2, background:"transparent", border:"1px dashed #3a3a4d", color:loggerAccent, borderRadius:8, padding:"8px", cursor:"pointer", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:13, letterSpacing:0.5 }}>
           + Add Set ({rows.length})
         </button>
       </div>
 
       {/* Rest timer */}
-      <button onClick={resting ? stopRest : startRest} style={{ width:"100%", marginTop:7, background: resting ? "#ff3d3d" : "#2a2a3d", color: resting ? "#fff" : "#e8ff00", border:"none", borderRadius:8, padding:"10px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:16, transition:"all 0.18s" }}>
+      <button onClick={resting ? stopRest : startRest} style={{ width:"100%", marginTop:7, background: resting ? "#ff3d3d" : "#2a2a3d", color: resting ? "#fff" : loggerAccent, border:"none", borderRadius:8, padding:"10px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:16, transition:"all 0.18s" }}>
         {resting ? ("RESTING \u00b7 " + restLeft + "s  (TAP TO STOP)") : ("\u23F1 REST " + restSecs + "s")}
       </button>
 
       {/* Auto-save indicator */}
-      <div style={{ textAlign:"center", marginTop:7, fontSize:11.5, color: savedTick ? "#3ddc84" : "#7070a0", fontFamily:"'Oswald', sans-serif", letterSpacing:0.5, transition:"color 0.2s", minHeight:14 }}>
+      <div style={{ textAlign:"center", marginTop:7, fontSize:11.5, color: savedTick ? "#3ddc84" : "#9898b8", fontFamily:"'Oswald', sans-serif", letterSpacing:0.5, transition:"color 0.2s", minHeight:14 }}>
         {savedTick ? "\u2713 Saved automatically" : "Saves automatically as you log"}
       </div>
     </div>
@@ -3216,7 +3794,7 @@ function BodyProgress({ entries, onAdd, onDelete }) {
     <div>
       {/* Fullscreen photo viewer */}
       {viewer && (
-        <div onClick={()=>setViewer(null)} style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+        <div onClick={()=>setViewer(null)} style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:20, maxWidth:480, margin:"0 auto" }}>
           <img src={viewer.src} alt="progress" style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:10 }} />
         </div>
       )}
@@ -3317,7 +3895,7 @@ function BodyProgress({ entries, onAdd, onDelete }) {
                   {ANGLES.map(a => e.photos[a.id] ? (
                     <div key={a.id} onClick={()=>setViewer({ src:e.photos[a.id] })} style={{ position:"relative", aspectRatio:"3/4", borderRadius:8, overflow:"hidden", cursor:"pointer" }}>
                       <img src={e.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                      <span style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", color:"#fff", fontSize:10, textAlign:"center", padding:"2px 0", letterSpacing:1 }}>{a.label.toUpperCase()}</span>
+                      <span style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", color:"#fff", fontSize:12, textAlign:"center", padding:"2px 0", letterSpacing:1 }}>{a.label.toUpperCase()}</span>
                     </div>
                   ) : (
                     <div key={a.id} style={{ aspectRatio:"3/4", borderRadius:8, background:"#0e0e16", border:"1px solid #2a2a3d", display:"flex", alignItems:"center", justifyContent:"center", color:"#3a3a52", fontSize:11.5 }}>{a.label}</div>
@@ -3362,7 +3940,7 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
   // ── SVG Line Chart ──
   const LineChart = ({ points, color="#e8ff00", label="", unit="", goalLine=null }) => {
     if (!points || points.length < 2) return (
-      <div style={{ padding:20, textAlign:"center", color:"#7070a0", fontSize:13 }}>
+      <div style={{ padding:20, textAlign:"center", color:"#9898b8", fontSize:13 }}>
         {points && points.length === 1 ? `${points[0].v} ${unit} — log more to see trend` : "No data for this period"}
       </div>
     );
@@ -3387,13 +3965,13 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto", display:"block" }}>
           {[0,0.5,1].map((t,i) => {
             const yv = pT+ph-t*ph, val = Math.round((minV+t*range)*10)/10;
-            return <g key={i}><line x1={pL} y1={yv} x2={W-pR} y2={yv} stroke="#2a2a3d" strokeWidth="1"/><text x={pL-4} y={yv+4} textAnchor="end" fontSize="9" fill="#7070a0" fontFamily="Oswald">{val}</text></g>;
+            return <g key={i}><line x1={pL} y1={yv} x2={W-pR} y2={yv} stroke="#2a2a3d" strokeWidth="1"/><text x={pL-4} y={yv+4} textAnchor="end" fontSize="9" fill="#9898b8" fontFamily="Oswald">{val}</text></g>;
           })}
           {goalLine && <line x1={pL} y1={y(goalLine)} x2={W-pR} y2={y(goalLine)} stroke="#ff7070" strokeWidth="1" strokeDasharray="4,3"/>}
           <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
           {points.map((p,i) => <circle key={i} cx={x(i)} cy={y(p.v)} r="3.5" fill={color}/>)}
           {[0, Math.floor(points.length/2), points.length-1].map(i => (
-            <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="9" fill="#7070a0" fontFamily="Oswald">{fmtDate(points[i].d)}</text>
+            <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="9" fill="#9898b8" fontFamily="Oswald">{fmtDate(points[i].d)}</text>
           ))}
         </svg>
       </div>
@@ -3402,7 +3980,7 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
 
   // ── SVG Bar Chart ──
   const BarChart = ({ bars, color="#3d8eff", label="", unit="" }) => {
-    if (!bars || bars.length === 0) return <div style={{ padding:20, textAlign:"center", color:"#7070a0", fontSize:13 }}>No data for this period</div>;
+    if (!bars || bars.length === 0) return <div style={{ padding:20, textAlign:"center", color:"#9898b8", fontSize:13 }}>No data for this period</div>;
     const W=320,H=140,pL=38,pR=12,pT=14,pB=26;
     const maxV = Math.max(...bars.map(b=>b.v),1);
     const pw = W-pL-pR, ph = H-pT-pB;
@@ -3414,13 +3992,13 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto", display:"block" }}>
           {[0,0.5,1].map((t,i) => {
             const yv = pT+ph-t*ph, val = Math.round(maxV*t);
-            return <g key={i}><line x1={pL} y1={yv} x2={W-pR} y2={yv} stroke="#2a2a3d" strokeWidth="1"/><text x={pL-4} y={yv+4} textAnchor="end" fontSize="9" fill="#7070a0" fontFamily="Oswald">{val}</text></g>;
+            return <g key={i}><line x1={pL} y1={yv} x2={W-pR} y2={yv} stroke="#2a2a3d" strokeWidth="1"/><text x={pL-4} y={yv+4} textAnchor="end" fontSize="9" fill="#9898b8" fontFamily="Oswald">{val}</text></g>;
           })}
           {bars.map((b,i) => {
             const bh = (b.v/maxV)*ph;
             const bx = pL + i*gap + gap/2 - bw/2;
             const by = pT+ph-bh;
-            return <g key={i}><rect x={bx} y={by} width={bw} height={bh} fill={color} rx="2"/><text x={bx+bw/2} y={H-8} textAnchor="middle" fontSize="8" fill="#7070a0" fontFamily="Oswald">{fmtDate(b.d)}</text></g>;
+            return <g key={i}><rect x={bx} y={by} width={bw} height={bh} fill={color} rx="2"/><text x={bx+bw/2} y={H-8} textAnchor="middle" fontSize="8" fill="#9898b8" fontFamily="Oswald">{fmtDate(b.d)}</text></g>;
           })}
         </svg>
       </div>
@@ -3572,7 +4150,7 @@ function CardioPlanner({ plan, onSave, onBack }) {
           })}
         </div>
         {dayTypes.length === 0 && (
-          <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no cardio assigned.</div>
+          <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no cardio assigned.</div>
         )}
       </div>
     </div>
@@ -3915,7 +4493,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
             <img src={item.snippet.thumbnails.default.url} alt="" style={{ width:80, height:60, borderRadius:6, objectFit:"cover", flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"#f0f0f8", lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{item.snippet.title}</div>
-              <div style={{ fontSize:11, color:"#7070a0", marginTop:3 }}>{item.snippet.channelTitle}</div>
+              <div style={{ fontSize:11, color:"#9898b8", marginTop:3 }}>{item.snippet.channelTitle}</div>
             </div>
             <span style={{ color:"#3d8eff", fontSize:11, fontWeight:700, flexShrink:0 }}>▶</span>
           </button>
@@ -4010,8 +4588,11 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
               <StretchCard key={t.id} t={t} on={contents.includes(t.id)} toggle={togglePose} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
             ))}
           </div>
-          <div style={{ color:"#7070a0", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
-          <button onClick={()=>setEditRoutine(null)} style={{ width:"100%", marginTop:16, background:"#3d8eff", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
+          <div style={{ color:"#9898b8", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
+          <div style={{ display:"flex", gap:10, marginTop:16 }}>
+            <button onClick={()=>{ onSaveRoutines({ ...(routines||{}), [editRoutine]: [...(DEFAULT_ROUTINES[editRoutine]||[])] }); }} style={{ flex:1, background:"transparent", color:"#ff7070", border:"2px solid #ff7070", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>RESET</button>
+            <button onClick={()=>setEditRoutine(null)} style={{ flex:2, background:"#3d8eff", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
+          </div>
         </div>
       </div>
     );
@@ -4073,7 +4654,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
           ))}
         </div>
         {dayTypes.length === 0 && (
-          <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no stretches assigned.</div>
+          <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", marginTop:14 }}>Rest day &mdash; no stretches assigned.</div>
         )}
       </div>
     </div>
@@ -4602,14 +5183,14 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
                 <div key={e.id} style={{ display:"flex", alignItems:"center", gap:10, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 12px" }}>
                   <span style={{ color:accent, fontSize:13, flexShrink:0 }}>●</span>
                   <span style={{ fontSize:14, fontWeight:600, flex:1 }}>{e.name}</span>
-                  <span style={{ color:"#7070a0", fontSize:12, flexShrink:0 }}>{(e.timing||[]).join(" & ")} {e.dosage ? "· "+e.dosage : ""}</span>
+                  <span style={{ color:"#9898b8", fontSize:12, flexShrink:0 }}>{(e.timing||[]).join(" & ")} {e.dosage ? "· "+e.dosage : ""}</span>
                 </div>
               ))}
             </div>
           </>
         )}
         {todayEntries.length === 0 && entries.length > 0 && (
-          <div style={{ color:"#7070a0", fontSize:13, textAlign:"center", padding:"12px 0 18px" }}>Nothing scheduled for {DAY_NAMES[sel]}.</div>
+          <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", padding:"12px 0 18px" }}>Nothing scheduled for {DAY_NAMES[sel]}.</div>
         )}
 
         {/* Full list */}
@@ -4628,7 +5209,7 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
                   </div>
                   <div style={{ display:"flex", gap:4, marginTop:8 }}>
                     {DAY_AB.map((ab,di) => (
-                      <span key={di} style={{ flex:1, textAlign:"center", fontSize:11, padding:"3px 0", borderRadius:5, background: (e.days||[]).includes(di) ? accent : "#2a2a3d", color: (e.days||[]).includes(di) ? "#000" : "#7070a0", fontWeight:600 }}>{ab}</span>
+                      <span key={di} style={{ flex:1, textAlign:"center", fontSize:11, padding:"3px 0", borderRadius:5, background: (e.days||[]).includes(di) ? accent : "#2a2a3d", color: (e.days||[]).includes(di) ? "#000" : "#9898b8", fontWeight:600 }}>{ab}</span>
                     ))}
                   </div>
                   <button onClick={()=>setAdding(catalog.find(c=>c.id===e.id) || { id:e.id, name:e.name })} style={{ marginTop:10, background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:accent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
@@ -4709,7 +5290,7 @@ function RegimenConfig({ item, kind, caution, existing, onConfirm, onCancel }) {
           ))}
         </div>
 
-        <button onClick={()=>onConfirm({ id:item.id, name:item.name, dosage, timing, days })} disabled={!timing.length || !days.length} style={{ width:"100%", background: (timing.length && days.length) ? accent : "#2a2a3d", color: (timing.length && days.length) ? "#000" : "#7070a0", border:"none", borderRadius:12, padding:"16px", cursor:(timing.length&&days.length)?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
+        <button onClick={()=>onConfirm({ id:item.id, name:item.name, dosage, timing, days })} disabled={!timing.length || !days.length} style={{ width:"100%", background: (timing.length && days.length) ? accent : "#2a2a3d", color: (timing.length && days.length) ? "#000" : "#9898b8", border:"none", borderRadius:12, padding:"16px", cursor:(timing.length&&days.length)?"pointer":"not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>
           {existing ? "UPDATE" : "ADD TO MY LIST"}
         </button>
       </div>
@@ -4849,9 +5430,9 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
                   <span style={{ fontSize:16, flexShrink:0 }}>{slot.emoji}</span>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13.5, color:"#f0f0f8", fontWeight:600, textDecoration: checked[ck] ? "line-through" : "none", opacity: checked[ck] ? 0.6 : 1 }}>{slot.label}</div>
-                    {display && <div style={{ fontSize:12, color: isLogged ? "#3ddc84" : "#7070a0", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{display.food}{display.cal ? " · "+display.cal+" cal" : ""}</div>}
+                    {display && <div style={{ fontSize:12, color: isLogged ? "#3ddc84" : "#9898b8", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{display.food}{display.cal ? " · "+display.cal+" cal" : ""}</div>}
                   </div>
-                  {isLogged && <span style={{ fontSize:10, color:"#3ddc84", fontWeight:700, flexShrink:0 }}>✓ LOGGED</span>}
+                  {isLogged && <span style={{ fontSize:12, color:"#3ddc84", fontWeight:700, flexShrink:0 }}>✓ LOGGED</span>}
                 </div>
               );
             })}
@@ -4931,7 +5512,7 @@ function MacroAI({ slotLabel, onResult }) {
 
       {/* Full-screen overlay */}
       {imgSrc && (
-        <div style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column" }}>
+        <div style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
           {/* X button */}
           <button onClick={reset} style={{ position:"absolute", top:16, right:16, zIndex:310, background:"rgba(0,0,0,0.6)", border:"1px solid #444", borderRadius:"50%", width:36, height:36, color:"#fff", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
 
@@ -4956,11 +5537,11 @@ function MacroAI({ slotLabel, onResult }) {
                   {[["cal",result.cal,"#e8ff00"],["P",result.protein+"g","#3d8eff"],["C",result.carbs+"g","#9b5de5"],["F",result.fats+"g","#3ddc84"]].map(([k,v,col])=>(
                     <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
                       <div style={{ color:col, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:20 }}>{v}</div>
-                      <div style={{ color:"#7070a0", fontSize:11 }}>{k}</div>
+                      <div style={{ color:"#9898b8", fontSize:11 }}>{k}</div>
                     </div>
                   ))}
                 </div>
-                <div style={{ color:"#7070a0", fontSize:11, textAlign:"center", marginBottom:12 }}>AI estimate — tap Edit to adjust</div>
+                <div style={{ color:"#9898b8", fontSize:11, textAlign:"center", marginBottom:12 }}>AI estimate — tap Edit to adjust</div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
                   <button onClick={()=>{ onResult({...result, _openEdit:true}); reset(); }} style={{ flex:1, background:"transparent", border:"2px solid #e8ff00", borderRadius:20, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Edit</button>
@@ -5011,6 +5592,28 @@ async function lookupFoodMacros(name) {
 }
 
 // One food line: name + macro inputs, with debounced auto-fill of blank macro fields.
+async function searchUSDA(query) {
+  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation,SR%20Legacy,Branded`;
+  const res = await fetch(url);
+  if (res.status === 429 || res.status === 403) throw new Error("rate_limit");
+  if (!res.ok) throw new Error("USDA API error");
+  const data = await res.json();
+  return (data.foods || []).map(f => ({
+    fdcId: f.fdcId,
+    description: f.description,
+    brandOwner: f.brandOwner || null,
+    cal:     Math.round(f.foodNutrients.find(n=>n.nutrientId===1008)?.value || 0),
+    protein: Math.round((f.foodNutrients.find(n=>n.nutrientId===1003)?.value || 0) * 10) / 10,
+    carbs:   Math.round((f.foodNutrients.find(n=>n.nutrientId===1005)?.value || 0) * 10) / 10,
+    fats:    Math.round((f.foodNutrients.find(n=>n.nutrientId===1004)?.value || 0) * 10) / 10,
+    measures: [
+      ...(f.foodMeasures||[]).slice(0,8).map(m=>({ label:m.disseminationText, grams:m.gramWeight })),
+      { label:"1 oz (28 g)", grams:28 },
+      { label:"100 g", grams:100 },
+    ]
+  }));
+}
+
 function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
   const fileRef = useRef();
@@ -5019,10 +5622,20 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [scanResult, setScanResult] = useState(null);
   const [scanError, setScanError] = useState(null);
 
+  // USDA search states
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const [pickedFood, setPickedFood] = useState(null);
+  const [pickedMeasureIdx, setPickedMeasureIdx] = useState(0);
+  const [pickedQty, setPickedQty] = useState("1");
+  const searchTimer = useRef(null);
+
   const setField = (i, field, val) => {
     setLocalItems(prev => { const a=[...prev]; a[i]={...a[i],[field]:val}; return a; });
   };
-  const addBlank = () => setLocalItems(prev => [...prev, {}]);
   const removeLocal = (i) => setLocalItems(prev => prev.filter((_,idx)=>idx!==i).length ? prev.filter((_,idx)=>idx!==i) : []);
 
   const handlePhoto = async (file) => {
@@ -5051,8 +5664,51 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
 
   const done = () => { onSave(localItems.filter(x=>x.food||x.cal)); };
 
+  const onSearchChange = (val) => {
+    setSearchQuery(val); setSearchResults([]); setSearchError(null);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (val.trim().length < 2) return;
+    searchTimer.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const results = await searchUSDA(val.trim());
+        setSearchResults(results);
+        if (!results.length) setSearchError("No results — try a different spelling.");
+      } catch(e) {
+        setSearchError(e.message === "rate_limit"
+          ? "Search limit reached (DEMO_KEY). Add a free USDA key to continue."
+          : "Search failed — check your connection.");
+      }
+      setSearchLoading(false);
+    }, 450);
+  };
+
+  const pickFood = (food) => { setPickedFood(food); setPickedMeasureIdx(0); setPickedQty("1"); setSearchResults([]); };
+
+  const macrosForServing = () => {
+    if (!pickedFood) return { cal:0, protein:0, carbs:0, fats:0 };
+    const measure = pickedFood.measures[pickedMeasureIdx] || pickedFood.measures[0];
+    const qty = parseFloat(pickedQty) || 1;
+    const factor = (measure.grams * qty) / 100;
+    return {
+      cal:     Math.round(pickedFood.cal * factor),
+      protein: Math.round(pickedFood.protein * factor * 10) / 10,
+      carbs:   Math.round(pickedFood.carbs * factor * 10) / 10,
+      fats:    Math.round(pickedFood.fats * factor * 10) / 10,
+    };
+  };
+
+  const confirmServing = () => {
+    const m = macrosForServing();
+    const measure = pickedFood.measures[pickedMeasureIdx] || pickedFood.measures[0];
+    const qty = parseFloat(pickedQty) || 1;
+    const servingLabel = qty === 1 ? measure.label : `${qty} × ${measure.label}`;
+    setLocalItems(prev => [...prev, { food:`${pickedFood.description} (${servingLabel})`, cal:String(m.cal), protein:String(m.protein), carbs:String(m.carbs), fats:String(m.fats), logged:false }]);
+    setPickedFood(null); setSearchQuery(""); setSearchResults([]);
+  };
+
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
       <style>{GLOBAL_CSS}</style>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", borderBottom:"1px solid #1a1a26" }}>
@@ -5067,19 +5723,111 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
       <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
 
         {/* Two main options */}
-        <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ display:"flex", gap:10, marginBottom:16 }}>
           <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"rgba(61,142,255,0.12)", border:"2px solid #3d8eff", borderRadius:14, color:"#3d8eff", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
             <span style={{ fontSize:28 }}>📷</span>
             <span>Macro AI</span>
-            <span style={{ fontSize:11, fontWeight:400, color:"#7070a0" }}>Snap a photo</span>
+            <span style={{ fontSize:11, fontWeight:400, color:"#9898b8" }}>Snap a photo</span>
           </button>
-          <button onClick={addBlank} style={{ flex:1, background:"rgba(232,255,0,0.07)", border:"2px solid #e8ff00", borderRadius:14, color:"#e8ff00", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:28 }}>✏️</span>
-            <span>Type It</span>
-            <span style={{ fontSize:11, fontWeight:400, color:"#7070a0" }}>Enter food name</span>
+          <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={{ flex:1, background: searchActive ? "rgba(232,255,0,0.15)" : "rgba(232,255,0,0.07)", border:"2px solid #e8ff00", borderRadius:14, color:"#e8ff00", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+            <span style={{ fontSize:28 }}>🔍</span>
+            <span>Search Food</span>
+            <span style={{ fontSize:11, fontWeight:400, color:"#9898b8" }}>USDA database</span>
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />
+
+        {/* USDA Search panel */}
+        {searchActive && !imgSrc && (
+          <div style={{ marginBottom:16 }}>
+            <div style={{ position:"relative", marginBottom:10 }}>
+              <input autoFocus value={searchQuery} onChange={e=>onSearchChange(e.target.value)}
+                placeholder="Type a food, e.g. grilled chicken…"
+                style={{ width:"100%", background:"#1a1a26", border:"1px solid #3d8eff", borderRadius:10, color:"#f0f0f8", padding:"10px 36px 10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
+              {searchQuery.length > 0 && (
+                <button onClick={()=>{ setSearchQuery(""); setSearchResults([]); setPickedFood(null); setSearchError(null); }}
+                  style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", color:"#9898b8", fontSize:18, cursor:"pointer", padding:0 }}>✕</button>
+              )}
+            </div>
+
+            {searchLoading && (
+              <div style={{ display:"flex", alignItems:"center", gap:8, color:"#3d8eff", fontSize:13, padding:"8px 0" }}>
+                <div style={{ width:14, height:14, border:"2px solid #2a2a3d", borderTop:"2px solid #3d8eff", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+                Searching USDA database…
+              </div>
+            )}
+            {searchError && !searchLoading && <div style={{ color:"#ff7070", fontSize:13, padding:"6px 0" }}>{searchError}</div>}
+
+            {/* Results list */}
+            {!searchLoading && searchResults.length > 0 && !pickedFood && (
+              <div style={{ background:"#12121a", borderRadius:12, overflow:"hidden", border:"1px solid #2a2a3d" }}>
+                {searchResults.map((food,i) => (
+                  <button key={food.fdcId} onClick={()=>pickFood(food)}
+                    style={{ width:"100%", background:"transparent", border:"none", borderBottom:i<searchResults.length-1?"1px solid #1a1a26":"none", padding:"10px 14px", cursor:"pointer", textAlign:"left", display:"block" }}>
+                    <div style={{ color:"#f0f0f8", fontSize:13, fontFamily:"'DM Sans'", lineHeight:1.3, marginBottom:2 }}>{food.description}</div>
+                    {food.brandOwner && <div style={{ color:"#9898b8", fontSize:11, marginBottom:3 }}>{food.brandOwner}</div>}
+                    <div style={{ display:"flex", gap:10, marginTop:3 }}>
+                      {[["Cal",food.cal,"#e8ff00"],["P",food.protein+"g","#3d8eff"],["C",food.carbs+"g","#9b5de5"],["F",food.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                        <span key={k} style={{ color:col, fontSize:11, fontFamily:"'Oswald'", fontWeight:600 }}>{k} {v}</span>
+                      ))}
+                      <span style={{ color:"#9898b8", fontSize:12, marginLeft:"auto", alignSelf:"center" }}>per 100g</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Serving picker */}
+            {pickedFood && (
+              <div style={{ background:"#12121a", borderRadius:14, border:"1px solid #2a2a3d", overflow:"hidden" }}>
+                <div style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"12px 14px", borderBottom:"1px solid #1a1a26" }}>
+                  <button onClick={()=>{ setPickedFood(null); setSearchResults([]); }}
+                    style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:20, cursor:"pointer", padding:0, marginTop:1, flexShrink:0, lineHeight:1 }}>←</button>
+                  <div style={{ color:"#f0f0f8", fontSize:13, fontFamily:"'DM Sans'", lineHeight:1.4, fontWeight:600 }}>{pickedFood.description}</div>
+                </div>
+
+                <div style={{ padding:"12px 14px" }}>
+                  <div style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:8 }}>SERVING SIZE</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+                    {pickedFood.measures.map((m,i) => (
+                      <button key={i} onClick={()=>setPickedMeasureIdx(i)}
+                        style={{ background:pickedMeasureIdx===i?"#e8ff00":"transparent", border:pickedMeasureIdx===i?"none":"1px solid #2a2a3d", borderRadius:20, color:pickedMeasureIdx===i?"#000":"#c8c8e0", padding:"5px 12px", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans'", fontWeight:pickedMeasureIdx===i?700:400 }}>
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:8 }}>QUANTITY</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+                    <button onClick={()=>setPickedQty(q=>String(Math.max(0.25,(parseFloat(q)||1)-0.25)))}
+                      style={{ width:36, height:36, borderRadius:"50%", background:"#1a1a26", border:"1px solid #2a2a3d", color:"#f0f0f8", fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>−</button>
+                    <input value={pickedQty} onChange={e=>setPickedQty(e.target.value)} type="number" min="0.25" step="0.25"
+                      style={{ flex:1, background:"#1a1a26", border:"1px solid #3d8eff", borderRadius:8, color:"#f0f0f8", padding:"8px", fontSize:18, fontFamily:"'Oswald'", textAlign:"center", outline:"none" }} />
+                    <button onClick={()=>setPickedQty(q=>String((parseFloat(q)||1)+0.25))}
+                      style={{ width:36, height:36, borderRadius:"50%", background:"#1a1a26", border:"1px solid #2a2a3d", color:"#f0f0f8", fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>+</button>
+                  </div>
+
+                  {/* Live macro preview */}
+                  {(()=>{ const m=macrosForServing(); return (
+                    <div style={{ display:"flex", gap:0, background:"#0e0e16", borderRadius:10, overflow:"hidden", marginBottom:14 }}>
+                      {[["CAL",m.cal,"#e8ff00"],["PROTEIN",m.protein+"g","#3d8eff"],["CARBS",m.carbs+"g","#9b5de5"],["FAT",m.fats+"g","#3ddc84"]].map(([k,v,col],i,arr)=>(
+                        <div key={k} style={{ flex:1, textAlign:"center", padding:"10px 4px", borderRight:i<arr.length-1?"1px solid #1a1a26":"none" }}>
+                          <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:20 }}>{v}</div>
+                          <div style={{ color:"#9898b8", fontSize:11, marginTop:2 }}>{k}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ); })()}
+
+                  <button onClick={confirmServing}
+                    style={{ width:"100%", background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"11px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>
+                    Add to {slotLabel}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Photo scan overlay within page */}
         {imgSrc && (
@@ -5098,7 +5846,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
                   {[["cal",scanResult.cal,"#e8ff00"],["P",scanResult.protein+"g","#3d8eff"],["C",scanResult.carbs+"g","#9b5de5"],["F",scanResult.fats+"g","#3ddc84"]].map(([k,v,col])=>(
                     <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
                       <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:18 }}>{v}</div>
-                      <div style={{ color:"#7070a0", fontSize:10 }}>{k}</div>
+                      <div style={{ color:"#9898b8", fontSize:10 }}>{k}</div>
                     </div>
                   ))}
                 </div>
@@ -5120,7 +5868,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
         {/* Current items */}
         {localItems.length > 0 && (
           <div>
-            <div style={{ color:"#7070a0", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:8 }}>ITEMS ADDED</div>
+            <div style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:8 }}>ITEMS ADDED</div>
             {localItems.map((it,i) => (
               <FoodItemRow key={i} it={it} index={i} canRemove={true}
                 onField={(field,val)=>setField(i,field,val)}
@@ -5129,15 +5877,15 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
           </div>
         )}
 
-        {!imgSrc && localItems.length === 0 && sug && (
+        {!imgSrc && !searchActive && localItems.length === 0 && sug && (
           <div style={{ background:"#1a1a26", borderRadius:12, padding:"12px 14px", marginTop:8 }}>
-            <div style={{ color:"#7070a0", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:6 }}>TODAY'S SUGGESTION</div>
+            <div style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:6 }}>TODAY'S SUGGESTION</div>
             <div style={{ color:"#c8c8e0", fontSize:13 }}>{sug.food}</div>
             <div style={{ display:"flex", gap:0, marginTop:8 }}>
               {[["cal",sug.cal,"#e8ff00"],["P",sug.protein+"g","#3d8eff"],["C",sug.carbs+"g","#9b5de5"],["F",sug.fats+"g","#3ddc84"]].map(([k,v,col])=>(
                 <div key={k} style={{ flex:1, textAlign:"center" }}>
                   <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:16 }}>{v}</div>
-                  <div style={{ color:"#7070a0", fontSize:10 }}>{k}</div>
+                  <div style={{ color:"#9898b8", fontSize:10 }}>{k}</div>
                 </div>
               ))}
             </div>
@@ -5178,19 +5926,19 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
     <div style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
         <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>ITEM {index+1}{looking && <span style={{ color:"#3d8eff", fontWeight:600, marginLeft:8 }}>· looking up…</span>}</span>
-        {canRemove && <button onClick={onRemove} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:16, cursor:"pointer", padding:0 }}>&times;</button>}
+        {canRemove && <button onClick={onRemove} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:32, cursor:"pointer", padding:0, lineHeight:1 }}>&times;</button>}
       </div>
       <input value={it.food||""} onChange={e=>onName(e.target.value)} placeholder="Type a food, e.g. boiled egg" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
       <div style={{ display:"flex", gap:6, marginTop:6 }}>
         {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
           <div key={id} style={{ flex:1 }}>
-            <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
+            <div style={{ color:col, fontSize:12, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
             <input value={it[id]||""} onChange={e=>onField(id, e.target.value)} placeholder="0" type="number" inputMode="numeric"
               style={{ width:"100%", background:"#1a1a26", border:"1px solid "+col, borderRadius:6, color:"#f0f0f8", padding:"6px 4px", fontSize:12, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
           </div>
         ))}
       </div>
-      <div style={{ color:"#7070a0", fontSize:10, marginTop:6, textAlign:"center" }}>Auto-filled estimate — edit any value (e.g. 2 eggs)</div>
+      <div style={{ color:"#9898b8", fontSize:12, marginTop:6, textAlign:"center" }}>Auto-filled estimate — edit any value (e.g. 2 eggs)</div>
     </div>
   );
 }
@@ -5358,7 +6106,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
 
   const saveFoodLogger = (slotId, newItems) => {
     const updated = { ...(foodLog||{}) };
-    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:false})) };
+    updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:true})) };
     onSaveFoodLog(updated);
     setFoodLogger(null);
   };
@@ -5446,12 +6194,12 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
           <div style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5, marginBottom:6 }}>CALORIE GOAL</div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
             <div>
-              <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:28, color:"#f0f0f8" }}>{totalCal}</span>
-              <span style={{ color:"#7070a0", fontSize:13, marginLeft:5 }}>/ {calGoal} cal</span>
+              <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:28, color:calOver?"#ff3d3d":"#e8ff00" }}>{totalCal}</span>
+              <span style={{ color:"#9898b8", fontSize:13, marginLeft:5 }}>/ {calGoal} cal</span>
             </div>
             <div>
-              <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:22, color:calOver?"#ff3d3d":"#e8ff00" }}>{calOver?totalCal-calGoal:calLeft}</span>
-              <span style={{ color:"#7070a0", fontSize:12, marginLeft:4 }}>{calOver?"over":"left"}</span>
+              <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:22, color:calOver?"#ff3d3d":"#f0f0f8" }}>{calOver?totalCal-calGoal:calLeft}</span>
+              <span style={{ color:"#9898b8", fontSize:12, marginLeft:4 }}>{calOver?"over":"left"}</span>
             </div>
           </div>
           {ProgressBar({ val:totalCal, max:calGoal, color:calOver?"#ff3d3d":"#e8ff00" })}
@@ -5460,12 +6208,12 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
         {/* Macros: Protein → Net Carbs → Fats */}
         <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:14 }}>
           <div style={{ display:"flex", gap:14 }}>
-            {[["Protein",totalP,proteinGoal,"#3d8eff"],["Net Carbs",totalC,carbsGoal,"#9b5de5"],["Fats",totalF,fatsGoal,"#3ddc84"]].map(([k,v,goal,col])=>(
+            {[["Protein",totalP,proteinGoal,"#3ddc84"],["Net Carbs",totalC,carbsGoal,"#3d8eff"],["Fats",totalF,fatsGoal,"#e8ff00"]].map(([k,v,goal,col])=>(
               <div key={k} style={{ flex:1 }}>
                 <div style={{ color:"#c8c8e0", fontSize:12, fontWeight:600 }}>{k}</div>
                 <div style={{ marginTop:3 }}>
-                  <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:20, color:"#f0f0f8" }}>{v}g</span>
-                  <span style={{ color:"#7070a0", fontSize:11, marginLeft:3 }}>/ {goal}</span>
+                  <span style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:20, color:col }}>{v}g</span>
+                  <span style={{ color:"#9898b8", fontSize:11, marginLeft:3 }}>/ {goal}</span>
                 </div>
                 {ProgressBar({ val:v, max:goal, color:col })}
               </div>
@@ -5476,7 +6224,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>MEAL PLAN</div>
-          <div style={{ color:"#7070a0", fontSize:12 }}>{DAY_NAMES[sel]}</div>
+          <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
           {MEAL_SLOTS.map(slot => {
@@ -5508,9 +6256,9 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                         <span style={{ fontWeight:700, fontSize:15 }}>Snacks</span>
-                        {snacksLogged && <span style={{ fontSize:10, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
-                        {!snacksLogged && snackHasData && <span style={{ fontSize:10, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
-                        <span style={{ fontSize:12, color:"#7070a0" }}>({displaySnacks.length})</span>
+                        {snacksLogged && <span style={{ fontSize:12, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
+                        {!snacksLogged && snackHasData && <span style={{ fontSize:12, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
+                        <span style={{ fontSize:12, color:"#9898b8" }}>({displaySnacks.length})</span>
                       </div>
                       {!open && displaySnacks.map((s,i)=>s.food&&(<div key={i} style={{ color:"#c8c8e0", fontSize:13, marginTop:2, lineHeight:1.5 }}>{s.food}</div>))}
                     </div>
@@ -5531,35 +6279,35 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                       {[["cal",totalSnackCal],["P",displaySnacks.reduce((s,x)=>s+(parseInt(x.protein)||0),0)+"g"],["C",displaySnacks.reduce((s,x)=>s+(parseInt(x.carbs)||0),0)+"g"],["F",displaySnacks.reduce((s,x)=>s+(parseInt(x.fats)||0),0)+"g"]].map(([k,v])=>(
                         <div key={k} style={{ flex:1, textAlign:"center", padding:"8px 4px", borderRight:"1px solid #2a2a3d" }}>
                           <div style={{ color: k==="cal"?"#e8ff00":"#f0f0f8", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:16 }}>{v}</div>
-                          <div style={{ color:"#7070a0", fontSize:10 }}>{k}</div>
+                          <div style={{ color:"#9898b8", fontSize:10 }}>{k}</div>
                         </div>
                       ))}
                     </div>
                   )}
                   {/* ROW 3 — Buttons */}
                   <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Add Food
                     </button>
-                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#3ddc84", color: snacksLogged?"#3ddc84":"#000", border: snacksLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#e8ff00", color: snacksLogged?"#e8ff00":"#000", border: snacksLogged?"2px solid #e8ff00":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       {snacksLogged?"Unlog":"Log It"}
                     </button>
                   </div>
                   {/* Edit snacks */}
                   {open && (
                     <div style={{ padding:"0 14px 14px", borderTop:"1px solid #2a2a3d" }}>
-                      {!snackHasData && sugSnack && <div style={{ color:"#7070a0", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sugSnack.food}</div>}
+                      {!snackHasData && sugSnack && <div style={{ color:"#9898b8", fontSize:12, marginTop:10, marginBottom:6 }}>Suggestion: {sugSnack.food}</div>}
                       {snackList.map((s,i) => (
                         <div key={i} style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                             <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>SNACK {i+1}</span>
-                            {snackList.length > 1 && <button onClick={()=>removeSnack(i)} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:16, cursor:"pointer", padding:0 }}>&times;</button>}
+                            {snackList.length > 1 && <button onClick={()=>removeSnack(i)} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:32, cursor:"pointer", padding:0, lineHeight:1 }}>&times;</button>}
                           </div>
                           <input value={s.food||""} onChange={e=>setSnack(i,"food",e.target.value)} placeholder="What did you snack on?" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
                           <div style={{ display:"flex", gap:6, marginTop:6 }}>
                             {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
                               <div key={id} style={{ flex:1 }}>
-                                <div style={{ color:col, fontSize:10, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
+                                <div style={{ color:col, fontSize:12, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
                                 <input value={s[id]||""} onChange={e=>setSnack(i,id,e.target.value)} placeholder="0" type="number" inputMode="numeric"
                                   style={{ width:"100%", background:"#1a1a26", border:"1px solid "+col, borderRadius:6, color:"#f0f0f8", padding:"6px 4px", fontSize:12, fontFamily:"'Oswald', sans-serif", outline:"none", textAlign:"center", boxSizing:"border-box" }} />
                               </div>
@@ -5592,9 +6340,9 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <span style={{ fontWeight:700, fontSize:15 }}>{slot.label}</span>
-                      {isLogged && <span style={{ fontSize:10, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
-                      {!isLogged && hasData && <span style={{ fontSize:10, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
-                      {hasData && items.length > 1 && <span style={{ fontSize:12, color:"#7070a0" }}>({items.filter(x=>x.food||x.cal).length})</span>}
+                      {isLogged && <span style={{ fontSize:12, color:"#3ddc84", fontWeight:700 }}>✓ LOGGED</span>}
+                      {!isLogged && hasData && <span style={{ fontSize:12, color:"#e8ff00", fontWeight:700 }}>EDITED</span>}
+                      {hasData && items.length > 1 && <span style={{ fontSize:12, color:"#9898b8" }}>({items.filter(x=>x.food||x.cal).length})</span>}
                     </div>
                     <div style={{ color:"#c8c8e0", fontSize:13, marginTop:3, lineHeight:1.5 }}>{hasData ? namesLine : (sug && sug.food)}</div>
                   </div>
@@ -5618,17 +6366,17 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     ).map(([k,v,col])=>(
                       <div key={k} style={{ flex:1, textAlign:"center", padding:"8px 4px", borderRight:"1px solid #2a2a3d" }}>
                         <div style={{ color: k==="cal" ? "#e8ff00" : "#f0f0f8", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:16 }}>{v}</div>
-                        <div style={{ color:"#7070a0", fontSize:10, letterSpacing:0.3 }}>{k}</div>
+                        <div style={{ color:"#9898b8", fontSize:12, letterSpacing:0.3 }}>{k}</div>
                       </div>
                     ))}
                   </div>
                 )}
                 {/* ROW 3 — Buttons */}
                 <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                  <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     Add Food
                   </button>
-                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#3ddc84", color: isLogged?"#3ddc84":"#000", border: isLogged?"2px solid #3ddc84":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#e8ff00", color: isLogged?"#e8ff00":"#000", border: isLogged?"2px solid #e8ff00":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     {isLogged?"Unlog":"Log It"}
                   </button>
                 </div>
@@ -5664,7 +6412,21 @@ function migrateProfile(p) {
     hftStartDate: null,
     glbStartDate: null,
   };
-  return { ...defaults, ...p };
+  const merged = { ...defaults, ...p };
+  // Sanitize trainingDays: accepts numeric indices (0-6) or day name strings ("Monday" etc.)
+  const rawDays = Array.isArray(merged.trainingDays) ? merged.trainingDays : [];
+  const cleanDays = rawDays
+    .map(d => {
+      if (typeof d === 'number' && d >= 0 && d <= 6) return d;
+      const asInt = parseInt(d, 10);
+      if (!isNaN(asInt) && asInt >= 0 && asInt <= 6) return asInt;
+      const nameIdx = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].indexOf(String(d));
+      return nameIdx >= 0 ? nameIdx : null;
+    })
+    .filter(d => d !== null)
+    .filter((v,i,a) => a.indexOf(v) === i);
+  merged.trainingDays = cleanDays.length ? cleanDays : defaults.trainingDays;
+  return merged;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -5690,6 +6452,9 @@ export default function BodyMorph() {
   const [stretchRoutines, setStretchRoutines] = useState(DEFAULT_ROUTINES);
   const [toast, setToast]     = useState(null);
   const [loaded, setLoaded]   = useState(false);
+  const [hydration, setHydration] = useState({ date: new Date().toISOString().slice(0,10), cups: 0, goal: 8 });
+  const [homeVoice, setHomeVoice] = useState(false); // voice coach launched from home
+  const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
 
   // Load saved profile + logs + medals on first mount
   useEffect(() => {
@@ -5712,6 +6477,7 @@ export default function BodyMorph() {
         const sfoodlog = await Store.get(FOODLOG_KEY);
         const snutrgoals = await Store.get("bodymorph_nutrgoals_v2");
         const sdietpref = await Store.get(DIETPREF_KEY);
+        const shyd = await Store.get(HYDRATION_KEY);
         if (sl) setLogs(sl);
         if (sm) setRewards(sm);
         if (sb) setBodyEntries(sb);
@@ -5726,6 +6492,11 @@ export default function BodyMorph() {
         if (sfoodlog) setFoodLog(sfoodlog);
         if (snutrgoals) setNutritionGoals(snutrgoals);
         if (sdietpref) setDietPref(sdietpref);
+        if (shyd) {
+          const todayStr = new Date().toISOString().slice(0,10);
+          // Daily reset: if the saved record is from an earlier day, zero the cups (keep the goal).
+          setHydration(shyd.date === todayStr ? shyd : { date: todayStr, cups: 0, goal: shyd.goal || 8 });
+        }
         if (sp) {
           // Migrate profile to fill in any fields added since the user signed up
           const migrated = migrateProfile(sp);
@@ -5755,6 +6526,12 @@ export default function BodyMorph() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (loaded && profile) {
+      try { setProgram(buildProgram(profile)); } catch(e) { console.warn("program rebuild:", e); }
+    }
+  }, [profile, loaded]);
+
   useEffect(() => { if (loaded) Store.set(LOG_KEY, logs); }, [logs, loaded]);
   useEffect(() => { if (loaded) Store.set(MEDAL_KEY, rewards); }, [rewards, loaded]);
   useEffect(() => { if (loaded) Store.set(BODY_KEY, bodyEntries); }, [bodyEntries, loaded]);
@@ -5770,6 +6547,36 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(STRETCHPLAN_KEY, stretchPlan); }, [stretchPlan, loaded]);
   useEffect(() => { if (loaded) Store.set(ROUTINES_KEY, stretchRoutines); }, [stretchRoutines, loaded]);
   useEffect(() => { if (loaded) Store.set(VIDEO_KEY, videoOverrides); }, [videoOverrides, loaded]);
+  useEffect(() => { if (loaded) Store.set(HYDRATION_KEY, hydration); }, [hydration, loaded]);
+
+  // Hydration: set the cup count directly (resets each day on load).
+  const setHydrationCups = (val) => setHydration(h => {
+    const todayStr = new Date().toISOString().slice(0,10);
+    const goal = h.goal || 8;
+    return { date: todayStr, cups: Math.max(0, parseInt(val) || 0), goal };
+  });
+  // Voice companion: add N cups of water.
+  const addWaterCups = (n) => setHydration(h => {
+    const todayStr = new Date().toISOString().slice(0,10);
+    const base = h.date === todayStr ? h : { date: todayStr, cups: 0, goal: h.goal || 8 };
+    return { ...base, cups: base.cups + (parseInt(n) || 1) };
+  });
+  // Voice companion: log a food item the client reports eating.
+  const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
+    const todayStr = new Date().toISOString().slice(0,10);
+    const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
+    const entry = { food: name || "Logged item", cal:String(Math.round(cal||0)), protein:String(Math.round(protein||0)), carbs:String(Math.round(carbs||0)), fats:String(Math.round(fats||0)), logged:true };
+    setFoodLog(prev => {
+      const updated = { ...(prev||{}) };
+      const dayLog = { ...(updated[todayStr]||{}) };
+      if (s === "snacks") {
+        const arr = Array.isArray(dayLog.snacks) ? [...dayLog.snacks] : (dayLog.snacks ? [dayLog.snacks] : []);
+        arr.push(entry); dayLog.snacks = arr;
+      } else { dayLog[s] = entry; }
+      updated[todayStr] = dayLog;
+      return updated;
+    });
+  };
 
   const saveVideo = (exName, videoId) => {
     setVideoOverrides(prev => {
@@ -5951,7 +6758,38 @@ export default function BodyMorph() {
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 
-  if (phase === "home") return (
+  if (phase === "home") {
+    // The home Voice Coach is always the daily COMPANION. It covers hydration,
+    // mood, stretching, nutrition (and can log food/water), then gives a workout
+    // overview and hands off to the in-session coach at the gym.
+    const todayName = DAY_NAMES[new Date().getDay()];
+    const todayWorkout = (program && program.weeklySchedule || []).find(d => d.day === todayName) || null;
+    const tStr = new Date().toISOString().slice(0,10);
+    const tLog = (foodLog && foodLog[tStr]) || {};
+    const slotInfo = (slot) => {
+      const e = tLog[slot];
+      if (!e) return { logged:false };
+      const items = Array.isArray(e) ? e : [e];
+      const done = items.filter(x => x && x.logged);
+      if (!done.length) return { logged:false };
+      return { logged:true, name: done.map(x=>x.food).filter(Boolean).join(", ") || slot, cal: Math.round(done.reduce((s,x)=>s+(parseFloat(x.cal)||0),0)) };
+    };
+    let calTotal=0, pTotal=0;
+    ["breakfast","lunch","dinner","snacks"].forEach(s => {
+      const e = tLog[s]; if (!e) return;
+      (Array.isArray(e)?e:[e]).forEach(it => { if (it && it.logged) { calTotal += parseFloat(it.cal)||0; pTotal += parseFloat(it.protein)||0; } });
+    });
+    const cMacros = macrosFor(profile, dietPref||"mediterranean");
+    const hrs = new Date().getHours();
+    const companionData = {
+      timeOfDay: hrs < 12 ? "morning" : hrs < 17 ? "afternoon" : "evening",
+      hydration: { cups: (hydration&&hydration.cups)||0, goal: (hydration&&hydration.goal)||8 },
+      meals: { breakfast: slotInfo("breakfast"), lunch: slotInfo("lunch"), dinner: slotInfo("dinner"), snacks: slotInfo("snacks") },
+      calories: { total: Math.round(calTotal), goal: cMacros.cals||2000 },
+      protein: { total: Math.round(pTotal), goal: cMacros.protein||0 },
+      workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length } : null,
+    };
+    return (
     <><Toast />
       <Home profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }}
@@ -5962,9 +6800,19 @@ export default function BodyMorph() {
         onSupplements={()=>setPhase("supplements")}
         onPeptides={()=>setPhase("peptides")}
         onCalendar={()=>setPhase("calendar")}
-        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")} />
+        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
+        hydration={hydration} onSetCups={setHydrationCups}
+        voiceActive={homeVoice} voiceState={voiceState}
+        onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
+      {homeVoice && (
+        <VoiceCoach profile={profile} day={null} logs={logs}
+          companion={true} companionData={companionData}
+          onLogFood={logFoodFromVoice} onAddWater={addWaterCups}
+          onClose={()=>{ setHomeVoice(false); setVoiceState(null); }} videoOverrides={videoOverrides} onState={setVoiceState} />
+      )}
     </>
-  );
+    );
+  }
 
   if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} /></>);
 
