@@ -3202,7 +3202,23 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
     </div>
   );
 
-  return null;
+  // TEMP DIAGNOSTIC — shows where the listen→transcribe loop is (remove later).
+  return (
+    <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"#0e0e16", borderTop:`2px solid ${APP_PINK}`, padding:"9px 14px 24px", boxShadow:"0 -6px 22px rgba(0,0,0,0.5)" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
+        <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:1, color:APP_PINK }}>COACH</span>
+        <span style={{ fontSize:11.5, color:"#9898b8" }}>{vs}</span>
+        <div style={{ flex:1, height:6, background:"#1a1a26", borderRadius:99, overflow:"hidden" }}>
+          <div style={{ width: Math.min(100, micLevel*3)+"%", height:"100%", background: micLevel>8?"#3ddc84":"#555", transition:"width 0.08s" }} />
+        </div>
+        <button onClick={() => { closedRef.current = true; try { recogRef.current?.stop(); } catch {} window.speechSynthesis.cancel(); onClose(); }}
+          style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#c8c8e0", padding:"4px 10px", cursor:"pointer", fontSize:12 }}>End</button>
+      </div>
+      <div style={{ background:"#000", border:"1px solid #2a2a3d", borderRadius:8, padding:"7px 10px", fontFamily:"monospace", fontSize:11, lineHeight:1.5, color:"#7dd87d", minHeight:30 }}>
+        {dbg.length ? dbg.map((m,i)=><div key={i} style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>› {m}</div>) : "› waiting…"}
+      </div>
+    </div>
+  );
 }
 
 // ── SESSION ───────────────────────────────────────────────────────────────────
