@@ -21,7 +21,13 @@ const GLOBAL_CSS = `
   /* Chrome/silver light that travels around a card's edge */
   @property --vc-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
   @keyframes vcSpin  { to { --vc-angle: 360deg; } }
-  @keyframes vcSweep { 0% { --vc-angle: 0deg; } 35% { --vc-angle: 360deg; } 100% { --vc-angle: 360deg; } }
+  /* Idle: one slow smooth lap, then the light fades out and stays gone ~3s. */
+  @keyframes vcSweep {
+    0%   { --vc-angle: 0deg;   opacity: 1; }
+    50%  { --vc-angle: 360deg; opacity: 1; }
+    58%  { --vc-angle: 360deg; opacity: 0; }
+    100% { --vc-angle: 360deg; opacity: 0; }
+  }
   .silver-edge { position: relative; }
   .silver-edge::before {
     content:""; position:absolute; inset:0; border-radius:inherit; padding:1.6px;
@@ -31,8 +37,8 @@ const GLOBAL_CSS = `
     -webkit-mask-composite: xor; mask-composite: exclude;
     pointer-events:none;
   }
-  .silver-edge.vc-on::before   { animation: vcSpin 4s linear infinite; }
-  .silver-edge.vc-idle::before { animation: vcSweep 3s linear infinite; }
+  .silver-edge.vc-on::before   { opacity:1; animation: vcSpin 7s linear infinite; }
+  .silver-edge.vc-idle::before { animation: vcSweep 6s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
     50%       { opacity: 0.60; }
