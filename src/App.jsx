@@ -18,27 +18,19 @@ const GLOBAL_CSS = `
   .fade-in { animation: fadeIn 0.35s ease both; }
   @keyframes voiceSlide { 0% { transform:translateX(-100%); } 100% { transform:translateX(330%); } }
   .voice-bar-seg { animation: voiceSlide 1.1s ease-in-out infinite; }
-  /* Chrome/silver light that travels around a card's edge */
-  @property --vc-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
-  @keyframes vcSpin  { to { --vc-angle: 360deg; } }
-  /* Idle: one slow smooth lap, then the light fades out and stays gone ~3s. */
-  @keyframes vcSweep {
-    0%   { --vc-angle: 0deg;   opacity: 1; }
-    50%  { --vc-angle: 360deg; opacity: 1; }
-    58%  { --vc-angle: 360deg; opacity: 0; }
-    100% { --vc-angle: 360deg; opacity: 0; }
+  /* Chrome/silver light that travels around a card's edge as an SVG stroke.
+     Moves by PATH LENGTH (pathLength=100), so speed is constant on every edge
+     and corner — no angular speed-up/slow-down. */
+  @keyframes vcDashOn { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+  @keyframes vcDashIdle {
+    0%   { stroke-dashoffset: 0;    opacity: 1; }
+    50%  { stroke-dashoffset: -100; opacity: 1; }
+    58%  { stroke-dashoffset: -100; opacity: 0; }
+    100% { stroke-dashoffset: -100; opacity: 0; }
   }
-  .silver-edge { position: relative; }
-  .silver-edge::before {
-    content:""; position:absolute; inset:0; border-radius:inherit; padding:1.6px;
-    background: conic-gradient(from var(--vc-angle), transparent 0%, transparent 50%, rgba(206,210,224,0.12) 63%, rgba(228,231,240,0.4) 74%, rgba(245,246,250,0.8) 82%, #ffffff 87%, rgba(245,246,250,0.8) 92%, rgba(228,231,240,0.4) 97%, transparent 100%);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor; mask-composite: exclude;
-    pointer-events:none;
-  }
-  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 0.95s linear infinite; }
-  .silver-edge.vc-idle::before { animation: vcSweep 6s linear infinite; }
+  .vc-edge-dash { fill:none; stroke:#eef0f6; stroke-width:1.8; stroke-linecap:round; stroke-dasharray:20 80; filter: drop-shadow(0 0 2.5px rgba(255,255,255,0.6)); }
+  .vc-edge-dash.vc-on   { stroke:#ffffff; filter: drop-shadow(0 0 3.5px rgba(255,255,255,0.85)); animation: vcDashOn 1.1s linear infinite; }
+  .vc-edge-dash.vc-idle { animation: vcDashIdle 6s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
     50%       { opacity: 0.60; }
@@ -2555,6 +2547,18 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
     setEditingHyd(false);
   };
 
+  // Measure the Voice Coach card so the edge-light SVG matches its size exactly.
+  const vcRef = useRef(null);
+  const [vcSize, setVcSize] = useState({ w:0, h:0 });
+  useEffect(() => {
+    const el = vcRef.current; if (!el) return;
+    const update = () => setVcSize({ w: el.offsetWidth, h: el.offsetHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Today's nutrition totals from food log
   const todayLog = (foodLog && foodLog[today]) || {};
   let totalCal=0, totalP=0, totalC=0, totalF=0;
@@ -2594,9 +2598,16 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         {/* Voice Coach + Hydration side by side */}
         <div style={{ display:"flex", gap:8 }}>
 
-          {/* Voice Coach — tap to start/stop. Silver light circles the edge:
-              continuously when active, a slow sweep every 3s when idle. */}
-          <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
+          {/* Voice Coach — tap to start/stop. A silver light travels the edge as an
+              SVG stroke (constant speed on every edge/corner): continuous when
+              active, a slow lap that fades out every few seconds when idle. */}
+          <button ref={vcRef} onClick={onVoiceCoach} style={{ position:"relative", flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
+            {vcSize.w > 0 && (
+              <svg width={vcSize.w} height={vcSize.h} style={{ position:"absolute", top:0, left:0, pointerEvents:"none", overflow:"visible" }}>
+                <rect x="1" y="1" width={Math.max(0, vcSize.w-2)} height={Math.max(0, vcSize.h-2)} rx="11" ry="11"
+                  pathLength="100" className={"vc-edge-dash " + (voiceActive ? "vc-on" : "vc-idle")} />
+              </svg>
+            )}
             <div style={{ display:"flex", alignItems:"center", gap:7 }}>
               <span style={{ fontSize:20 }}>🎙️</span>
               <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:accent }}>VOICE COACH</span>
