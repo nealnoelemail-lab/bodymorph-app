@@ -2831,6 +2831,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   const micStreamRef = useRef(null); // persistent mic stream (requested once, reused)
   const audioCtxRef  = useRef(null);
   const analyserRef  = useRef(null);
+  const lastTickRef  = useRef(0); // heartbeat — last time the listen loop ran a frame
 
   const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
 
@@ -2860,7 +2861,11 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   // ── System prompt ──────────────────────────────────────────────────────────
   const isWorkout = !companion && !!(day && day.workout && day.workout.length);
 
-  const PERSONA = `YOUR PERSONALITY — motivating but never annoying:
+  const coachName = "Coach";
+  const PERSONA = `YOUR IDENTITY:
+• Your name is ${coachName}. ${profile.name} addresses you as "${coachName}" — they'll say things like "Hey ${coachName}" or "Hi ${coachName}". Refer to yourself as ${coachName} when natural, and gently get them used to calling you ${coachName}.
+
+YOUR PERSONALITY — motivating but never annoying:
 • Warm, confident, and supportive — like a great trainer who genuinely believes in their client. NOT a drill sergeant. Never yell, never use harsh "push harder, no excuses" clichés, never be over-the-top hype.
 • Encourage naturally and specifically, not with empty cheerleading. A little encouragement goes a long way; don't overdo it.
 • Be calm, present, and steady — confidence, not pressure.
@@ -2919,7 +2924,7 @@ LOGGING WATER — when ${profile.name} says they drank water, append at the very
 |||WATER:{"cups":1}|||
 Use the number of cups/glasses they mention. Never say or read the tag aloud.
 
-Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} and asking how they're doing.`;
+Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} as their Coach (e.g. "Hey ${profile.name}, it's Coach — how are you doing this ${cd.timeOfDay||"morning"}?") and asking how they're doing.`;
     }
 
     // ── Workout mode ──
@@ -2956,7 +2961,7 @@ LOGGING SETS — When ${profile.name} tells you they completed a set (stating we
 |||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
 
-Start by greeting ${profile.name} warmly by name, naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
+Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright ${profile.name}, it's Coach — let's get to work"), naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
   }, [profile, day, logs, isWorkout, PERSONA, companionData]);
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
@@ -3070,6 +3075,7 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
 
     const checkSilence = () => {
       if (closedRef.current) { try { recorder.stop(); } catch {} return; }
+      lastTickRef.current = performance.now(); // heartbeat for the watchdog
       analyser.getByteFrequencyData(data);
       const vol = data.reduce((a, b) => a + b, 0) / data.length;
       if (vol > 8) {
@@ -3104,6 +3110,7 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
       log("sending to transcribe…");
       try {
         const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          signal: AbortSignal.timeout(15000),
           method: "POST",
           headers: { "Authorization": `Bearer ${OPENAI_KEY}` },
           body: formData,
@@ -3141,6 +3148,7 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
 
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
+        signal: AbortSignal.timeout(15000),
         method: "POST",
         headers: {
           "x-api-key": ANTHROPIC_KEY,
@@ -3212,6 +3220,20 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
       try { audioCtxRef.current?.close(); } catch {}
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Watchdog: if the listen loop silently dies (no heartbeat for a while) and
+  // we're not mid-thought (speaking/processing), restart listening so the coach
+  // never just "freezes." ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!armed) return;
+    const id = setInterval(() => {
+      if (closedRef.current || speakingRef.current) return;
+      if (vsRef.current === "processing") return; // a request is in flight
+      const stale = performance.now() - (lastTickRef.current || 0);
+      if (stale > 4000) { log("watchdog → restart listening"); startListening(); }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [armed, startListening, log]);
 
   // ── UI ───────────────────────────────────────────────────────────────────────
   // No screen overlay anymore. The only visible indicator is a small animated bar
