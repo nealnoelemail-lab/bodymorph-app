@@ -1472,7 +1472,13 @@ const Logo = ({ small, onSettings }) => (
     <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative" }}>
       NTF
       {onSettings && (
-        <button onClick={onSettings} style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", color:"#c8c8e0", fontSize:22, lineHeight:1, padding:"0 4px" }}>&#9776;</button>
+        <button onClick={onSettings} aria-label="Menu" style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:"0 2px" }}>
+          <svg width="38" height="28" viewBox="0 0 38 28" fill="none">
+            <line x1="3" y1="5"  x2="35" y2="5"  stroke="#c8c8e0" strokeWidth="2.8" strokeLinecap="round"/>
+            <line x1="3" y1="14" x2="35" y2="14" stroke="#c8c8e0" strokeWidth="2.8" strokeLinecap="round"/>
+            <line x1="3" y1="23" x2="35" y2="23" stroke="#c8c8e0" strokeWidth="2.8" strokeLinecap="round"/>
+          </svg>
+        </button>
       )}
     </div>
     <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?73:96, letterSpacing: small?7.5:10.5, lineHeight:1 }}>
