@@ -1613,7 +1613,7 @@ const YTButton = ({ query, gender }) => {
 };
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
-const STEPS = ["name","gender","goal","focus","days","time","stats","activity"];
+const STEPS = ["firstname","lastname","gender","goal","focus","days","time","stats","activity"];
 
 // ── HIGH FREQUENCY TRAINING — INFO PAGE ──────────────────────────────────────
 // Full-screen description shown when the user taps the info icon on the HFT option.
@@ -1815,12 +1815,13 @@ function Wizard({ onComplete }) {
   const [step, setStep] = useState(0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
-  const [p, setP] = useState({ name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
+  const [p, setP] = useState({ firstName:"", lastName:"", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
 
   const canNext = [
-    () => p.name.trim().length > 0,
+    () => p.firstName.trim().length > 0,
+    () => p.lastName.trim().length > 0,
     () => !!p.gender,
     () => !!p.goal,
     () => !!p.focus,
@@ -1839,9 +1840,15 @@ function Wizard({ onComplete }) {
   );
 
   const steps = [
-    <div key="name" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
-      <div style={{ ...S.stepLabel, fontSize:26 }}>WHAT'S YOUR NAME?</div>
-      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Enter your name" value={p.name} onChange={e=>set("name",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.name.trim()) setStep(1); }} />
+    <div key="firstname" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
+      <div style={{ ...S.stepLabel, fontSize:26 }}>FIRST NAME</div>
+      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="First name" value={p.firstName} onChange={e=>set("firstName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.firstName.trim()) setStep(1); }} />
+      <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
+    </div>,
+
+    <div key="lastname" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
+      <div style={{ ...S.stepLabel, fontSize:26 }}>LAST NAME</div>
+      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Last name" value={p.lastName} onChange={e=>set("lastName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.lastName.trim()) setStep(2); }} />
       <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
     </div>,
 
@@ -1992,7 +1999,7 @@ function Wizard({ onComplete }) {
         {step < STEPS.length-1 ? (
           <button onClick={() => ok && setStep(s=>s+1)} disabled={!ok} style={{ ...S.btnPri, flex:1, opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", padding:"10px 8px" }}>Continue</button>
         ) : (
-          <button onClick={() => { if(!ok) return; const totalIn = (parseInt(p.heightFt)||0)*12 + (parseInt(p.heightIn)||0); onComplete({ ...p, height: String(totalIn) }); }} disabled={!ok} style={{ ...S.btnPri, flex:"0 0 73%", opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", background:"#e8ff00", color:"#000", padding:"10px 6px", fontSize:15.6 }}>BUILD MY PROGRAM</button>
+          <button onClick={() => { if(!ok) return; const totalIn = (parseInt(p.heightFt)||0)*12 + (parseInt(p.heightIn)||0); onComplete({ ...p, firstName: p.firstName.trim(), lastName: p.lastName.trim(), name: p.firstName.trim(), height: String(totalIn) }); }} disabled={!ok} style={{ ...S.btnPri, flex:"0 0 73%", opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", background:"#e8ff00", color:"#000", padding:"10px 6px", fontSize:15.6 }}>BUILD MY PROGRAM</button>
         )}
       </div>
     </div>
@@ -6417,6 +6424,14 @@ function migrateProfile(p) {
     .filter(d => d !== null)
     .filter((v,i,a) => a.indexOf(v) === i);
   merged.trainingDays = cleanDays.length ? cleanDays : defaults.trainingDays;
+  // Split name into first/last (older profiles stored a single full name).
+  if (!merged.firstName) {
+    const parts = String(merged.name || "").trim().split(/\s+/).filter(Boolean);
+    merged.firstName = parts[0] || "User";
+    merged.lastName  = parts.slice(1).join(" ") || "";
+  }
+  // The app and the AI coach address the user by FIRST name only.
+  merged.name = merged.firstName;
   return merged;
 }
 // ─────────────────────────────────────────────────────────────────────────────
