@@ -3160,7 +3160,8 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
   // Keep stable ref so startListening/onresult can call askClaude without stale closure
   useEffect(() => { askRef.current = askClaude; }, [askClaude]);
 
-  // ── Pre-fetch form cues for all pinned videos ──────────────────────────────
+  // ── Pre-fetch form cues for pinned videos — re-runs when the workout day
+  // appears (e.g. companion → workout mode hand-off). ─────────────────────────
   useEffect(() => {
     if (!videoOverrides || !day || !day.workout) return;
     day.workout.forEach((ex) => {
@@ -3170,7 +3171,7 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
         if (cues) formCuesRef.current[ex.exercise] = cues;
       });
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [day, videoOverrides]);
 
   // ── Mount/unmount: auto-start coaching, tear down on close ──────────────────
   // The parent already called primeTTS() inside the tap, so we can arm immediately
@@ -3213,19 +3214,6 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
 function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo }) {
   const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
-  const [voiceActive, setVoiceActive] = useState(false);
-
-  const handleAILog = useCallback(({ ex, weight, reps }) => {
-    const exercise = (day.workout || [])[ex];
-    if (!exercise) return;
-    const today = new Date().toISOString().slice(0, 10);
-    onLogExercise(exercise.exercise, {
-      date: today,
-      sets: [{ weight: String(weight), reps: String(reps) }],
-      weight: String(weight),
-      reps: String(reps),
-    });
-  }, [day, onLogExercise]);
   const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0,10));
   const workout = day.workout || [];
   const weekdayIdx = DAY_NAMES.indexOf(day.day);
@@ -3340,15 +3328,10 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>{day.day}</div>
           <div style={{ color:sessionAccent, fontSize:12 }}>{day.type}</div>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          <button onClick={() => setVoiceActive(v => { if (!v) primeTTS(); return !v; })} style={{ background: voiceActive ? APP_PINK : "transparent", border:`1px solid ${APP_PINK}`, borderRadius:8, color: voiceActive ? "#000" : APP_PINK, padding:"6px 11px", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans'", fontWeight:700, display:"flex", alignItems:"center", gap:5 }}>
-            🎙 {voiceActive ? "Coach On" : "AI Coach"}
-          </button>
-          <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
-        </div>
+        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
       </div>
 
-      <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px", paddingBottom: voiceActive ? 90 : 14 }}>
+      <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
         {workout.map((ex,i) => (
           <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
         ))}
@@ -3383,17 +3366,6 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
           &#10003; FINISH &amp; SAVE WORKOUT
         </button>
       </div>
-
-      {voiceActive && (
-        <VoiceCoach
-          profile={profile}
-          day={day}
-          logs={logs}
-          onLogSet={handleAILog}
-          onClose={() => setVoiceActive(false)}
-          videoOverrides={videoOverrides}
-        />
-      )}
     </div>
   );
 }
@@ -6755,19 +6727,23 @@ export default function BodyMorph() {
     </div>
   ) : null;
 
-  if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
-  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
-  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
-  if (phase === "loading") return <Loading name={profile && profile.name} />;
-
-  if (phase === "home") {
-    // The home Voice Coach is always the daily COMPANION. It covers hydration,
-    // mood, stretching, nutrition (and can log food/water), then gives a workout
-    // overview and hands off to the in-session coach at the gym.
-    const todayName = DAY_NAMES[new Date().getDay()];
-    const todayWorkout = (program && program.weeklySchedule || []).find(d => d.day === todayName) || null;
-    const tStr = new Date().toISOString().slice(0,10);
-    const tLog = (foodLog && foodLog[tStr]) || {};
+  // ── Persistent voice coach: ONE instance that survives screen changes. The
+  // companion you start at home keeps talking and automatically switches into
+  // set-by-set workout coaching the moment you enter a session. ──────────────
+  const inSession = phase === "session";
+  const sessionDay = (program && program.weeklySchedule || [])[dayIdx] || null;
+  const handleVoiceSetLog = ({ ex, weight, reps }) => {
+    const exercise = sessionDay && sessionDay.workout && sessionDay.workout[ex];
+    if (!exercise) return;
+    logExercise(exercise.exercise, {
+      date: new Date().toISOString().slice(0,10),
+      sets: [{ weight: String(weight), reps: String(reps) }],
+      weight: String(weight), reps: String(reps),
+    });
+  };
+  const companionData = profile ? (() => {
+    const today = new Date().toISOString().slice(0,10);
+    const tLog = (foodLog && foodLog[today]) || {};
     const slotInfo = (slot) => {
       const e = tLog[slot];
       if (!e) return { logged:false };
@@ -6783,7 +6759,9 @@ export default function BodyMorph() {
     });
     const cMacros = macrosFor(profile, dietPref||"mediterranean");
     const hrs = new Date().getHours();
-    const companionData = {
+    const todayName = DAY_NAMES[new Date().getDay()];
+    const todayWorkout = (program && program.weeklySchedule || []).find(d => d.day === todayName) || null;
+    return {
       timeOfDay: hrs < 12 ? "morning" : hrs < 17 ? "afternoon" : "evening",
       hydration: { cups: (hydration&&hydration.cups)||0, goal: (hydration&&hydration.goal)||8 },
       meals: { breakfast: slotInfo("breakfast"), lunch: slotInfo("lunch"), dinner: slotInfo("dinner"), snacks: slotInfo("snacks") },
@@ -6791,7 +6769,30 @@ export default function BodyMorph() {
       protein: { total: Math.round(pTotal), goal: cMacros.protein||0 },
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length } : null,
     };
-    return (
+  })() : null;
+  const voiceCoachEl = homeVoice ? (
+    <VoiceCoach
+      profile={profile}
+      day={inSession ? sessionDay : null}
+      logs={logs}
+      companion={!inSession}
+      companionData={companionData}
+      onLogSet={inSession ? handleVoiceSetLog : undefined}
+      onLogFood={logFoodFromVoice}
+      onAddWater={addWaterCups}
+      videoOverrides={videoOverrides}
+      onState={setVoiceState}
+      onClose={()=>{ setHomeVoice(false); setVoiceState(null); }}
+    />
+  ) : null;
+
+  const screen = (() => {
+  if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
+  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
+  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
+  if (phase === "loading") return <Loading name={profile && profile.name} />;
+
+  if (phase === "home") return (
     <><Toast />
       <Home profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }}
@@ -6806,15 +6807,8 @@ export default function BodyMorph() {
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
         onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
-      {homeVoice && (
-        <VoiceCoach profile={profile} day={null} logs={logs}
-          companion={true} companionData={companionData}
-          onLogFood={logFoodFromVoice} onAddWater={addWaterCups}
-          onClose={()=>{ setHomeVoice(false); setVoiceState(null); }} videoOverrides={videoOverrides} onState={setVoiceState} />
-      )}
     </>
-    );
-  }
+  );
 
   if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} /></>);
 
@@ -6842,6 +6836,9 @@ export default function BodyMorph() {
   if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={()=>setPhase("home")} /></>);
 
   return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
+  })();
+
+  return (<>{screen}{voiceCoachEl}</>);
 }
 
 // ── STYLES ────────────────────────────────────────────────────────────────────
