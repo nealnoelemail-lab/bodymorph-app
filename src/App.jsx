@@ -1842,13 +1842,13 @@ function Wizard({ onComplete }) {
   const steps = [
     <div key="firstname" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
       <div style={{ ...S.stepLabel, fontSize:26 }}>FIRST NAME</div>
-      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="First name" value={p.firstName} onChange={e=>set("firstName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.firstName.trim()) setStep(1); }} />
+      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="First Name" value={p.firstName} onChange={e=>set("firstName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.firstName.trim()) setStep(1); }} />
       <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
     </div>,
 
     <div key="lastname" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
       <div style={{ ...S.stepLabel, fontSize:26 }}>LAST NAME</div>
-      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Last name" value={p.lastName} onChange={e=>set("lastName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.lastName.trim()) setStep(2); }} />
+      <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Last Name" value={p.lastName} onChange={e=>set("lastName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.lastName.trim()) setStep(2); }} />
       <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
     </div>,
 
