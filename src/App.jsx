@@ -3079,7 +3079,7 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
         setInterim("🎙 Hearing you…");
       } else if (hasAudio && !silenceTimer) {
         // End-of-speech: stop & transcribe after a short silence (snappy response).
-        silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 700);
+        silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 550);
       }
       if (recorder.state === "recording") requestAnimationFrame(checkSilence);
     };
@@ -3099,9 +3099,9 @@ Start by greeting ${profile.name} warmly by name, naming today's session in one 
       const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
       const formData = new FormData();
       formData.append("file", blob, `audio.${ext}`);
-      formData.append("model", "whisper-1");
+      formData.append("model", "gpt-4o-mini-transcribe"); // faster than whisper-1
       formData.append("language", "en");
-      log("sending to Whisper…");
+      log("sending to transcribe…");
       try {
         const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
           method: "POST",
