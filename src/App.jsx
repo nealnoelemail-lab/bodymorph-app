@@ -18,6 +18,21 @@ const GLOBAL_CSS = `
   .fade-in { animation: fadeIn 0.35s ease both; }
   @keyframes voiceSlide { 0% { transform:translateX(-100%); } 100% { transform:translateX(330%); } }
   .voice-bar-seg { animation: voiceSlide 1.1s ease-in-out infinite; }
+  /* Chrome/silver light that travels around a card's edge */
+  @property --vc-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+  @keyframes vcSpin  { to { --vc-angle: 360deg; } }
+  @keyframes vcSweep { 0% { --vc-angle: 0deg; } 35% { --vc-angle: 360deg; } 100% { --vc-angle: 360deg; } }
+  .silver-edge { position: relative; }
+  .silver-edge::before {
+    content:""; position:absolute; inset:0; border-radius:inherit; padding:1.6px;
+    background: conic-gradient(from var(--vc-angle), transparent 0 60%, rgba(210,213,226,0.45) 74%, #ffffff 84%, rgba(210,213,226,0.45) 90%, transparent 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    pointer-events:none;
+  }
+  .silver-edge.vc-on::before   { animation: vcSpin 4s linear infinite; }
+  .silver-edge.vc-idle::before { animation: vcSweep 3s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
     50%       { opacity: 0.60; }
@@ -2573,8 +2588,9 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         {/* Voice Coach + Hydration side by side */}
         <div style={{ display:"flex", gap:8 }}>
 
-          {/* Voice Coach — tap to start/stop. Active indicator is a small bar at the card bottom. */}
-          <button onClick={onVoiceCoach} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid "+(voiceActive?accent:"#2a2a3d"), borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
+          {/* Voice Coach — tap to start/stop. Silver light circles the edge:
+              continuously when active, a slow sweep every 3s when idle. */}
+          <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid "+(voiceActive?accent:"#2a2a3d"), borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
             <div style={{ display:"flex", alignItems:"center", gap:7 }}>
               <span style={{ fontSize:20 }}>🎙️</span>
               <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:accent }}>VOICE COACH</span>
