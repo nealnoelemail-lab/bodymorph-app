@@ -37,7 +37,7 @@ const GLOBAL_CSS = `
     -webkit-mask-composite: xor; mask-composite: exclude;
     pointer-events:none;
   }
-  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 3s linear infinite; }
+  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 2s linear infinite; }
   .silver-edge.vc-idle::before { animation: vcSweep 6s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
