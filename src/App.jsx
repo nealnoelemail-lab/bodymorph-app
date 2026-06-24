@@ -37,7 +37,7 @@ const GLOBAL_CSS = `
     -webkit-mask-composite: xor; mask-composite: exclude;
     pointer-events:none;
   }
-  .silver-edge.vc-on::before   { opacity:1; animation: vcSpin 7s linear infinite; }
+  .silver-edge.vc-on::before   { opacity:1; filter: brightness(1.2); animation: vcSpin 5s linear infinite; }
   .silver-edge.vc-idle::before { animation: vcSweep 6s linear infinite; }
   @keyframes silhouetteGlow {
     0%, 100% { opacity: 0.35; }
@@ -2596,17 +2596,12 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
           {/* Voice Coach — tap to start/stop. Silver light circles the edge:
               continuously when active, a slow sweep every 3s when idle. */}
-          <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid "+(voiceActive?accent:"#2a2a3d"), borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
+          <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
             <div style={{ display:"flex", alignItems:"center", gap:7 }}>
               <span style={{ fontSize:20 }}>🎙️</span>
               <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:accent }}>VOICE COACH</span>
             </div>
-            <div style={{ color:"#9898b8", fontSize:12.5 }}>{voiceActive ? (voiceState==="speaking"?"Coaching…":voiceState==="processing"?"Thinking…":voiceState==="listening"?"Listening…":"Connecting…")+"  ·  tap to stop" : "Tap to talk with your coach"}</div>
-            {voiceActive && (
-              <div style={{ position:"absolute", left:0, right:0, bottom:0, height:4, background:"#101018", overflow:"hidden" }}>
-                <div className="voice-bar-seg" style={{ width:"30%", height:"100%", background: voiceState==="listening" ? "#3ddc84" : voiceState==="processing" ? "#3d8eff" : accent, borderRadius:99 }} />
-              </div>
-            )}
+            <div style={{ color:"#9898b8", fontSize:12.5 }}>{voiceActive ? "Coaching… · tap to stop" : "Tap to talk with your coach"}</div>
           </button>
 
           {/* Hydration — built exactly like Steps: tap to type cups, ✓ to save */}
