@@ -105,6 +105,7 @@ const STRETCHPLAN_KEY = "bodymorph_stretchplan_v2";
 const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
 const VIDEO_KEY    = "bodymorph_videos_v2";
 const COACH_CONVO_KEY = "bodymorph_coachconvo_v2"; // today's voice-coach conversation, for memory across opens
+const COACH_SUMMARY_KEY = "bodymorph_coachsummary_v2"; // rolling daily summaries (last 7 days) for longer-term memory
 const HYDRATION_KEY = "bodymorph_hydration_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
@@ -2793,6 +2794,40 @@ async function fetchFormCues(videoId, exerciseName) {
   }
 }
 
+// ── COACH MEMORY ──────────────────────────────────────────────────────────────
+// Distill a finished day's conversation into a 1-2 sentence note worth remembering.
+async function summarizeCoachDay(messages, name) {
+  const convo = (messages || [])
+    .filter(m => !(m.role === "user" && (m.content.startsWith("(") || m.content === "Begin the session.")))
+    .map(m => `${m.role === "user" ? name : "Coach"}: ${m.content}`)
+    .join("\n").slice(0, 4000);
+  if (convo.trim().length < 20) return "";
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 110,
+        system: "Summarize this day's fitness-coaching conversation into 1-2 short sentences capturing ONLY facts worth remembering for future sessions: workouts/PRs, how they felt, soreness or pain mentioned, nutrition/hydration notes, goals, and struggles. Be specific and concise. Return only the summary, no preamble.",
+        messages: [{ role: "user", content: convo }],
+      }),
+    });
+    const data = await res.json();
+    return data.content?.[0]?.text?.trim() || "";
+  } catch { return ""; }
+}
+
+// Load rolling daily summaries, keeping only the last 7 days.
+function loadCoachSummaries() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COACH_SUMMARY_KEY) || "null");
+    const entries = (saved && Array.isArray(saved.entries)) ? saved.entries : [];
+    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    return entries.filter(e => e && e.date && e.date >= cutoff).slice(-7);
+  } catch { return []; }
+}
+
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
 function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater }) {
   const [vs, setVs]           = useState("idle");
@@ -2817,6 +2852,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   const audioCtxRef  = useRef(null);
   const analyserRef  = useRef(null);
   const lastTickRef  = useRef(0); // heartbeat — last time the listen loop ran a frame
+  const recentSummaryRef = useRef([]); // rolling last-7-days summaries
 
   const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
 
@@ -2890,7 +2926,10 @@ TODAY'S STATUS (use this; don't ask about things you already know):
 • Snacks — ${mealLine("snacks", m.snacks)}.
 • Calories so far: ${cd.calories?.total||0} of ${cd.calories?.goal||0}. Protein: ${cd.protein?.total||0} of ${cd.protein?.goal||0}g.
 • ${workoutLine}
-
+${recentSummaryRef.current.length ? `
+WHAT YOU REMEMBER FROM THE PAST WEEK (bring up naturally when relevant — do NOT recite this list):
+${recentSummaryRef.current.map(e => `• ${e.date}: ${e.text}`).join("\n")}
+` : ""}
 RUN A NATURAL CHECK-IN — ONE topic at a time, short turns, and WAIT for their reply before moving to the next. Flow:
 1. Greet ${profile.name} by name for the ${cd.timeOfDay||"day"} and ask how they're doing.
 2. HYDRATION: if they're below their water goal, warmly encourage a glass. If they say they drank water, log it (see WATER tag).
@@ -3206,12 +3245,27 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   useEffect(() => {
     closedRef.current = false;
     window.speechSynthesis.getVoices();
-    // Load today's earlier conversation so the coach continues instead of starting over.
+    // Long-term memory: last 7 days of daily summaries.
+    recentSummaryRef.current = loadCoachSummaries();
+    // Today's earlier conversation so the coach continues instead of starting over.
     try {
-      const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
       const today = new Date().toISOString().slice(0,10);
+      const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
       if (saved && saved.date === today && Array.isArray(saved.messages) && saved.messages.length) {
-        messagesRef.current = saved.messages;
+        messagesRef.current = saved.messages; // same day → continue verbatim
+      } else if (saved && Array.isArray(saved.messages) && saved.messages.length) {
+        // A new day: fold the previous day's chat into the rolling 7-day summary, then start fresh.
+        const prevDate = saved.date, prevMsgs = saved.messages;
+        messagesRef.current = [];
+        try { localStorage.removeItem(COACH_CONVO_KEY); } catch {}
+        summarizeCoachDay(prevMsgs, profile.name).then(text => {
+          if (!text) return;
+          const entries = loadCoachSummaries().filter(e => e.date !== prevDate);
+          entries.push({ date: prevDate, text });
+          const trimmed = entries.slice(-7);
+          recentSummaryRef.current = trimmed;
+          try { localStorage.setItem(COACH_SUMMARY_KEY, JSON.stringify({ entries: trimmed })); } catch {}
+        });
       }
     } catch {}
     arm();
