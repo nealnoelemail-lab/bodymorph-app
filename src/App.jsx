@@ -2830,7 +2830,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onCheckTodo, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onCheckTodo, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2967,6 +2967,7 @@ TODAY'S STATUS (use this; don't ask about things you already know):
 • Dinner — ${mealLine("dinner", m.dinner)}.
 • Snacks — ${mealLine("snacks", m.snacks)}.
 • Calories so far: ${cd.calories?.total||0} of ${cd.calories?.goal||0}. Protein: ${cd.protein?.total||0} of ${cd.protein?.goal||0}g.
+• Steps today: ${cd.steps||0}.
 • ${workoutLine}
 
 TODAY'S TO-DO LIST ([x] = already checked off, [ ] = still open):
@@ -3006,6 +3007,12 @@ CORRECTING WATER — if ${profile.name} corrects a mistake (e.g. "no, I only had
 • Set the exact total they tell you: |||WATER:{"set":1}|||  (use when they state the correct running total, e.g. "I've only had 1 cup all day")
 • Subtract with a negative number: |||WATER:{"cups":-1}|||  (use to remove cups you just over-logged)
 Confirm the fix warmly ("Got it, fixed that — you're at 1 cup"). Never read the tag aloud.
+
+LOGGING / CORRECTING STEPS — ${profile.name} has ${cd.steps||0} steps logged today. When they tell you a step count, record it:
+• Exact total ("I hit 8,000 steps", "my watch says 10k"): |||STEPS:{"set":8000}|||
+• Add more ("I just walked another 2,000"): |||STEPS:{"add":2000}|||
+• Fix an over-count ("that was wrong, take off 3,000"): |||STEPS:{"add":-3000}|||
+Confirm naturally ("Nice, you're at 8,000 today"). Never read the tag aloud.
 
 ${messagesRef.current.length
   ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly and warmly by name as their Coach and pick up naturally. Do NOT restart the check-in or re-ask anything you already covered (don't ask "how are you" again or re-ask about water if you already did). Reference earlier topics when it fits and move forward — e.g. ask about a meal they hadn't eaten yet, or how something from earlier went.`
@@ -3053,7 +3060,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
-    const re = /\|\|\|(LOG|FOOD|WATER|TODO):(\{[^}]*\})\|\|\|/g;
+    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO):(\{[^}]*\})\|\|\|/g;
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
@@ -3072,11 +3079,12 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           onAddWater(d); confirm = (parseInt(d) < 0) ? `✓ Water corrected` : `✓ Water logged`;
         }
       }
+      else if (m[1] === "STEPS" && onLogSteps) { onLogSteps(obj); confirm = (obj.set !== undefined) ? `✓ Steps set to ${Math.max(0, parseInt(obj.set)||0)}` : `✓ Steps updated`; }
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
     }
     return confirm;
   };
-  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER|TODO):\{[^}]*\}\|\|\|/g, "").trim();
+  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO):\{[^}]*\}\|\|\|/g, "").trim();
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
@@ -6885,6 +6893,19 @@ export default function BodyMorph() {
       return [{ ...entry }, ...without].sort((a,b)=> a.date < b.date ? 1 : -1);
     });
   };
+  // Voice companion: set or adjust today's step count. {set:N} = exact total; {add:N} = add (N may be negative). Never below 0.
+  const logStepsFromVoice = ({ set, add }) => {
+    const today = new Date().toISOString().slice(0,10);
+    setStepEntries(prev => {
+      const cur = (prev.find(e => e.date === today)?.steps) || 0;
+      let val;
+      if (set !== undefined) val = parseInt(set) || 0;
+      else val = cur + (parseInt(add) || 0);
+      val = Math.max(0, val);
+      const without = prev.filter(e => e.date !== today);
+      return [{ date: today, steps: val }, ...without].sort((a,b)=> a.date < b.date ? 1 : -1);
+    });
+  };
 
   const upsertById = (setter) => (entry) => {
     setter(prev => {
@@ -7055,6 +7076,7 @@ export default function BodyMorph() {
       meals: { breakfast: slotInfo("breakfast"), lunch: slotInfo("lunch"), dinner: slotInfo("dinner"), snacks: slotInfo("snacks") },
       calories: { total: Math.round(calTotal), goal: cMacros.cals||2000 },
       protein: { total: Math.round(pTotal), goal: cMacros.protein||0 },
+      steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length } : null,
       todos,
     };
@@ -7073,6 +7095,7 @@ export default function BodyMorph() {
       onRemoveFood={removeFoodFromVoice}
       onAddWater={addWaterCups}
       onSetWater={setHydrationCups}
+      onLogSteps={logStepsFromVoice}
       onCheckTodo={checkTodo}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
