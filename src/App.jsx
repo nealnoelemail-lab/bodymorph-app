@@ -3326,7 +3326,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       const vol = data.reduce((a, b) => a + b, 0) / data.length;
       // Require sustained sound (~3 frames > 15) to count as real speech, so background
       // noise doesn't get captured and sent off.
-      if (vol > 15) loudFrames++; else loudFrames = 0;
+      if (vol > 9) loudFrames++; else loudFrames = 0; // lower floor → normal speaking volume registers (no need to raise your voice)
       if (loudFrames >= 3) {
         hasAudio = true;
         idleNudgeRef.current = 0; // they're engaged again
