@@ -112,10 +112,31 @@ const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
+const ELEVEN_KEY = import.meta.env.VITE_ELEVENLABS_KEY; // ElevenLabs TTS (natural / cloned coach voices)
+const COACH_VOICE_KEY = "bodymorph_coachvoice_v2";      // { id, name } — which ElevenLabs voice the coach speaks in
 const APP_PINK = "#ff79c6";
 
-// Unlock iOS speech synthesis. MUST be called synchronously inside a user-gesture
-// handler (a tap) — speaking a short line here lets later programmatic speech play.
+// A few ElevenLabs premade voices to start with (until a trainer's own voice is cloned).
+// A cloned coach voice is just another { id, name } pasted in Settings — same playback path.
+const ELEVEN_VOICES = [
+  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel — warm female" },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella — soft female" },
+  { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi — strong female" },
+  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam — deep male" },
+  { id: "ErXwobaYiN019PkySvjV", name: "Antoni — warm male" },
+  { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh — young male" },
+];
+const DEFAULT_COACH_VOICE = ELEVEN_VOICES[0];
+
+// One reusable <audio> element for ElevenLabs playback. iOS only lets audio play after
+// a user gesture, and the unlock is PER-ELEMENT — so we unlock THIS element in the tap
+// (primeTTS) and reuse it for every coach line. A fresh `new Audio()` later would be muted.
+let coachAudio = null;
+// Tiny silent WAV — played once in the gesture to flip the element to "allowed".
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+// Unlock iOS speech synthesis AND the ElevenLabs audio element. MUST be called
+// synchronously inside a user-gesture handler (a tap).
 function primeTTS() {
   try {
     window.speechSynthesis.cancel();
@@ -124,6 +145,12 @@ function primeTTS() {
     const pv = voices.find(v => v.lang === "en-US" && v.localService) || voices.find(v => v.lang.startsWith("en"));
     if (pv) u.voice = pv;
     window.speechSynthesis.speak(u);
+  } catch {}
+  // Unlock the reusable audio element for ElevenLabs (no-op if it later goes unused).
+  try {
+    if (!coachAudio) { coachAudio = new Audio(); coachAudio.preload = "auto"; }
+    coachAudio.src = SILENT_WAV;
+    coachAudio.play().catch(() => {});
   } catch {}
 }
 
@@ -2496,7 +2523,23 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Settings({ profile, onBack, onResetProfile }) {
+function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
+  const [customId, setCustomId] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const isCustom = coachVoice && !ELEVEN_VOICES.some(v => v.id === coachVoice.id);
+  const previewVoice = (id) => {
+    if (!id || previewing) return;
+    if (!ELEVEN_KEY) { alert("Add your ElevenLabs API key (VITE_ELEVENLABS_KEY) to hear voices."); return; }
+    setPreviewing(true);
+    fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}`, {
+      method: "POST",
+      headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+      body: JSON.stringify({ text: `Hey ${profile.name}, it's Coach. Let's have a great session.`, model_id: "eleven_turbo_v2_5" }),
+    })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
+      .then(b => { const a = new Audio(URL.createObjectURL(b)); a.onended = () => setPreviewing(false); a.onerror = () => setPreviewing(false); return a.play(); })
+      .catch(e => { setPreviewing(false); alert("Couldn't play preview: " + e.message); });
+  };
   const items = [
     { label:"Change Password", icon:"🔒", note:"Coming soon — requires account backend", action: ()=>alert("Coming soon.") },
     { label:"Update Payment", icon:"💳", note:"Coming soon — requires payment backend", action: ()=>alert("Coming soon.") },
@@ -2513,6 +2556,35 @@ function Settings({ profile, onBack, onResetProfile }) {
       </div>
       <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
         <div style={{ color:"#9898b8", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
+
+        {/* ── Coach voice (ElevenLabs) ── */}
+        <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+            <span style={{ fontSize:22 }}>🎙️</span>
+            <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>Coach Voice</div>
+          </div>
+          <div style={{ fontSize:12, color:"#9898b8", marginBottom:10 }}>
+            The voice your coach speaks in.{!ELEVEN_KEY ? " (Add an ElevenLabs API key to enable — using the basic phone voice until then.)" : ""}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+            {ELEVEN_VOICES.map(v => (
+              <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: coachVoice?.id===v.id ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${coachVoice?.id===v.id ? "#e8ff00" : "#2a2a3d"}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+                <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{coachVoice?.id===v.id ? "✓" : ""}</span>
+                <span style={{ flex:1, fontSize:14, color:"#f0f0f8" }}>{v.name}</span>
+                <span onClick={(e)=>{ e.stopPropagation(); previewVoice(v.id); }} style={{ fontSize:12, color:"#9898b8", border:"1px solid #2a2a3d", borderRadius:6, padding:"3px 8px" }}>▶ Preview</span>
+              </button>
+            ))}
+          </div>
+          {/* Cloned coach voice: paste the ElevenLabs Voice ID */}
+          <div style={{ marginTop:12, fontSize:12, color:"#9898b8", marginBottom:6 }}>Coach's cloned voice — paste its ElevenLabs Voice ID:</div>
+          <div style={{ display:"flex", gap:7 }}>
+            <input value={customId} onChange={e=>setCustomId(e.target.value.trim())} placeholder={isCustom ? coachVoice.id : "e.g. a1B2c3D4..."} style={{ flex:1, background:"#0e0e16", border:`1px solid ${isCustom ? "#e8ff00" : "#2a2a3d"}`, borderRadius:8, color:"#f0f0f8", padding:"9px 11px", fontSize:13, outline:"none" }} />
+            <button onClick={()=>{ if(customId){ onSetVoice({ id: customId, name: "Coach (cloned voice)" }); previewVoice(customId); } }} style={{ background:"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"0 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Use</button>
+          </div>
+          {isCustom && <div style={{ marginTop:8, fontSize:12, color:"#e8ff00" }}>✓ Using cloned voice: {coachVoice.id}</div>}
+          {previewing && <div style={{ marginTop:8, fontSize:12, color:"#9898b8" }}>▶ Playing preview…</div>}
+        </div>
+
         {items.map(item => (
           <button key={item.label} onClick={item.action} style={{ display:"flex", alignItems:"center", gap:14, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%" }}>
             <span style={{ fontSize:22 }}>{item.icon}</span>
@@ -2830,7 +2902,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onCheckTodo, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onCheckTodo, voiceId, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2843,6 +2915,8 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const log = useCallback((m) => setDbg(d => [...d.slice(-4), m]), []);
 
   const vsRef        = useRef("idle");
+  const voiceIdRef   = useRef(null);
+  voiceIdRef.current = voiceId; // current ElevenLabs voice id (null → browser TTS)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -3092,19 +3166,8 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!text || closedRef.current) { onDone?.(); return; }
     speakingRef.current = true;
     setState("speaking");
-    window.speechSynthesis.cancel();
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 1.05;
-    utt.pitch = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const pick = voices.find(v => v.lang === "en-US" && v.name.includes("Samantha"))
-              || voices.find(v => v.lang === "en-US" && v.localService)
-              || voices.find(v => v.lang.startsWith("en"));
-    if (pick) utt.voice = pick;
-
-    // iOS Safari frequently never fires onend. Guard with a poll + a hard cap so
-    // the listen loop always resumes. `finish` runs exactly once.
+    // Shared one-shot finisher: stops BOTH engines, clears timers, resumes the loop.
     let done = false;
     let pollId = null, capId = null, bargeRaf = null;
     const finish = (barged) => {
@@ -3113,30 +3176,17 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       clearInterval(pollId);
       clearTimeout(capId);
       if (bargeRaf) cancelAnimationFrame(bargeRaf);
-      window.speechSynthesis.cancel(); // stop talking immediately (esp. on barge-in)
+      try { window.speechSynthesis.cancel(); } catch {}
+      try { if (coachAudio) { coachAudio.pause(); coachAudio.onended = null; coachAudio.onerror = null; } } catch {}
       speakingRef.current = false;
       onDone?.(barged === true);
     };
-    utt.onend = finish;
-    utt.onerror = finish;
 
-    window.speechSynthesis.speak(utt);
-
-    // Poll: once it has actually started and then stops speaking, we're done.
-    let started = false;
-    pollId = setInterval(() => {
-      if (closedRef.current) { finish(); return; }
-      if (window.speechSynthesis.speaking) started = true;
-      else if (started) finish();
-    }, 250);
-    // Hard cap based on word count (~2.8 words/sec) + buffer.
-    const secs = Math.min(30, Math.max(4, (text.split(/\s+/).length / 2.8) + 2));
-    capId = setTimeout(finish, secs * 1000);
-
-    // ── BARGE-IN: if the user starts talking over the coach, stop and listen ──
+    // ── BARGE-IN: a sustained real voice over the coach stops it and starts listening.
     // Grace period so the coach's own audio (echo) doesn't trigger it instantly.
-    const an = analyserRef.current;
-    if (an) {
+    const startBargeWatch = () => {
+      const an = analyserRef.current;
+      if (!an) return;
       const buf = new Uint8Array(an.frequencyBinCount);
       let loud = 0;
       const graceUntil = performance.now() + 900;
@@ -3145,14 +3195,73 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         an.getByteFrequencyData(buf);
         const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
         setMicLevel(vol);
-        // Only a genuine, sustained voice should interrupt — not a noise blip or echo.
         if (performance.now() > graceUntil && vol > 42) {
           if (++loud >= 12) { log("barge-in → listening"); finish(true); return; } // ~200ms of real speech
         } else { loud = 0; }
         bargeRaf = requestAnimationFrame(watch);
       };
       bargeRaf = requestAnimationFrame(watch);
-    }
+    };
+
+    // ── Browser speechSynthesis (fallback engine — robotic but always available) ──
+    const browserSpeak = () => {
+      try { window.speechSynthesis.cancel(); } catch {}
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 1.05; utt.pitch = 1.0;
+      const voices = window.speechSynthesis.getVoices();
+      const pick = voices.find(v => v.lang === "en-US" && v.name.includes("Samantha"))
+                || voices.find(v => v.lang === "en-US" && v.localService)
+                || voices.find(v => v.lang.startsWith("en"));
+      if (pick) utt.voice = pick;
+      utt.onend = finish; utt.onerror = finish;
+      window.speechSynthesis.speak(utt);
+      // iOS Safari often never fires onend → poll + hard cap so the loop always resumes.
+      let started = false;
+      pollId = setInterval(() => {
+        if (closedRef.current) { finish(); return; }
+        if (window.speechSynthesis.speaking) started = true;
+        else if (started) finish();
+      }, 250);
+      const secs = Math.min(30, Math.max(4, (text.split(/\s+/).length / 2.8) + 2));
+      capId = setTimeout(finish, secs * 1000);
+      startBargeWatch();
+    };
+
+    // ── ElevenLabs (natural / cloned coach voice) — falls back to browser on any error ──
+    const elevenSpeak = async () => {
+      try {
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceIdRef.current}`, {
+          method: "POST",
+          signal: AbortSignal.timeout(12000),
+          headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+          body: JSON.stringify({
+            text,
+            model_id: "eleven_turbo_v2_5", // low-latency model
+            voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true },
+          }),
+        });
+        if (!res.ok || closedRef.current || done) { if (!res.ok) log("ElevenLabs HTTP " + res.status); throw new Error("tts " + res.status); }
+        const blob = await res.blob();
+        if (closedRef.current || done) return;
+        const url = URL.createObjectURL(blob);
+        if (!coachAudio) coachAudio = new Audio();
+        coachAudio.src = url;
+        coachAudio.onended = () => { URL.revokeObjectURL(url); finish(); };
+        coachAudio.onerror = () => { URL.revokeObjectURL(url); if (!done) finish(); };
+        // Safety cap in case onended never fires.
+        const secs = Math.min(40, Math.max(5, (text.split(/\s+/).length / 2.6) + 3));
+        capId = setTimeout(finish, secs * 1000);
+        await coachAudio.play();
+        startBargeWatch();
+      } catch (e) {
+        log("ElevenLabs fail → browser voice: " + e.message);
+        if (!done && !closedRef.current) browserSpeak();
+        else if (!done) finish();
+      }
+    };
+
+    if (ELEVEN_KEY && voiceIdRef.current) elevenSpeak();
+    else browserSpeak();
   }, [log]);
 
   // ── Whisper-based recorder (works on iOS + Android + desktop) ────────────────
@@ -6655,6 +6764,7 @@ export default function BodyMorph() {
   const [cardioPlan, setCardioPlan] = useState({});
   const [stretchPlan, setStretchPlan] = useState({});
   const [stretchRoutines, setStretchRoutines] = useState(DEFAULT_ROUTINES);
+  const [coachVoice, setCoachVoice] = useState(DEFAULT_COACH_VOICE); // ElevenLabs voice for the coach
   const [toast, setToast]     = useState(null);
   const [loaded, setLoaded]   = useState(false);
   const [hydration, setHydration] = useState({ date: new Date().toISOString().slice(0,10), cups: 0, goal: 8 });
@@ -6687,6 +6797,8 @@ export default function BodyMorph() {
         const shyd = await Store.get(HYDRATION_KEY);
         const stodo = await Store.get(TODO_CHECKED_KEY);
         if (stodo && typeof stodo === "object") setTodoChecked(stodo);
+        const svoice = await Store.get(COACH_VOICE_KEY);
+        if (svoice && svoice.id) setCoachVoice(svoice);
         if (sl) setLogs(sl);
         if (sm) setRewards(sm);
         if (sb) setBodyEntries(sb);
@@ -6758,6 +6870,7 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(VIDEO_KEY, videoOverrides); }, [videoOverrides, loaded]);
   useEffect(() => { if (loaded) Store.set(HYDRATION_KEY, hydration); }, [hydration, loaded]);
   useEffect(() => { if (loaded) Store.set(TODO_CHECKED_KEY, todoChecked); }, [todoChecked, loaded]);
+  useEffect(() => { if (loaded) Store.set(COACH_VOICE_KEY, coachVoice); }, [coachVoice, loaded]);
 
   const toggleTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: !prev[key] }));
   const checkTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: true }));
@@ -7097,6 +7210,7 @@ export default function BodyMorph() {
       onSetWater={setHydrationCups}
       onLogSteps={logStepsFromVoice}
       onCheckTodo={checkTodo}
+      voiceId={coachVoice?.id}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
       onClose={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }}
@@ -7145,7 +7259,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
