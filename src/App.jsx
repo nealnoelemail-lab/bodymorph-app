@@ -2854,6 +2854,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   const lastTickRef  = useRef(0); // heartbeat — last time the listen loop ran a frame
   const recentSummaryRef = useRef([]); // rolling last-7-days summaries
   const idleNudgeRef = useRef(0); // how many times we've nudged a silent user in a row
+  const turnRef = useRef(0); // monotonic turn id — only the latest turn is allowed to speak
 
   const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
 
@@ -3059,14 +3060,15 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (an) {
       const buf = new Uint8Array(an.frequencyBinCount);
       let loud = 0;
-      const graceUntil = performance.now() + 700;
+      const graceUntil = performance.now() + 900;
       const watch = () => {
         if (done || closedRef.current) return;
         an.getByteFrequencyData(buf);
         const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
         setMicLevel(vol);
-        if (performance.now() > graceUntil && vol > 32) {
-          if (++loud >= 6) { log("barge-in → listening"); finish(true); return; } // ~100ms of speech
+        // Only a genuine, sustained voice should interrupt — not a noise blip or echo.
+        if (performance.now() > graceUntil && vol > 42) {
+          if (++loud >= 12) { log("barge-in → listening"); finish(true); return; } // ~200ms of real speech
         } else { loud = 0; }
         bargeRaf = requestAnimationFrame(watch);
       };
@@ -3099,6 +3101,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     const chunks = [];
     let silenceTimer = null;
     let hasAudio = false;
+    let loudFrames = 0;   // consecutive frames above threshold (filters brief noise spikes)
     let idleStop = false; // stopped because the user never said anything (for a check-in)
     const listenStart = performance.now();
     const data = new Uint8Array(analyser.frequencyBinCount);
@@ -3108,7 +3111,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       lastTickRef.current = performance.now(); // heartbeat for the watchdog
       analyser.getByteFrequencyData(data);
       const vol = data.reduce((a, b) => a + b, 0) / data.length;
-      if (vol > 8) {
+      // Require sustained sound (~3 frames > 15) to count as real speech, so background
+      // noise doesn't get captured and sent off.
+      if (vol > 15) loudFrames++; else loudFrames = 0;
+      if (loudFrames >= 3) {
         hasAudio = true;
         idleNudgeRef.current = 0; // they're engaged again
         clearTimeout(silenceTimer);
@@ -3137,6 +3143,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         setTimeout(startListening, 250);
         return;
       }
+      const myTurn = ++turnRef.current; // claim this turn
       setState("processing");
       setInterim("");
       const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
@@ -3154,13 +3161,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         });
         if (!res.ok) { log("Whisper HTTP " + res.status); }
         const data = await res.json();
-        const text = data.text?.trim();
-        log(text ? ("heard: " + text) : ("Whisper empty" + (data.error ? ": " + data.error.message : "")));
-        if (text && !closedRef.current) {
+        const text = (data.text || "").trim();
+        // Reject silence/noise + Whisper's common hallucinations on quiet audio.
+        const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
+        const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
+        const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
+        log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
+        if (closedRef.current || turnRef.current !== myTurn) return; // superseded by a newer turn
+        if (text && !isNoise) {
           setLastUser(text);
           askRef.current?.(text, false);
-        } else if (!closedRef.current) {
-          setTimeout(startListening, 300);
+        } else {
+          setTimeout(startListening, 250); // junk → just keep listening, no reply
         }
       } catch (e) {
         log("Whisper error: " + e.message);
@@ -3175,6 +3187,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // ── Claude API ─────────────────────────────────────────────────────────────
   const askClaude = useCallback(async (userText, isInit = false, idleNudge = false) => {
     if (closedRef.current) return;
+    const myTurn = turnRef.current; // if a newer turn starts, this response is abandoned
     setState("processing");
     if (!isInit && !idleNudge) setLastUser(userText);
 
@@ -3205,7 +3218,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           messages: msgs,
         }),
       });
-      if (closedRef.current) return;
+      if (closedRef.current || turnRef.current !== myTurn) return; // superseded by a newer turn
       const data = await res.json();
       const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
 
