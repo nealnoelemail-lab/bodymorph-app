@@ -2526,7 +2526,9 @@ const IconProgramSummary = () => (
 function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const isCustom = coachVoice && !ELEVEN_VOICES.some(v => v.id === coachVoice.id);
+  const currentVoiceName = coachVoice ? (isCustom ? "Coach (cloned voice)" : coachVoice.name) : "Not set";
   const previewVoice = (id) => {
     if (!id || previewing) return;
     if (!ELEVEN_KEY) { alert("Add your ElevenLabs API key (VITE_ELEVENLABS_KEY) to hear voices."); return; }
@@ -2557,32 +2559,42 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
       <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
         <div style={{ color:"#9898b8", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
 
-        {/* ── Coach voice (ElevenLabs) ── */}
+        {/* ── Coach voice (ElevenLabs) — collapsible dropdown ── */}
         <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+          {/* Header row: tap to expand/collapse. Shows the currently selected voice when closed. */}
+          <button onClick={()=>setVoiceOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:10, background:"transparent", border:"none", padding:0, cursor:"pointer", width:"100%", textAlign:"left" }}>
             <span style={{ fontSize:22 }}>🎙️</span>
-            <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>Coach Voice</div>
-          </div>
-          <div style={{ fontSize:12, color:"#9898b8", marginBottom:10 }}>
-            The voice your coach speaks in.{!ELEVEN_KEY ? " (Add an ElevenLabs API key to enable — using the basic phone voice until then.)" : ""}
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
-            {ELEVEN_VOICES.map(v => (
-              <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: coachVoice?.id===v.id ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${coachVoice?.id===v.id ? "#e8ff00" : "#2a2a3d"}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
-                <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{coachVoice?.id===v.id ? "✓" : ""}</span>
-                <span style={{ flex:1, fontSize:14, color:"#f0f0f8" }}>{v.name}</span>
-                <span onClick={(e)=>{ e.stopPropagation(); previewVoice(v.id); }} style={{ fontSize:12, color:"#9898b8", border:"1px solid #2a2a3d", borderRadius:6, padding:"3px 8px" }}>▶ Preview</span>
-              </button>
-            ))}
-          </div>
-          {/* Cloned coach voice: paste the ElevenLabs Voice ID */}
-          <div style={{ marginTop:12, fontSize:12, color:"#9898b8", marginBottom:6 }}>Coach's cloned voice — paste its ElevenLabs Voice ID:</div>
-          <div style={{ display:"flex", gap:7 }}>
-            <input value={customId} onChange={e=>setCustomId(e.target.value.trim())} placeholder={isCustom ? coachVoice.id : "e.g. a1B2c3D4..."} style={{ flex:1, background:"#0e0e16", border:`1px solid ${isCustom ? "#e8ff00" : "#2a2a3d"}`, borderRadius:8, color:"#f0f0f8", padding:"9px 11px", fontSize:13, outline:"none" }} />
-            <button onClick={()=>{ if(customId){ onSetVoice({ id: customId, name: "Coach (cloned voice)" }); previewVoice(customId); } }} style={{ background:"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"0 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Use</button>
-          </div>
-          {isCustom && <div style={{ marginTop:8, fontSize:12, color:"#e8ff00" }}>✓ Using cloned voice: {coachVoice.id}</div>}
-          {previewing && <div style={{ marginTop:8, fontSize:12, color:"#9898b8" }}>▶ Playing preview…</div>}
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>Coach Voice</div>
+              <div style={{ fontSize:12, color:"#9898b8", marginTop:2 }}>{currentVoiceName}</div>
+            </div>
+            <span style={{ color:"#e8ff00", fontSize:18, lineHeight:1 }}>{voiceOpen ? "✕" : "▾"}</span>
+          </button>
+
+          {voiceOpen && (
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontSize:12, color:"#9898b8", marginBottom:10 }}>
+                The voice your coach speaks in.{!ELEVEN_KEY ? " (Add an ElevenLabs API key to enable — using the basic phone voice until then.)" : ""}
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                {ELEVEN_VOICES.map(v => (
+                  <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: coachVoice?.id===v.id ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${coachVoice?.id===v.id ? "#e8ff00" : "#2a2a3d"}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+                    <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{coachVoice?.id===v.id ? "✓" : ""}</span>
+                    <span style={{ flex:1, fontSize:14, color:"#f0f0f8" }}>{v.name}</span>
+                    <span onClick={(e)=>{ e.stopPropagation(); previewVoice(v.id); }} style={{ fontSize:12, color:"#9898b8", border:"1px solid #2a2a3d", borderRadius:6, padding:"3px 8px" }}>▶ Preview</span>
+                  </button>
+                ))}
+              </div>
+              {/* Cloned coach voice: paste the ElevenLabs Voice ID */}
+              <div style={{ marginTop:12, fontSize:12, color:"#9898b8", marginBottom:6 }}>Coach's cloned voice — paste its ElevenLabs Voice ID:</div>
+              <div style={{ display:"flex", gap:7 }}>
+                <input value={customId} onChange={e=>setCustomId(e.target.value.trim())} placeholder={isCustom ? coachVoice.id : "e.g. a1B2c3D4..."} style={{ flex:1, background:"#0e0e16", border:`1px solid ${isCustom ? "#e8ff00" : "#2a2a3d"}`, borderRadius:8, color:"#f0f0f8", padding:"9px 11px", fontSize:13, outline:"none" }} />
+                <button onClick={()=>{ if(customId){ onSetVoice({ id: customId, name: "Coach (cloned voice)" }); previewVoice(customId); } }} style={{ background:"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"0 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>Use</button>
+              </div>
+              {isCustom && <div style={{ marginTop:8, fontSize:12, color:"#e8ff00" }}>✓ Using cloned voice: {coachVoice.id}</div>}
+              {previewing && <div style={{ marginTop:8, fontSize:12, color:"#9898b8" }}>▶ Playing preview…</div>}
+            </div>
+          )}
         </div>
 
         {items.map(item => (
