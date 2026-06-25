@@ -104,6 +104,7 @@ const CARDIOPLAN_KEY = "bodymorph_cardioplan_v2";
 const STRETCHPLAN_KEY = "bodymorph_stretchplan_v2";
 const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
 const VIDEO_KEY    = "bodymorph_videos_v2";
+const COACH_CONVO_KEY = "bodymorph_coachconvo_v2"; // today's voice-coach conversation, for memory across opens
 const HYDRATION_KEY = "bodymorph_hydration_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
@@ -2908,7 +2909,9 @@ LOGGING WATER — when ${profile.name} says they drank water, append at the very
 |||WATER:{"cups":1}|||
 Use the number of cups/glasses they mention. Never say or read the tag aloud.
 
-Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} as their Coach (e.g. "Hey ${profile.name}, it's Coach — how are you doing this ${cd.timeOfDay||"morning"}?") and asking how they're doing.`;
+${messagesRef.current.length
+  ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly and warmly by name as their Coach and pick up naturally. Do NOT restart the check-in or re-ask anything you already covered (don't ask "how are you" again or re-ask about water if you already did). Reference earlier topics when it fits and move forward — e.g. ask about a meal they hadn't eaten yet, or how something from earlier went.`
+  : `Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} as their Coach (e.g. "Hey ${profile.name}, it's Coach — how are you doing this ${cd.timeOfDay||"morning"}?") and asking how they're doing.`}`;
     }
 
     // ── Workout mode ──
@@ -3125,9 +3128,12 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     setState("processing");
     if (!isInit) setLastUser(userText);
 
+    const prior = messagesRef.current;
     const msgs = isInit
-      ? [{ role: "user", content: "Begin the session." }]
-      : [...messagesRef.current, { role: "user", content: userText }];
+      ? (prior.length
+          ? [...prior, { role: "user", content: "(I just reopened the app a bit later in the day. Greet me briefly by name and pick up our conversation naturally — do not restart the check-in or re-ask what we already covered.)" }]
+          : [{ role: "user", content: "Begin the session." }])
+      : [...prior, { role: "user", content: userText }];
     if (!isInit) messagesRef.current = msgs;
 
     try {
@@ -3158,9 +3164,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       }
 
       setLastAI(cleanSpeak(aiText));
-      messagesRef.current = isInit
-        ? [{ role: "user", content: "Begin the session." }, { role: "assistant", content: aiText }]
-        : [...msgs, { role: "assistant", content: aiText }];
+      messagesRef.current = [...msgs, { role: "assistant", content: aiText }];
+      // Persist today's conversation so the coach remembers it on the next open.
+      try {
+        localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({
+          date: new Date().toISOString().slice(0,10),
+          messages: messagesRef.current.slice(-20),
+        }));
+      } catch {}
 
       log("coach replied → speaking");
       speak(aiText, () => { log("done speaking → listen"); if (!closedRef.current) startListening(); });
@@ -3195,6 +3206,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   useEffect(() => {
     closedRef.current = false;
     window.speechSynthesis.getVoices();
+    // Load today's earlier conversation so the coach continues instead of starting over.
+    try {
+      const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
+      const today = new Date().toISOString().slice(0,10);
+      if (saved && saved.date === today && Array.isArray(saved.messages) && saved.messages.length) {
+        messagesRef.current = saved.messages;
+      }
+    } catch {}
     arm();
     return () => {
       closedRef.current = true;
