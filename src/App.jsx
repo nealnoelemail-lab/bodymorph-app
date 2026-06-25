@@ -2829,7 +2829,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2882,7 +2882,8 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   }, []);
 
   // ── System prompt ──────────────────────────────────────────────────────────
-  const isWorkout = !companion && !!(day && day.workout && day.workout.length);
+  const isStretch = !!(stretchSession && stretchSession.items && stretchSession.items.length);
+  const isWorkout = !companion && !isStretch && !!(day && day.workout && day.workout.length);
 
   const coachName = "Coach";
   const PERSONA = `YOUR IDENTITY:
@@ -2903,6 +2904,28 @@ ABSOLUTE RULES — NEVER BREAK THESE:
 
   const buildSysPrompt = useCallback(() => {
     const today = new Date().toISOString().slice(0, 10);
+
+    if (isStretch) {
+      // ── Guided stretch session ──
+      const routineName = stretchSession.name || "stretch";
+      const list = stretchSession.items.map((s, i) => `${i + 1}. ${s}`).join("\n");
+      return `You are ${profile.name}'s personal stretch coach, guiding a calm, hands-free ${routineName} by voice.
+
+${PERSONA}
+
+THE ROUTINE (do these in order, one at a time):
+${list}
+
+HOW TO GUIDE THE SESSION:
+• Take ONE stretch at a time, in order. For each: name it, give a short setup cue and what they should feel, and tell them how long to hold (about 20-40 seconds; if it's a one-sided stretch, do both sides).
+• Keep your voice calm and soothing. Remind them to breathe. Keep each spoken turn to 1-3 short sentences.
+• When the hold is done, OR when ${profile.name} says they're ready / "next" / "done", gently transition to the next one ("Beautiful — let's ease into the next").
+• If they say they need more time, wait and reassure them. If they ask to skip or repeat one, honor it.
+• After the LAST stretch, give a short cooldown and a warm closing word, and let them know the routine is complete.
+• Coaching on form only — never medical advice. If something hurts, tell them to ease off gently.
+
+Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, then immediately guide the very first stretch.`;
+    }
 
     if (!isWorkout) {
       // ── Daily companion check-in (covers all aspects of health) ──
@@ -2991,7 +3014,7 @@ LOGGING SETS — When ${profile.name} tells you they completed a set (stating we
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
 
 Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright ${profile.name}, it's Coach — let's get to work"), naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
-  }, [profile, day, logs, isWorkout, PERSONA, companionData]);
+  }, [profile, day, logs, isWorkout, isStretch, stretchSession, PERSONA, companionData]);
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
@@ -3230,13 +3253,15 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
       setLastAI(cleanSpeak(aiText));
       messagesRef.current = [...msgs, { role: "assistant", content: aiText }];
-      // Persist today's conversation so the coach remembers it on the next open.
-      try {
-        localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({
-          date: new Date().toISOString().slice(0,10),
-          messages: messagesRef.current.slice(-20),
-        }));
-      } catch {}
+      // Persist today's companion conversation (not workout/stretch) for memory.
+      if (companion) {
+        try {
+          localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({
+            date: new Date().toISOString().slice(0,10),
+            messages: messagesRef.current.slice(-20),
+          }));
+        } catch {}
+      }
 
       log("coach replied → speaking");
       speak(aiText, () => { log("done speaking → listen"); if (!closedRef.current) startListening(); });
@@ -3273,8 +3298,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     window.speechSynthesis.getVoices();
     // Long-term memory: last 7 days of daily summaries.
     recentSummaryRef.current = loadCoachSummaries();
-    // Today's earlier conversation so the coach continues instead of starting over.
+    // Today's earlier conversation so the companion continues instead of starting over.
+    // (Workout / stretch sessions start fresh — they're self-contained.)
     try {
+      if (!companion) throw 0;
       const today = new Date().toISOString().slice(0,10);
       const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
       if (saved && saved.date === today && Array.isArray(saved.messages) && saved.messages.length) {
@@ -4648,7 +4675,12 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   );
 }
 
-function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo }) {
+function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch }) {
+  const startGuided = (routineId, label) => {
+    const ids = (routines && routines[routineId]) || DEFAULT_ROUTINES[routineId] || [];
+    const items = ids.map(id => (STRETCH_TYPES.find(x=>x.id===id)||{}).label).filter(Boolean);
+    if (items.length && onGuidedStretch) onGuidedStretch({ name: label, items });
+  };
   const [sel, setSel] = useState(new Date().getDay());
   const [editRoutine, setEditRoutine] = useState(null);
   const [videoStretch, setVideoStretch] = useState(null);  // routine id being configured
@@ -4743,6 +4775,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
+                <button onClick={()=>startGuided(t.id, t.label)} title="Guided voice session" style={{ flexShrink:0, background:"transparent", border:"1px solid #3ddc84", borderRadius:10, color:"#3ddc84", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9654; Guide</button>
                 <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#3d8eff", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
             );
@@ -6566,6 +6599,7 @@ export default function BodyMorph() {
   const [hydration, setHydration] = useState({ date: new Date().toISOString().slice(0,10), cups: 0, goal: 8 });
   const [homeVoice, setHomeVoice] = useState(false); // voice coach launched from home
   const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
+  const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items})
 
   // Load saved profile + logs + medals on first mount
   useEffect(() => {
@@ -6910,16 +6944,17 @@ export default function BodyMorph() {
   const voiceCoachEl = homeVoice ? (
     <VoiceCoach
       profile={profile}
-      day={inSession ? sessionDay : null}
+      day={(inSession && !stretchSession) ? sessionDay : null}
       logs={logs}
-      companion={!inSession}
+      companion={!inSession && !stretchSession}
       companionData={companionData}
-      onLogSet={inSession ? handleVoiceSetLog : undefined}
+      stretchSession={stretchSession}
+      onLogSet={(inSession && !stretchSession) ? handleVoiceSetLog : undefined}
       onLogFood={logFoodFromVoice}
       onAddWater={addWaterCups}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
-      onClose={()=>{ setHomeVoice(false); setVoiceState(null); }}
+      onClose={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }}
     />
   ) : null;
 
@@ -6969,7 +7004,7 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
