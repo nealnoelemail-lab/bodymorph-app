@@ -3220,7 +3220,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         an.getByteFrequencyData(buf);
         const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
         setMicLevel(vol);
-        if (performance.now() > graceUntil && vol > 40) { // require a clear, sustained voice to interrupt
+        if (performance.now() > graceUntil && vol > 38) { // require a clear, sustained voice to interrupt
           if (++loud >= 9) { log("barge-in → listening"); finish(true); return; } // ~150ms of real speech
         } else { loud = 0; }
         bargeRaf = requestAnimationFrame(watch);
@@ -3472,7 +3472,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           if (done || closedRef.current) return;
           an.getByteFrequencyData(buf);
           const vol = buf.reduce((a, b) => a + b, 0) / buf.length; setMicLevel(vol);
-          if (performance.now() > graceUntil && vol > 40) { if (++loud >= 9) { log("barge-in → listening"); endTurn(true); return; } }
+          if (performance.now() > graceUntil && vol > 38) { if (++loud >= 9) { log("barge-in → listening"); endTurn(true); return; } }
           else loud = 0;
           bargeRaf = requestAnimationFrame(watch);
         };
