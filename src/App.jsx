@@ -106,6 +106,7 @@ const ROUTINES_KEY = "bodymorph_stretch_routines_v2";
 const VIDEO_KEY    = "bodymorph_videos_v2";
 const COACH_CONVO_KEY = "bodymorph_coachconvo_v2"; // today's voice-coach conversation, for memory across opens
 const COACH_SUMMARY_KEY = "bodymorph_coachsummary_v2"; // rolling daily summaries (last 7 days) for longer-term memory
+const TODO_CHECKED_KEY = "bodymorph_todochecked_v2"; // checked-off to-do items, keyed by date:section:id
 const HYDRATION_KEY = "bodymorph_hydration_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
@@ -2829,7 +2830,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, onCheckTodo, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2948,6 +2949,10 @@ Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, 
       const workoutLine = w
         ? `Today is a training day — ${w.type}${w.focus ? " ("+w.focus+")" : ""}, ${w.count} exercises.`
         : "Today is a rest day — no training scheduled.";
+      const todos = cd.todos || [];
+      const todoListStr = todos.length
+        ? todos.map(t => `  - [${t.done ? "x" : " "}] ${t.label}  (key: ${t.key})`).join("\n")
+        : "  (no scheduled items today)";
 
       return `You are ${profile.name}'s personal health companion and coach, checking in by voice. This is a relaxed daily check-in — NOT a live workout. Be a warm, caring friend who happens to be a great coach.
 
@@ -2963,6 +2968,9 @@ TODAY'S STATUS (use this; don't ask about things you already know):
 • Snacks — ${mealLine("snacks", m.snacks)}.
 • Calories so far: ${cd.calories?.total||0} of ${cd.calories?.goal||0}. Protein: ${cd.protein?.total||0} of ${cd.protein?.goal||0}g.
 • ${workoutLine}
+
+TODAY'S TO-DO LIST ([x] = already checked off, [ ] = still open):
+${todoListStr}
 ${recentSummaryRef.current.length ? `
 WHAT YOU REMEMBER FROM THE PAST WEEK (bring up naturally when relevant — do NOT recite this list):
 ${recentSummaryRef.current.map(e => `• ${e.date}: ${e.text}`).join("\n")}
@@ -2974,8 +2982,13 @@ RUN A NATURAL CHECK-IN — ONE topic at a time, short turns, and WAIT for their 
 4. MOVEMENT: ask if they've stretched. If not, suggest they tap the Stretch button for a quick routine.
 5. NUTRITION: look at what's logged above. Acknowledge meals already logged. Ask about meals not logged yet. If they tell you what they ate, LOG IT for them (see FOOD tag) and confirm warmly. Nudge gently toward their protein goal if they're low.
 6. WORKOUT: give a short, upbeat overview of today's training (or affirm the rest day). Then hand off: "When you're at the gym and ready, just tap Training and start your session — I'll coach you through every set."
+${cd.isEvening ? `7. EVENING TO-DO REVIEW: it's evening, so wrap up the day by going through the to-do list above. Naturally walk through the items still open ([ ]) — gently ask if they got each one done. Cover them a few at a time, conversationally, NOT as a robotic roll-call. For every item they confirm they did, check it off for them with the TODO tag (below) and give a warm "nice, checking that off." Don't pester about items already marked [x]. When the list is essentially done, congratulate them on a solid day. If a few things are still undone, be encouraging — no guilt-tripping.` : `(It's not evening yet, so don't do the end-of-day to-do review now — just keep the natural check-in going.)`}
 
 Move through these conversationally based on their answers — do NOT dump all topics at once. Keep each turn to 1-3 sentences.
+
+CHECKING OFF TO-DO ITEMS — when ${profile.name} confirms they completed a to-do item, append this tag at the very END of your response (after your spoken words), copying the item's key EXACTLY as shown in the to-do list above:
+|||TODO:{"key":"PASTE-THE-EXACT-KEY-HERE"}|||
+You may include more than one TODO tag if they confirm several at once. Never say or read the key or the tag aloud — just speak naturally ("Awesome, checking that off for you").
 
 LOGGING FOOD — when ${profile.name} tells you what they ate, estimate reasonable macros and append this tag at the very END of your response, after your spoken words:
 |||FOOD:{"slot":"breakfast","name":"Oatmeal with banana","cal":320,"protein":10,"carbs":58,"fats":6}|||
@@ -3029,17 +3042,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
-    const re = /\|\|\|(LOG|FOOD|WATER):(\{[^}]*\})\|\|\|/g;
+    const re = /\|\|\|(LOG|FOOD|WATER|TODO):(\{[^}]*\})\|\|\|/g;
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
       if (m[1] === "LOG" && onLogSet) { onLogSet(obj); confirm = `✓ Logged ${obj.weight}lbs × ${obj.reps}`; }
       else if (m[1] === "FOOD" && onLogFood) { onLogFood(obj); confirm = `✓ Logged ${obj.name || "food"}`; }
       else if (m[1] === "WATER" && onAddWater) { onAddWater(obj.cups || obj.add || 1); confirm = `✓ Water logged`; }
+      else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
     }
     return confirm;
   };
-  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER):\{[^}]*\}\|\|\|/g, "").trim();
+  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER|TODO):\{[^}]*\}\|\|\|/g, "").trim();
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
@@ -5452,7 +5466,7 @@ function RegimenConfig({ item, kind, caution, existing, onConfirm, onCancel }) {
 
 // ── DAILY CALENDAR ────────────────────────────────────────────────────────────
 // Combines nutrition (from program), supplements, and peptides for each weekday.
-function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, foodLog, dietPref, onBack }) {
+function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, foodLog, dietPref, onBack, checked, onToggle }) {
   const todayIdx = new Date().getDay();
   const [sel, setSel] = useState(todayIdx);
   const accent = "#e8ff00";
@@ -5493,9 +5507,9 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
   const displayAmPeps = amPeps.length > 0 ? amPeps : allAmPeps;
   const displayPmPeps = pmPeps.length > 0 ? pmPeps : allPmPeps;
 
-  // Checked-off items, keyed by "day:section:id" so each day tracks its own.
-  const [checked, setChecked] = useState({});
-  const toggleCheck = (key) => setChecked(prev => ({ ...prev, [key]: !prev[key] }));
+  // Checked-off items are lifted to the app (persisted, and the voice coach can set them),
+  // keyed by "date:section:id" so each calendar date tracks its own.
+  const toggleCheck = onToggle;
   const CheckBox = ({ on, onClick }) => (
     <button onClick={onClick} style={{ flexShrink:0, width:24, height:24, borderRadius:6, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", background: on ? "#3ddc84" : "transparent", border:"2px solid " + (on ? "#3ddc84" : "#3a3a4d"), color:"#000", fontSize:15, fontWeight:700, padding:0, lineHeight:1 }}>
       {on ? "\u2713" : ""}
@@ -5513,7 +5527,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
     items.length === 0 ? null :
     <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:14, marginBottom:12 }}>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#5bb8ff", marginBottom:8 }}>{label}</div>
-      {items.map(e=><Row key={e.id} e={e} ck={sel+":"+sect+":"+prefix+":"+e.id} />)}
+      {items.map(e=><Row key={e.id} e={e} ck={dateKey+":"+sect+":"+prefix+":"+e.id} />)}
     </div>
   );
 
@@ -5521,7 +5535,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
     items.length === 0 ? null :
     <div style={{ background:"#1a1a26", border:"1px solid rgba(155,93,229,0.4)", borderRadius:12, padding:14, marginBottom:12 }}>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#9b5de5", marginBottom:8 }}>{label}</div>
-      {items.map(e=><Row key={e.id} e={e} ck={sel+":"+sect+":pep:"+e.id} />)}
+      {items.map(e=><Row key={e.id} e={e} ck={dateKey+":"+sect+":pep:"+e.id} />)}
     </div>
   );
 
@@ -5553,7 +5567,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
             <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:14, marginBottom:12 }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:accent, marginBottom:8 }}>TRAINING</div>
               {items.map(([label, sub], ti) => {
-                const ck = sel+":train:"+ti;
+                const ck = dateKey+":train:"+ti;
                 return (
                   <div key={ti} style={{ display:"flex", alignItems:"center", gap:10, padding:"5px 0" }}>
                     <CheckBox on={!!checked[ck]} onClick={()=>toggleCheck(ck)} />
@@ -5575,7 +5589,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
               const sug = getMealSuggestion(dietPref||"mediterranean", sel, slot.id);
               const isLogged = entry && entry.logged;
               const display = (entry && (entry.food||entry.cal)) ? entry : sug;
-              const ck = sel+":meal2:"+slot.id;
+              const ck = dateKey+":meal2:"+slot.id;
               return (
                 <div key={slot.id} style={{ borderBottom: mi < 3 ? "1px solid #2a2a3d" : "none", paddingBottom: mi < 3 ? 8 : 0, display:"flex", alignItems:"center", gap:10 }}>
                   <CheckBox on={!!checked[ck]} onClick={()=>toggleCheck(ck)} />
@@ -6616,6 +6630,7 @@ export default function BodyMorph() {
   const [homeVoice, setHomeVoice] = useState(false); // voice coach launched from home
   const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
   const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items})
+  const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
 
   // Load saved profile + logs + medals on first mount
   useEffect(() => {
@@ -6639,6 +6654,8 @@ export default function BodyMorph() {
         const snutrgoals = await Store.get("bodymorph_nutrgoals_v2");
         const sdietpref = await Store.get(DIETPREF_KEY);
         const shyd = await Store.get(HYDRATION_KEY);
+        const stodo = await Store.get(TODO_CHECKED_KEY);
+        if (stodo && typeof stodo === "object") setTodoChecked(stodo);
         if (sl) setLogs(sl);
         if (sm) setRewards(sm);
         if (sb) setBodyEntries(sb);
@@ -6709,6 +6726,10 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(ROUTINES_KEY, stretchRoutines); }, [stretchRoutines, loaded]);
   useEffect(() => { if (loaded) Store.set(VIDEO_KEY, videoOverrides); }, [videoOverrides, loaded]);
   useEffect(() => { if (loaded) Store.set(HYDRATION_KEY, hydration); }, [hydration, loaded]);
+  useEffect(() => { if (loaded) Store.set(TODO_CHECKED_KEY, todoChecked); }, [todoChecked, loaded]);
+
+  const toggleTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: !prev[key] }));
+  const checkTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: true }));
 
   // Hydration: set the cup count directly (resets each day on load).
   const setHydrationCups = (val) => setHydration(h => {
@@ -6946,15 +6967,40 @@ export default function BodyMorph() {
     });
     const cMacros = macrosFor(profile, dietPref||"mediterranean");
     const hrs = new Date().getHours();
-    const todayName = DAY_NAMES[new Date().getDay()];
+    const todayIdx = new Date().getDay();
+    const todayName = DAY_NAMES[todayIdx];
     const todayWorkout = (program && program.weeklySchedule || []).find(d => d.day === todayName) || null;
+
+    // Build today's to-do items (keys must match DailyCalendar's date-based keys).
+    const todos = [];
+    const cardioLbl = cardioPlanLabel(cardioPlan, todayIdx);
+    if (todayWorkout) {
+      todos.push({ key:`${today}:train:0`, label:`Gym workout${todayWorkout.type?" — "+todayWorkout.type:""}` });
+      todos.push({ key:`${today}:train:1`, label:`Cardio${cardioLbl?" — "+cardioLbl:""}` });
+      todos.push({ key:`${today}:train:2`, label:"Stretch" });
+    } else if (cardioLbl) {
+      todos.push({ key:`${today}:train:0`, label:`Cardio — ${cardioLbl}` });
+    }
+    ["breakfast","lunch","dinner","snacks"].forEach(slot => {
+      const e = tLog[slot]; const items = Array.isArray(e)?e:[e];
+      const logged = items.some(x => x && x.logged);
+      todos.push({ key:`${today}:meal2:${slot}`, label: slot.charAt(0).toUpperCase()+slot.slice(1), logged });
+    });
+    const forDay = (list) => (list||[]).filter(e => { const d=e.days||[]; return d.includes(todayIdx)||d.includes(String(todayIdx))||d.map(Number).includes(Number(todayIdx)); });
+    forDay(supplements).forEach(e => (e.timing||[]).forEach(tm => { if(tm==="AM"||tm==="PM") todos.push({ key:`${today}:${tm.toLowerCase()}:supp:${e.id}`, label:`${e.name} (${tm} supplement)` }); }));
+    const peps = forDay(peptides).length ? forDay(peptides) : (peptides||[]);
+    peps.forEach(e => (e.timing||[]).forEach(tm => { if(tm==="AM"||tm==="PM") todos.push({ key:`${today}:${tm.toLowerCase()}:pep:${e.id}`, label:`${e.name} (${tm} peptide)` }); }));
+    todos.forEach(t => { t.done = !!todoChecked[t.key] || !!t.logged; });
+
     return {
       timeOfDay: hrs < 12 ? "morning" : hrs < 17 ? "afternoon" : "evening",
+      isEvening: hrs >= 17,
       hydration: { cups: (hydration&&hydration.cups)||0, goal: (hydration&&hydration.goal)||8 },
       meals: { breakfast: slotInfo("breakfast"), lunch: slotInfo("lunch"), dinner: slotInfo("dinner"), snacks: slotInfo("snacks") },
       calories: { total: Math.round(calTotal), goal: cMacros.cals||2000 },
       protein: { total: Math.round(pTotal), goal: cMacros.protein||0 },
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length } : null,
+      todos,
     };
   })() : null;
   const voiceCoachEl = homeVoice ? (
@@ -6968,6 +7014,7 @@ export default function BodyMorph() {
       onLogSet={(inSession && !stretchSession) ? handleVoiceSetLog : undefined}
       onLogFood={logFoodFromVoice}
       onAddWater={addWaterCups}
+      onCheckTodo={checkTodo}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
       onClose={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }}
@@ -7024,7 +7071,7 @@ export default function BodyMorph() {
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
-  if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={()=>setPhase("home")} /></>);
+  if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={()=>setPhase("home")} checked={todoChecked} onToggle={toggleTodo} /></>);
 
   return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   })();
