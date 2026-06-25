@@ -2601,7 +2601,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       </div>
 
       {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
-      <div style={{ marginTop:10, marginBottom:8 }}>
+      <div style={{ marginTop:64, marginBottom:8 }}>
 
         {/* 2x2 metric grid: MENU + STEPS, CALORIES + WATER */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
@@ -2665,7 +2665,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         </div>
 
         {/* TODAY'S MACROS - tucked just under the circle */}
-        <div style={{ marginTop:-6, paddingTop:26, paddingLeft:16, paddingRight:16, display:"flex", flexDirection:"column", justifyContent:"center" }}>
+        <div style={{ marginTop:4, paddingTop:26, paddingLeft:16, paddingRight:16, display:"flex", flexDirection:"column", justifyContent:"center" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:17.4, letterSpacing:1, color:"#dcdcf0", textAlign:"center", marginBottom:5 }}>TODAY'S MACROS</div>
           <div style={{ display:"flex", gap:12 }}>
             {[["PROTEIN", totalP, macros.protein||0, "#3ddc84"],["CARBS", totalC, macros.carbs||0, "#3d8eff"],["FATS", totalF, macros.fats||0, "#e8ff00"]].map(([label,val,goal,color])=>{
