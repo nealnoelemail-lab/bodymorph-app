@@ -399,6 +399,7 @@ function macrosFor(profile, dietId) {
 
   return {
     dailyCalories: String(cals),
+    cals,                 // numeric calorie goal — Home & the voice coach read this (was undefined → wrongly fell back to 2000)
     protein: protein + "g",
     carbs: carbs + "g",
     fats: fats + "g",
