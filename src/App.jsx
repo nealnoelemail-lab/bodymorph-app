@@ -6872,6 +6872,25 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(TODO_CHECKED_KEY, todoChecked); }, [todoChecked, loaded]);
   useEffect(() => { if (loaded) Store.set(COACH_VOICE_KEY, coachVoice); }, [coachVoice, loaded]);
 
+  // Quiet startup check so it's obvious whether the ElevenLabs voice is wired up.
+  // Console only — no UI. Falls back to the phone voice if the key is missing/invalid.
+  useEffect(() => {
+    if (!ELEVEN_KEY) {
+      console.info("%c[BodyMorph] ElevenLabs: no VITE_ELEVENLABS_KEY — coach is using the basic phone voice.", "color:#e8a000");
+      return;
+    }
+    let cancelled = false;
+    fetch("https://api.elevenlabs.io/v1/user", { headers: { "xi-api-key": ELEVEN_KEY } })
+      .then(r => {
+        if (cancelled) return;
+        if (r.ok) console.info("%c[BodyMorph] ElevenLabs: key OK ✓ — natural coach voice is active.", "color:#3ad17a");
+        else if (r.status === 401) console.warn("[BodyMorph] ElevenLabs: key REJECTED (401). Check VITE_ELEVENLABS_KEY — falling back to phone voice.");
+        else console.warn("[BodyMorph] ElevenLabs: status " + r.status + " — falling back to phone voice.");
+      })
+      .catch(e => { if (!cancelled) console.warn("[BodyMorph] ElevenLabs: couldn't reach API (" + e.message + ") — falling back to phone voice."); });
+    return () => { cancelled = true; };
+  }, []);
+
   const toggleTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: !prev[key] }));
   const checkTodo = (key) => setTodoChecked(prev => ({ ...prev, [key]: true }));
 
