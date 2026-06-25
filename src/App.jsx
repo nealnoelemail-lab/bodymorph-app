@@ -2830,7 +2830,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, onSetWater, onCheckTodo, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onCheckTodo, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2994,6 +2994,10 @@ LOGGING FOOD — when ${profile.name} tells you what they ate, estimate reasonab
 |||FOOD:{"slot":"breakfast","name":"Oatmeal with banana","cal":320,"protein":10,"carbs":58,"fats":6}|||
 slot must be one of: breakfast, lunch, dinner, snacks. Never say or read the tag aloud.
 
+CORRECTING FOOD — if ${profile.name} fixes a meal entry:
+• To CHANGE what they ate: just log it again with the corrected details (a new FOOD tag for breakfast/lunch/dinner replaces that meal).
+• To REMOVE a meal entirely ("I didn't actually have lunch", "take that off", "delete my snack"): |||FOOD:{"slot":"lunch","remove":true}|||  (for snacks this removes the most recent snack). Confirm warmly, never read the tag aloud.
+
 LOGGING WATER — when ${profile.name} says they drank water, append at the very end:
 |||WATER:{"cups":1}|||
 Use the number of cups/glasses they mention. Never say or read the tag aloud.
@@ -3042,6 +3046,8 @@ LOGGING SETS — When ${profile.name} tells you they completed a set (stating we
 |||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
 
+CORRECTING A SET — if ${profile.name} says they misspoke or wants to undo the set you just logged ("scratch that", "that was wrong", "I didn't do that set", "take that one off"), remove the last logged set for that exercise: |||LOG:{"ex":INDEX,"remove":true}|||  — then, if they give the corrected weight/reps, log the right set with a normal LOG tag. Confirm naturally; never read the tag aloud.
+
 Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright ${profile.name}, it's Coach — let's get to work"), naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
   }, [profile, day, logs, isWorkout, isStretch, stretchSession, PERSONA, companionData]);
 
@@ -3051,8 +3057,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
-      if (m[1] === "LOG" && onLogSet) { onLogSet(obj); confirm = `✓ Logged ${obj.weight}lbs × ${obj.reps}`; }
-      else if (m[1] === "FOOD" && onLogFood) { onLogFood(obj); confirm = `✓ Logged ${obj.name || "food"}`; }
+      if (m[1] === "LOG") {
+        if (obj.remove && onRemoveSet) { onRemoveSet(obj); confirm = `✓ Set removed`; }
+        else if (onLogSet) { onLogSet(obj); confirm = `✓ Logged ${obj.weight}lbs × ${obj.reps}`; }
+      }
+      else if (m[1] === "FOOD") {
+        if (obj.remove && onRemoveFood) { onRemoveFood(obj); confirm = `✓ Removed ${obj.slot || "item"}`; }
+        else if (onLogFood) { onLogFood(obj); confirm = `✓ Logged ${obj.name || "food"}`; }
+      }
       else if (m[1] === "WATER") {
         if (obj.set !== undefined && onSetWater) { onSetWater(obj.set); confirm = `✓ Water set to ${Math.max(0, parseInt(obj.set)||0)}`; }
         else if (onAddWater) {
@@ -6771,6 +6783,22 @@ export default function BodyMorph() {
       return updated;
     });
   };
+  // Voice companion: undo a logged meal. Main meals clear the slot; snacks drop the last one.
+  const removeFoodFromVoice = ({ slot }) => {
+    const todayStr = new Date().toISOString().slice(0,10);
+    const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
+    setFoodLog(prev => {
+      const updated = { ...(prev||{}) };
+      const dayLog = { ...(updated[todayStr]||{}) };
+      if (s === "snacks") {
+        const arr = Array.isArray(dayLog.snacks) ? [...dayLog.snacks] : (dayLog.snacks ? [dayLog.snacks] : []);
+        arr.pop();
+        if (arr.length) dayLog.snacks = arr; else delete dayLog.snacks;
+      } else { delete dayLog[s]; }
+      updated[todayStr] = dayLog;
+      return updated;
+    });
+  };
 
   const saveVideo = (exName, videoId) => {
     setVideoOverrides(prev => {
@@ -6961,6 +6989,22 @@ export default function BodyMorph() {
       weight: String(weight), reps: String(reps),
     });
   };
+  // Voice companion: undo the most recently logged set of an exercise (today's last entry).
+  const handleVoiceSetRemove = ({ ex }) => {
+    const exercise = sessionDay && sessionDay.workout && sessionDay.workout[ex];
+    if (!exercise) return;
+    const today = new Date().toISOString().slice(0,10);
+    setLogs(prev => {
+      const arr = prev[exercise.exercise];
+      if (!Array.isArray(arr) || !arr.length) return prev;
+      // Drop the last entry from today (each voice-logged set is its own entry).
+      let i = arr.length - 1;
+      while (i >= 0 && arr[i].date !== today) i--;
+      if (i < 0) return prev;
+      const next = [...arr]; next.splice(i, 1);
+      return { ...prev, [exercise.exercise]: next };
+    });
+  };
   const companionData = profile ? (() => {
     const today = new Date().toISOString().slice(0,10);
     const tLog = (foodLog && foodLog[today]) || {};
@@ -7024,7 +7068,9 @@ export default function BodyMorph() {
       companionData={companionData}
       stretchSession={stretchSession}
       onLogSet={(inSession && !stretchSession) ? handleVoiceSetLog : undefined}
+      onRemoveSet={(inSession && !stretchSession) ? handleVoiceSetRemove : undefined}
       onLogFood={logFoodFromVoice}
+      onRemoveFood={removeFoodFromVoice}
       onAddWater={addWaterCups}
       onSetWater={setHydrationCups}
       onCheckTodo={checkTodo}
