@@ -3336,7 +3336,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       } else if (hasAudio && !silenceTimer) {
         // End-of-speech: stop & transcribe after a short silence (snappy response).
         silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 550);
-      } else if (!hasAudio && idleNudgeRef.current < 2 && performance.now() - listenStart > 8500) {
+      } else if (!hasAudio && idleNudgeRef.current < 2 && performance.now() - listenStart > 4500) {
         // No speech for a while → check in on them (up to twice in a row).
         idleStop = true;
         try { recorder.stop(); } catch {}
