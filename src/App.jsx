@@ -3039,6 +3039,14 @@ Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, 
       const todoListStr = todos.length
         ? todos.map(t => `  - [${t.done ? "x" : " "}] ${t.label}  (key: ${t.key})`).join("\n")
         : "  (no scheduled items today)";
+      const cal = cd.calories || {}, pro = cd.protein || {}, carb = cd.carbs || {}, fat = cd.fats || {};
+      const calOver = cal.goal && cal.total > cal.goal;
+      const cardioLine = cd.cardio?.planned
+        ? `Cardio is on the plan today (${cd.cardio.planned}) — ${cd.cardio.done ? "DONE ✓" : "NOT done yet"}.`
+        : "No cardio scheduled today.";
+      const workoutStatusLine = cd.workout
+        ? `${workoutLine} They have ${cd.workout.done ? "already trained today ✓" : "NOT logged any sets yet today"}.`
+        : workoutLine;
 
       return `You are ${profile.name}'s personal health companion and coach, checking in by voice. This is a relaxed daily check-in — NOT a live workout. Be a warm, caring friend who happens to be a great coach.
 
@@ -3052,9 +3060,10 @@ TODAY'S STATUS (use this; don't ask about things you already know):
 • Lunch — ${mealLine("lunch", m.lunch)}.
 • Dinner — ${mealLine("dinner", m.dinner)}.
 • Snacks — ${mealLine("snacks", m.snacks)}.
-• Calories so far: ${cd.calories?.total||0} of ${cd.calories?.goal||0}. Protein: ${cd.protein?.total||0} of ${cd.protein?.goal||0}g.
-• Steps today: ${cd.steps||0}.
-• ${workoutLine}
+• Calories so far: ${cal.total||0} of ${cal.goal||0}${calOver ? " — ⚠️ OVER their target" : ""}. Protein: ${pro.total||0}/${pro.goal||0}g, Carbs: ${carb.total||0}/${carb.goal||0}g, Fats: ${fat.total||0}/${fat.goal||0}g.
+• Steps today: ${cd.steps||0} of ${cd.stepGoal||12000} goal.
+• ${workoutStatusLine}
+• ${cardioLine}
 
 TODAY'S TO-DO LIST ([x] = already checked off, [ ] = still open):
 ${todoListStr}
@@ -3062,16 +3071,20 @@ ${recentSummaryRef.current.length ? `
 WHAT YOU REMEMBER FROM THE PAST WEEK (bring up naturally when relevant — do NOT recite this list):
 ${recentSummaryRef.current.map(e => `• ${e.date}: ${e.text}`).join("\n")}
 ` : ""}
-RUN A NATURAL CHECK-IN — ONE topic at a time, short turns, and WAIT for their reply before moving to the next. Flow:
-1. Greet ${profile.name} by name for the ${cd.timeOfDay||"day"} and ask how they're doing.
-2. HYDRATION: if they're below their water goal, warmly encourage a glass. If they say they drank water, log it (see WATER tag).
-3. FEELINGS: ask how they're feeling today; have a brief, caring exchange; offer a word of encouragement if they need it.
-4. MOVEMENT: ask if they've stretched. If not, suggest they tap the Stretch button for a quick routine.
-5. NUTRITION: look at what's logged above. Acknowledge meals already logged. Ask about meals not logged yet. If they tell you what they ate, LOG IT for them (see FOOD tag) and confirm warmly. Nudge gently toward their protein goal if they're low.
-6. WORKOUT: give a short, upbeat overview of today's training (or affirm the rest day). Then hand off: "When you're at the gym and ready, just tap Training and start your session — I'll coach you through every set."
-${cd.isEvening ? `7. EVENING TO-DO REVIEW: it's evening, so wrap up the day by going through the to-do list above. Naturally walk through the items still open ([ ]) — gently ask if they got each one done. Cover them a few at a time, conversationally, NOT as a robotic roll-call. For every item they confirm they did, check it off for them with the TODO tag (below) and give a warm "nice, checking that off." Don't pester about items already marked [x]. When the list is essentially done, congratulate them on a solid day. If a few things are still undone, be encouraging — no guilt-tripping.` : `(It's not evening yet, so don't do the end-of-day to-do review now — just keep the natural check-in going.)`}
+YOU ARE A PROACTIVE COACH, NOT A TRACKER. Don't wait to be asked — you've looked at their day above, so you NOTICE what's slipping and bring it up yourself, warmly. But you are a caring friend, NOT a nag: raise only the 1-2 most relevant things for THIS time of day (it's currently ${cd.timeOfDay}, hour ${cd.hour}), one at a time, and always lead with warmth or a win before a nudge. Never pile on, never guilt-trip, never list everything at once. If they're behind, get curious and kind ("Hey, noticed you haven't trained yet — everything good? How are you feeling?"), not disappointed.
 
-Move through these conversationally based on their answers — do NOT dump all topics at once. Keep each turn to 1-3 sentences.
+WHAT TO PROACTIVELY NOTICE (pick what fits the time of day — don't force a topic that doesn't apply yet):
+• HYDRATION: below their water goal and it's past morning → warmly encourage a glass. If they say they drank, log it (WATER tag).
+• MEALS: a meal that should've happened by now isn't logged (breakfast by late morning, lunch by mid-afternoon, dinner by evening) → ask about it gently and LOG it if they tell you (FOOD tag). Don't ask about dinner at noon.
+• OVER MACROS: if calories are OVER target (flagged above) or a macro is well over → gently mention it and suggest lighter choices for the rest of the day. Encouraging, not scolding.
+• PROTEIN LOW: late in the day and protein is well under goal → a gentle nudge toward a protein-rich option.
+• WORKOUT: if today is a training day and they have NOT trained yet and it's afternoon/evening → kindly check in: "How are you feeling? Noticed you haven't gotten your workout in yet today — what's going on?" Then encourage or problem-solve. If they already trained, praise it.
+• CARDIO: if cardio is on today's plan and not done, and it's afternoon/evening → gently encourage them to get it in.
+• STEPS: if it's later in the day and steps are well below goal → a light nudge to get moving (a walk, etc.).
+• STRETCH: if stretch is on the plan and not done → suggest tapping the Stretch button for a quick guided routine.
+
+HOW TO RUN IT: open with a warm, genuine greeting and "how are you doing / how are you feeling?" — have a real human moment first. THEN, based on their answer and what you noticed above, steer naturally to the single most important nudge. Keep it a flowing conversation, ONE topic per turn, 1-3 short sentences each, and WAIT for their reply. When they're doing well, say so specifically — celebration matters as much as nudging. Always offer to log/fix things for them by voice.
+${cd.isEvening ? `EVENING TO-DO REVIEW: it's evening, so as the conversation winds down, walk the still-open to-do items ([ ]) gently and conversationally (NOT a robotic roll-call). For each one they confirm they did, check it off with the TODO tag and a warm "nice, checking that off." Don't pester about [x] items. Wrap with genuine encouragement about the day — a win if they had one, kindness if they fell short.` : `(Not evening yet — don't do the end-of-day to-do review; keep the natural, proactive check-in going.)`}
 
 CHECKING OFF TO-DO ITEMS — when ${profile.name} confirms they completed a to-do item, append this tag at the very END of your response (after your spoken words), copying the item's key EXACTLY as shown in the to-do list above:
 |||TODO:{"key":"PASTE-THE-EXACT-KEY-HERE"}|||
@@ -7276,16 +7289,19 @@ export default function BodyMorph() {
       if (!done.length) return { logged:false };
       return { logged:true, name: done.map(x=>x.food).filter(Boolean).join(", ") || slot, cal: Math.round(done.reduce((s,x)=>s+(parseFloat(x.cal)||0),0)) };
     };
-    let calTotal=0, pTotal=0;
+    let calTotal=0, pTotal=0, cTotal=0, fTotal=0;
     ["breakfast","lunch","dinner","snacks"].forEach(s => {
       const e = tLog[s]; if (!e) return;
-      (Array.isArray(e)?e:[e]).forEach(it => { if (it && it.logged) { calTotal += parseFloat(it.cal)||0; pTotal += parseFloat(it.protein)||0; } });
+      (Array.isArray(e)?e:[e]).forEach(it => { if (it && it.logged) { calTotal += parseFloat(it.cal)||0; pTotal += parseFloat(it.protein)||0; cTotal += parseFloat(it.carbs)||0; fTotal += parseFloat(it.fats)||0; } });
     });
     const cMacros = macrosFor(profile, dietPref||"mediterranean");
     const hrs = new Date().getHours();
     const todayIdx = new Date().getDay();
     const todayName = DAY_NAMES[todayIdx];
     const todayWorkout = (program && program.weeklySchedule || []).find(d => d.day === todayName) || null;
+    // Have they actually trained / done cardio today? (drives proactive "you haven't worked out yet" nudges)
+    const workoutDone = Object.values(logs||{}).some(arr => Array.isArray(arr) && arr.some(e => e && e.date === today));
+    const cardioDone = (cardioSessions||[]).some(s => s && String(s.date||"").slice(0,10) === today);
 
     // Build today's to-do items (keys must match DailyCalendar's date-based keys).
     const todos = [];
@@ -7311,12 +7327,17 @@ export default function BodyMorph() {
     return {
       timeOfDay: hrs < 12 ? "morning" : hrs < 17 ? "afternoon" : "evening",
       isEvening: hrs >= 17,
+      hour: hrs,
       hydration: { cups: (hydration&&hydration.cups)||0, goal: (hydration&&hydration.goal)||8 },
       meals: { breakfast: slotInfo("breakfast"), lunch: slotInfo("lunch"), dinner: slotInfo("dinner"), snacks: slotInfo("snacks") },
       calories: { total: Math.round(calTotal), goal: cMacros.cals||2000 },
-      protein: { total: Math.round(pTotal), goal: cMacros.protein||0 },
+      protein: { total: Math.round(pTotal), goal: parseFloat(cMacros.protein)||0 },
+      carbs: { total: Math.round(cTotal), goal: parseFloat(cMacros.carbs)||0 },
+      fats: { total: Math.round(fTotal), goal: parseFloat(cMacros.fats)||0 },
       steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
-      workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length } : null,
+      stepGoal: 12000,
+      workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
+      cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
     };
   })() : null;
