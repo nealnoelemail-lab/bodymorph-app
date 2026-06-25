@@ -3214,14 +3214,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       if (!an) return;
       const buf = new Uint8Array(an.frequencyBinCount);
       let loud = 0;
-      const graceUntil = performance.now() + 350; // shorter grace → interruptible sooner
+      const graceUntil = performance.now() + 550; // brief grace so the coach's own audio doesn't trip it
       const watch = () => {
         if (done || closedRef.current) return;
         an.getByteFrequencyData(buf);
         const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
         setMicLevel(vol);
-        if (performance.now() > graceUntil && vol > 30) { // more sensitive: lower threshold + fewer frames
-          if (++loud >= 5) { log("barge-in → listening"); finish(true); return; } // ~85ms of real speech
+        if (performance.now() > graceUntil && vol > 40) { // require a clear, sustained voice to interrupt
+          if (++loud >= 9) { log("barge-in → listening"); finish(true); return; } // ~150ms of real speech
         } else { loud = 0; }
         bargeRaf = requestAnimationFrame(watch);
       };
@@ -3467,12 +3467,12 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (bargeStarted) return; bargeStarted = true;
         const an = analyserRef.current; if (!an) return;
         const buf = new Uint8Array(an.frequencyBinCount); let loud = 0;
-        const graceUntil = performance.now() + 350;
+        const graceUntil = performance.now() + 550;
         const watch = () => {
           if (done || closedRef.current) return;
           an.getByteFrequencyData(buf);
           const vol = buf.reduce((a, b) => a + b, 0) / buf.length; setMicLevel(vol);
-          if (performance.now() > graceUntil && vol > 30) { if (++loud >= 5) { log("barge-in → listening"); endTurn(true); return; } }
+          if (performance.now() > graceUntil && vol > 40) { if (++loud >= 9) { log("barge-in → listening"); endTurn(true); return; } }
           else loud = 0;
           bargeRaf = requestAnimationFrame(watch);
         };
