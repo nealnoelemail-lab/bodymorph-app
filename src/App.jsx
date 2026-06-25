@@ -2607,7 +2607,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
 
           {/* MENU */}
-          <button onClick={onMenu} style={{ height:74, background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4 }}>
+          <button onClick={onMenu} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:4 }}>
             <svg width="32" height="19" viewBox="0 0 32 19" fill="none">
               <line x1="3" y1="3" x2="29" y2="3" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
               <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
@@ -2618,12 +2618,12 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
           {/* STEPS */}
           {editingSteps ? (
-            <div style={{ height:74, background:"transparent", border:"1px solid #e8ff00", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+            <div style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"1px solid #e8ff00", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
               <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:66, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
               <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
             </div>
           ) : (
-            <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ height:74, background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1 }}>
+            <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:1 }}>
               <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#dcdcf0" }}>&#128095; STEPS</span>
               <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
               <span style={{ fontSize:12.6, color:"#9898b8" }}>{todaySteps.toLocaleString()} / {STEP_GOAL.toLocaleString()}</span>
