@@ -3201,14 +3201,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       if (!an) return;
       const buf = new Uint8Array(an.frequencyBinCount);
       let loud = 0;
-      const graceUntil = performance.now() + 900;
+      const graceUntil = performance.now() + 350; // shorter grace → interruptible sooner
       const watch = () => {
         if (done || closedRef.current) return;
         an.getByteFrequencyData(buf);
         const vol = buf.reduce((a, b) => a + b, 0) / buf.length;
         setMicLevel(vol);
-        if (performance.now() > graceUntil && vol > 42) {
-          if (++loud >= 12) { log("barge-in → listening"); finish(true); return; } // ~200ms of real speech
+        if (performance.now() > graceUntil && vol > 30) { // more sensitive: lower threshold + fewer frames
+          if (++loud >= 5) { log("barge-in → listening"); finish(true); return; } // ~85ms of real speech
         } else { loud = 0; }
         bargeRaf = requestAnimationFrame(watch);
       };
@@ -3401,50 +3401,143 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         : [...prior, { role: "user", content: userText }];
     if (!isInit) messagesRef.current = msgs;
 
+    const useStreaming = !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
+    const ac = new AbortController();
     try {
+      // ── Non-streaming path (browser voice already starts instantly) ──
+      if (!useStreaming) {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          signal: AbortSignal.timeout(15000),
+          method: "POST",
+          headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+          body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs }),
+        });
+        if (closedRef.current || turnRef.current !== myTurn) return;
+        const data = await res.json();
+        const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+        const confirm = processActions(aiText);
+        if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
+        setLastAI(cleanSpeak(aiText));
+        messagesRef.current = [...msgs, { role: "assistant", content: aiText }];
+        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: new Date().toISOString().slice(0,10), messages: messagesRef.current.slice(-20) })); } catch {} }
+        log("coach replied → speaking");
+        speak(aiText, () => { if (!closedRef.current) startListening(); });
+        return;
+      }
+
+      // ── Streaming path: start speaking the first sentence while the rest is still generating ──
+      setState("processing");
+      speakingRef.current = true;
+      let fullText = "", spokenUpto = 0, streamDone = false, playing = false, done = false, finalized = false, bargeStarted = false, bargeRaf = null;
+      const queue = []; // promises that resolve to playable audio URLs, in order
+
+      const finalize = () => {
+        if (finalized) return; finalized = true;
+        const ft = fullText.trim() || "Okay.";
+        const confirm = processActions(ft);
+        if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
+        setLastAI(cleanSpeak(ft));
+        messagesRef.current = [...msgs, { role: "assistant", content: ft }];
+        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: new Date().toISOString().slice(0,10), messages: messagesRef.current.slice(-20) })); } catch {} }
+      };
+      const endTurn = (barged) => {
+        if (done) return; done = true;
+        finalize();
+        try { ac.abort(); } catch {}
+        if (bargeRaf) cancelAnimationFrame(bargeRaf);
+        try { if (coachAudio) { coachAudio.pause(); coachAudio.onended = null; coachAudio.onerror = null; } } catch {}
+        speakingRef.current = false;
+        if (!closedRef.current && turnRef.current === myTurn) { log(barged ? "barge → listen" : "done speaking → listen"); startListening(); }
+      };
+      // More sensitive barge-in: shorter grace, lower threshold, fewer sustained frames.
+      const startBarge = () => {
+        if (bargeStarted) return; bargeStarted = true;
+        const an = analyserRef.current; if (!an) return;
+        const buf = new Uint8Array(an.frequencyBinCount); let loud = 0;
+        const graceUntil = performance.now() + 350;
+        const watch = () => {
+          if (done || closedRef.current) return;
+          an.getByteFrequencyData(buf);
+          const vol = buf.reduce((a, b) => a + b, 0) / buf.length; setMicLevel(vol);
+          if (performance.now() > graceUntil && vol > 30) { if (++loud >= 5) { log("barge-in → listening"); endTurn(true); return; } }
+          else loud = 0;
+          bargeRaf = requestAnimationFrame(watch);
+        };
+        bargeRaf = requestAnimationFrame(watch);
+      };
+      const fetchTTS = (text) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceIdRef.current}`, {
+        method: "POST", signal: ac.signal,
+        headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+        body: JSON.stringify({ text, model_id: "eleven_turbo_v2_5", voice_settings: { stability: 0.4, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true } }),
+      }).then(r => { if (!r.ok) throw new Error("tts " + r.status); return r.blob(); }).then(b => URL.createObjectURL(b));
+      const playNext = async () => {
+        if (done) return;
+        if (!queue.length) { if (streamDone) endTurn(false); else playing = false; return; }
+        playing = true;
+        let url; try { url = await queue.shift(); } catch { playNext(); return; }
+        if (done || !url) { if (url) URL.revokeObjectURL(url); return; }
+        if (!coachAudio) coachAudio = new Audio();
+        setState("speaking");
+        coachAudio.src = url;
+        coachAudio.onended = () => { URL.revokeObjectURL(url); playNext(); };
+        coachAudio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
+        try { await coachAudio.play(); } catch { URL.revokeObjectURL(url); playNext(); return; }
+        startBarge();
+      };
+      const enqueue = (sentence) => {
+        const clean = cleanSpeak(sentence).trim();
+        if (!clean) return;
+        queue.push(fetchTTS(clean)); // fetch immediately (look-ahead) so audio is ready in order
+        if (!playing) playNext();
+      };
+      // Flush complete sentences as they stream; never speak the hidden ||| action tags.
+      const tryEmit = (final) => {
+        let region = fullText; const t = region.indexOf("|||"); if (t >= 0) region = region.slice(0, t);
+        const chunk = region.slice(spokenUpto);
+        if (!chunk) return;
+        let lastB = -1;
+        for (let i = 0; i < chunk.length; i++) {
+          const c = chunk[i];
+          if ((c === "." || c === "!" || c === "?" || c === "…" || c === "\n") && i < chunk.length - 1 && /[\s"'’”)]/.test(chunk[i + 1])) lastB = i;
+        }
+        if (final) lastB = chunk.length - 1;
+        if (lastB >= 0) { const toSpeak = chunk.slice(0, lastB + 1); spokenUpto += toSpeak.length; enqueue(toSpeak); }
+      };
+
       const res = await fetch("https://api.anthropic.com/v1/messages", {
-        signal: AbortSignal.timeout(15000),
+        signal: ac.signal,
         method: "POST",
-        headers: {
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 220,
-          system: buildSysPrompt(),
-          messages: msgs,
-        }),
+        headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true }),
       });
-      if (closedRef.current || turnRef.current !== myTurn) return; // superseded by a newer turn
-      const data = await res.json();
-      const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+      if (closedRef.current || turnRef.current !== myTurn) { endTurn(false); return; }
 
-      const confirm = processActions(aiText);
-      if (confirm) {
-        setLogConfirm(confirm);
-        setTimeout(() => setLogConfirm(null), 3500);
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let sbuf = "";
+      while (true) {
+        const { done: rdone, value } = await reader.read();
+        if (rdone) break;
+        if (done || closedRef.current || turnRef.current !== myTurn) { try { reader.cancel(); } catch {} break; }
+        sbuf += dec.decode(value, { stream: true });
+        const lines = sbuf.split("\n"); sbuf = lines.pop();
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s.startsWith("data:")) continue;
+          const js = s.slice(5).trim();
+          if (!js || js === "[DONE]") continue;
+          try { const ev = JSON.parse(js); if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") { fullText += ev.delta.text; tryEmit(false); } } catch {}
+        }
       }
-
-      setLastAI(cleanSpeak(aiText));
-      messagesRef.current = [...msgs, { role: "assistant", content: aiText }];
-      // Persist today's companion conversation (not workout/stretch) for memory.
-      if (companion) {
-        try {
-          localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({
-            date: new Date().toISOString().slice(0,10),
-            messages: messagesRef.current.slice(-20),
-          }));
-        } catch {}
-      }
-
-      log("coach replied → speaking");
-      speak(aiText, () => { log("done speaking → listen"); if (!closedRef.current) startListening(); });
+      if (done) return; // barged / superseded during stream
+      if (closedRef.current || turnRef.current !== myTurn) { endTurn(false); return; }
+      tryEmit(true);
+      streamDone = true;
+      finalize();
+      log("stream complete");
+      if (!playing && !queue.length) endTurn(false); // nothing left to speak
     } catch (e) {
-      if (closedRef.current) return;
+      if (closedRef.current || e.name === "AbortError") return; // barge-in/close already handled
       log("Claude error: " + e.message);
+      speakingRef.current = false;
       const fallback = "Trouble connecting — keep going, I'm here.";
       setLastAI(fallback);
       speak(fallback, () => { if (!closedRef.current) startListening(); });
