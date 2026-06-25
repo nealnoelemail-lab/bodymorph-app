@@ -2830,7 +2830,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, onCheckTodo, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onAddWater, onSetWater, onCheckTodo, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -2998,6 +2998,11 @@ LOGGING WATER — when ${profile.name} says they drank water, append at the very
 |||WATER:{"cups":1}|||
 Use the number of cups/glasses they mention. Never say or read the tag aloud.
 
+CORRECTING WATER — if ${profile.name} corrects a mistake (e.g. "no, I only had one cup total", "that was wrong", "take one back"), fix it instead of adding more. They have ${h.cups} cup(s) logged right now. Two ways:
+• Set the exact total they tell you: |||WATER:{"set":1}|||  (use when they state the correct running total, e.g. "I've only had 1 cup all day")
+• Subtract with a negative number: |||WATER:{"cups":-1}|||  (use to remove cups you just over-logged)
+Confirm the fix warmly ("Got it, fixed that — you're at 1 cup"). Never read the tag aloud.
+
 ${messagesRef.current.length
   ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly and warmly by name as their Coach and pick up naturally. Do NOT restart the check-in or re-ask anything you already covered (don't ask "how are you" again or re-ask about water if you already did). Reference earlier topics when it fits and move forward — e.g. ask about a meal they hadn't eaten yet, or how something from earlier went.`
   : `Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} as their Coach (e.g. "Hey ${profile.name}, it's Coach — how are you doing this ${cd.timeOfDay||"morning"}?") and asking how they're doing.`}`;
@@ -3048,7 +3053,13 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
       if (m[1] === "LOG" && onLogSet) { onLogSet(obj); confirm = `✓ Logged ${obj.weight}lbs × ${obj.reps}`; }
       else if (m[1] === "FOOD" && onLogFood) { onLogFood(obj); confirm = `✓ Logged ${obj.name || "food"}`; }
-      else if (m[1] === "WATER" && onAddWater) { onAddWater(obj.cups || obj.add || 1); confirm = `✓ Water logged`; }
+      else if (m[1] === "WATER") {
+        if (obj.set !== undefined && onSetWater) { onSetWater(obj.set); confirm = `✓ Water set to ${Math.max(0, parseInt(obj.set)||0)}`; }
+        else if (onAddWater) {
+          const d = (obj.cups !== undefined ? obj.cups : (obj.add !== undefined ? obj.add : 1));
+          onAddWater(d); confirm = (parseInt(d) < 0) ? `✓ Water corrected` : `✓ Water logged`;
+        }
+      }
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
     }
     return confirm;
@@ -6737,11 +6748,12 @@ export default function BodyMorph() {
     const goal = h.goal || 8;
     return { date: todayStr, cups: Math.max(0, parseInt(val) || 0), goal };
   });
-  // Voice companion: add N cups of water.
+  // Voice companion: add N cups of water (N may be negative to correct a mistake). Never below 0.
   const addWaterCups = (n) => setHydration(h => {
     const todayStr = new Date().toISOString().slice(0,10);
     const base = h.date === todayStr ? h : { date: todayStr, cups: 0, goal: h.goal || 8 };
-    return { ...base, cups: base.cups + (parseInt(n) || 1) };
+    const delta = parseInt(n); // keep 0 and negatives; only default to +1 when truly absent/NaN
+    return { ...base, cups: Math.max(0, base.cups + (Number.isNaN(delta) ? 1 : delta)) };
   });
   // Voice companion: log a food item the client reports eating.
   const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
@@ -7014,6 +7026,7 @@ export default function BodyMorph() {
       onLogSet={(inSession && !stretchSession) ? handleVoiceSetLog : undefined}
       onLogFood={logFoodFromVoice}
       onAddWater={addWaterCups}
+      onSetWater={setHydrationCups}
       onCheckTodo={checkTodo}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
