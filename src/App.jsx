@@ -6811,6 +6811,8 @@ export default function BodyMorph() {
         if (stodo && typeof stodo === "object") setTodoChecked(stodo);
         const svoice = await Store.get(COACH_VOICE_KEY);
         if (svoice && svoice.id) setCoachVoice(svoice);
+        else if (sp && sp.gender === "Male") setCoachVoice(ELEVEN_VOICES.find(v => v.name.startsWith("Adam")) || DEFAULT_COACH_VOICE);
+        else setCoachVoice(DEFAULT_COACH_VOICE); // Rachel — default for women
         if (sl) setLogs(sl);
         if (sm) setRewards(sm);
         if (sb) setBodyEntries(sb);
