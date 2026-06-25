@@ -1481,7 +1481,7 @@ const Logo = ({ small, onSettings }) => (
       )}
     </div>
     <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?73:96, letterSpacing: small?7.5:10.5, lineHeight:1 }}>
-      BODY<span style={{ color:"#e8ff00" }}>MORPH</span><span style={{ fontFamily:"'DM Sans', sans-serif", fontSize:"0.28em", verticalAlign:"top", marginLeft:1, color:"#e8ff00", fontWeight:600, lineHeight:1 }}>&#8482;</span>
+      BODY<span style={{ color:"#e8ff00" }}>MORPH</span><span style={{ fontFamily:"'DM Sans', sans-serif", fontSize:"0.28em", verticalAlign:"top", marginLeft:-3, letterSpacing:0, color:"#e8ff00", fontWeight:600, lineHeight:1 }}>&#8482;</span>
     </div>
   </div>
 );
