@@ -2613,20 +2613,20 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
               <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
               <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
             </svg>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:19, letterSpacing:2, color:accent }}>MENU</span>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>MENU</span>
           </button>
 
           {/* STEPS */}
           {editingSteps ? (
             <div style={{ height:74, background:"transparent", border:"1px solid #e8ff00", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:66, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:66, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
               <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
             </div>
           ) : (
             <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ height:74, background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:1, color:"#dcdcf0" }}>&#128095; STEPS</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:22, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
-              <span style={{ fontSize:10.5, color:"#9898b8" }}>/ {STEP_GOAL.toLocaleString()}</span>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#dcdcf0" }}>&#128095; STEPS</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
+              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todaySteps.toLocaleString()} / {STEP_GOAL.toLocaleString()}</span>
             </button>
           )}
 
@@ -2635,22 +2635,22 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
           {/* CALORIES */}
           <div style={{ height:74, background:"transparent", border:"none", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.5, color:"#dcdcf0" }}>&#128293; CALORIES</span>
-            <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:22, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
-            <span style={{ fontSize:10.5, color:"#9898b8" }}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`of ${calGoal.toLocaleString()}`}</span>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:0.5, color:"#dcdcf0" }}>&#128293; CALORIES</span>
+            <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
+            <span style={{ fontSize:12.6, color:"#9898b8" }}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`${totalCal.toLocaleString()} of ${calGoal.toLocaleString()}`}</span>
           </div>
 
           {/* WATER */}
           {editingHyd ? (
             <div style={{ height:74, background:"transparent", border:"1px solid #3d8eff", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:48, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:48, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
               <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
             </div>
           ) : (
             <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ height:74, background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.5, color:"#dcdcf0" }}>&#128167; WATER</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:22, color:"#3d8eff" }}>{todayCups}</span>
-              <span style={{ fontSize:10.5, color:"#9898b8" }}>/ {HYD_GOAL} cups</span>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:0.5, color:"#dcdcf0" }}>&#128167; WATER</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#3d8eff" }}>{todayCups}</span>
+              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todayCups} / {HYD_GOAL} cups</span>
             </button>
           )}
         </div>
@@ -2658,23 +2658,24 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         {/* Voice Coach circle, sitting on top of Today's Macros */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:18 }}>
           <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ width:196, height:196, borderRadius:"50%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, overflow:"hidden", padding:"10px", position:"relative", zIndex:2 }}>
-            <span style={{ fontSize:36, lineHeight:1 }}>&#127897;&#65039;</span>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:25, letterSpacing:1.5, color:accent }}>VOICE COACH</span>
-            <span style={{ color:"#9898b8", fontSize:11.5, maxWidth:150, textAlign:"center", lineHeight:1.3 }}>{voiceActive ? "Coaching... tap to stop" : "Tap to talk with your coach"}</span>
+            <span style={{ fontSize:43.2, lineHeight:1 }}>&#127897;&#65039;</span>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1.5, color:accent }}>VOICE COACH</span>
+            <span style={{ color:"#9898b8", fontSize:13.8, maxWidth:150, textAlign:"center", lineHeight:1.3 }}>{voiceActive ? "Coaching... tap to stop" : "Tap to talk with your coach"}</span>
           </button>
         </div>
 
         {/* TODAY'S MACROS - tucked just under the circle */}
         <div style={{ marginTop:-6, paddingTop:26, paddingLeft:16, paddingRight:16, display:"flex", flexDirection:"column", justifyContent:"center" }}>
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:14.5, letterSpacing:1, color:"#dcdcf0", textAlign:"center", marginBottom:5 }}>TODAY'S MACROS</div>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:17.4, letterSpacing:1, color:"#dcdcf0", textAlign:"center", marginBottom:5 }}>TODAY'S MACROS</div>
           <div style={{ display:"flex", gap:12 }}>
             {[["PROTEIN", totalP, macros.protein||0, "#3ddc84"],["CARBS", totalC, macros.carbs||0, "#3d8eff"],["FATS", totalF, macros.fats||0, "#e8ff00"]].map(([label,val,goal,color])=>{
-              const over = goal>0 && val>goal;
+              const goalNum = parseFloat(goal) || 0; // goal may be like "117g"
+              const over = goalNum>0 && val>goalNum;
               return (
                 <div key={label} style={{ flex:1, textAlign:"center" }}>
-                  <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:17, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:10, color:"#9898b8" }}>/{goal}g</span></div>
-                  <div style={{ background:"#1e1e2e", borderRadius:99, height:4, overflow:"hidden", margin:"3px 0" }}><div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background:over?"#ff7070":color }} /></div>
-                  <div style={{ color:"#9898b8", fontSize:10, letterSpacing:0.5 }}>{label}</div>
+                  <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:20.4, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:12, color:"#9898b8" }}>/{goalNum}g</span></div>
+                  <div style={{ background:"#1e1e2e", borderRadius:99, height:4, overflow:"hidden", margin:"3px 0" }}><div style={{ width:Math.min(100,goalNum?Math.round(val/goalNum*100):0)+"%", height:"100%", background:over?"#ff7070":color }} /></div>
+                  <div style={{ color:"#9898b8", fontSize:12, letterSpacing:0.5 }}>{label}</div>
                 </div>
               );
             })}
