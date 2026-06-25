@@ -2853,6 +2853,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   const analyserRef  = useRef(null);
   const lastTickRef  = useRef(0); // heartbeat — last time the listen loop ran a frame
   const recentSummaryRef = useRef([]); // rolling last-7-days summaries
+  const idleNudgeRef = useRef(0); // how many times we've nudged a silent user in a row
 
   const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
 
@@ -2890,6 +2891,7 @@ YOUR PERSONALITY — motivating but never annoying:
 • Warm, confident, and supportive — like a great trainer who genuinely believes in their client. NOT a drill sergeant. Never yell, never use harsh "push harder, no excuses" clichés, never be over-the-top hype.
 • Encourage naturally and specifically, not with empty cheerleading. A little encouragement goes a long way; don't overdo it.
 • Be calm, present, and steady — confidence, not pressure.
+• Be LIVELY and engaging — keep the conversation flowing with warmth and energy, like a real person who's glad to talk to them. Never flat, never robotic. If they go quiet, warmly check in rather than going silent.
 
 ABSOLUTE RULES — NEVER BREAK THESE:
 • Never give medical advice, diagnose injuries, or recommend any supplements, medications, or treatments. Coaching on exercise form is fine; anything medical is not.
@@ -3097,6 +3099,8 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     const chunks = [];
     let silenceTimer = null;
     let hasAudio = false;
+    let idleStop = false; // stopped because the user never said anything (for a check-in)
+    const listenStart = performance.now();
     const data = new Uint8Array(analyser.frequencyBinCount);
 
     const checkSilence = () => {
@@ -3106,12 +3110,17 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       const vol = data.reduce((a, b) => a + b, 0) / data.length;
       if (vol > 8) {
         hasAudio = true;
+        idleNudgeRef.current = 0; // they're engaged again
         clearTimeout(silenceTimer);
         silenceTimer = null;
         setInterim("🎙 Hearing you…");
       } else if (hasAudio && !silenceTimer) {
         // End-of-speech: stop & transcribe after a short silence (snappy response).
         silenceTimer = setTimeout(() => { try { recorder.stop(); } catch {} }, 550);
+      } else if (!hasAudio && idleNudgeRef.current < 2 && performance.now() - listenStart > 8500) {
+        // No speech for a while → check in on them (up to twice in a row).
+        idleStop = true;
+        try { recorder.stop(); } catch {}
       }
       if (recorder.state === "recording") requestAnimationFrame(checkSilence);
     };
@@ -3123,7 +3132,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
       log("stopped: " + blob.size + " bytes, audio=" + hasAudio);
       if (!hasAudio || closedRef.current) {
-        if (!closedRef.current && !speakingRef.current) setTimeout(startListening, 300);
+        if (closedRef.current || speakingRef.current) return;
+        if (idleStop) { idleNudgeRef.current++; askRef.current?.(null, false, true); return; } // check in
+        setTimeout(startListening, 250);
         return;
       }
       setState("processing");
@@ -3162,17 +3173,19 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   }, [log]);
 
   // ── Claude API ─────────────────────────────────────────────────────────────
-  const askClaude = useCallback(async (userText, isInit = false) => {
+  const askClaude = useCallback(async (userText, isInit = false, idleNudge = false) => {
     if (closedRef.current) return;
     setState("processing");
-    if (!isInit) setLastUser(userText);
+    if (!isInit && !idleNudge) setLastUser(userText);
 
     const prior = messagesRef.current;
     const msgs = isInit
       ? (prior.length
           ? [...prior, { role: "user", content: "(I just reopened the app a bit later in the day. Greet me briefly by name and pick up our conversation naturally — do not restart the check-in or re-ask what we already covered.)" }]
           : [{ role: "user", content: "Begin the session." }])
-      : [...prior, { role: "user", content: userText }];
+      : idleNudge
+        ? [...prior, { role: "user", content: "(I've gone quiet for several seconds with no response. In ONE short, warm, casual sentence, gently check if I'm still there or nudge the conversation forward — keep it light and don't repeat your last line.)" }]
+        : [...prior, { role: "user", content: userText }];
     if (!isInit) messagesRef.current = msgs;
 
     try {
