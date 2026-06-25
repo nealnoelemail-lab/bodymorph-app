@@ -2534,7 +2534,7 @@ function Settings({ profile, onBack, onResetProfile }) {
   );
 }
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState }) {
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -2601,144 +2601,113 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>Welcome back, <span style={{ color:accent }}>{profile.name}</span></div>
       </div>
 
-      {/* Daily Dashboard Strip */}
-      <div style={{ margin:"0 0 14px", display:"flex", flexDirection:"column", gap:8 }}>
+      {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
+      <div style={{ position:"relative", height:360, marginTop:10, marginBottom:8 }}>
 
-        {/* Voice Coach + Hydration side by side */}
-        <div style={{ display:"flex", gap:8 }}>
+        {/* MENU - top left */}
+        <button onClick={onMenu} style={{ position:"absolute", top:0, left:0, width:"46%", height:70, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:14, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, zIndex:1 }}>
+          <svg width="32" height="19" viewBox="0 0 32 19" fill="none">
+            <line x1="3" y1="3" x2="29" y2="3" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+            <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+            <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+          </svg>
+          <span style={{ fontFamily:"'Bebas Neue'", fontSize:19, letterSpacing:2, color:"#f0f0f8" }}>MENU</span>
+        </button>
 
-          {/* Voice Coach — tap to start/stop. Silver light travels the edge:
-              continuous when active, a slow lap that fades out when idle. */}
-          <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"relative", overflow:"hidden", flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"10px 12px", cursor:"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:3 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:7 }}>
-              <span style={{ fontSize:20 }}>🎙️</span>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:accent }}>VOICE COACH</span>
-            </div>
-            <div style={{ color:"#9898b8", fontSize:12.5 }}>{voiceActive ? "Coaching… · tap to stop" : "Tap to talk with your coach"}</div>
+        {/* STEPS - top right */}
+        {editingSteps ? (
+          <div style={{ position:"absolute", top:0, right:0, width:"46%", height:70, background:"#12121a", border:"1px solid #e8ff00", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6, zIndex:1 }}>
+            <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:66, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+            <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
+          </div>
+        ) : (
+          <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ position:"absolute", top:0, right:0, width:"46%", height:70, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:14, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, zIndex:1 }}>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:1, color:"#dcdcf0" }}>&#128095; STEPS</span>
+            <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:22, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
+            <span style={{ fontSize:10.5, color:"#9898b8" }}>/ {STEP_GOAL.toLocaleString()}</span>
           </button>
+        )}
 
-          {/* Hydration — built exactly like Steps: tap to type cups, ✓ to save */}
-          <div style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"8px 10px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-              <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
-                <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0" }}>💧 HYDRATION</span>
-              </button>
-              {editingHyd ? (
-                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-                  <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }}
-                    style={{ width:50, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"3px 6px", fontSize:15.6, fontFamily:"'Oswald',sans-serif", fontWeight:600, textAlign:"center", outline:"none" }} />
-                  <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"3px 7px", cursor:"pointer", fontSize:13.2, fontWeight:700 }}>✓</button>
-                  <button onClick={()=>setEditingHyd(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#c8c8e0", padding:"3px 6px", cursor:"pointer", fontSize:13.2 }}>✕</button>
-                </div>
-              ) : (
-                <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color:"#3d8eff" }}>{todayCups}</span>
-                </button>
-              )}
-            </div>
-            <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
-              <div style={{ width:hydPct+"%", height:"100%", background:"#3d8eff", borderRadius:99, transition:"width 0.4s" }} />
-            </div>
-            <div style={{ color:"#9898b8", fontSize:13.2 }}>{hydPct>=100?"🎉 Goal reached!":`${todayCups} / ${HYD_GOAL} cups`}</div>
-          </div>
+        {/* CALORIES - left */}
+        <div style={{ position:"absolute", left:0, top:150, width:"29%", height:118, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:14, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, zIndex:1, padding:"6px 3px" }}>
+          <span style={{ fontFamily:"'Bebas Neue'", fontSize:14.5, letterSpacing:0.5, color:"#dcdcf0" }}>&#128293; CAL</span>
+          <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:21, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
+          <span style={{ fontSize:10, color:"#9898b8", textAlign:"center", lineHeight:1.2 }}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`of ${calGoal.toLocaleString()}`}</span>
         </div>
 
-        {/* Steps + Calories side by side */}
-        <div style={{ display:"flex", gap:8 }}>
-
-          {/* Steps */}
-          <div style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"8px 10px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-              <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
-                <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0" }}>👟 STEPS</span>
-              </button>
-              {editingSteps ? (
-                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-                  <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }}
-                    style={{ width:64, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"3px 6px", fontSize:15.6, fontFamily:"'Oswald',sans-serif", fontWeight:600, textAlign:"center", outline:"none" }} />
-                  <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"3px 7px", cursor:"pointer", fontSize:13.2, fontWeight:700 }}>✓</button>
-                  <button onClick={()=>setEditingSteps(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#c8c8e0", padding:"3px 6px", cursor:"pointer", fontSize:13.2 }}>✕</button>
-                </div>
-              ) : (
-                <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
-                </button>
-              )}
-            </div>
-            <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
-              <div style={{ width:stepPct+"%", height:"100%", background:"#3ddc84", borderRadius:99, transition:"width 0.4s" }} />
-            </div>
-            <div style={{ color:"#9898b8", fontSize:13.2 }}>{stepPct>=100?"🎉 Goal reached!":`${todaySteps.toLocaleString()} / ${STEP_GOAL.toLocaleString()}`}</div>
+        {/* HYDRATION - right */}
+        {editingHyd ? (
+          <div style={{ position:"absolute", right:0, top:150, width:"29%", height:118, background:"#12121a", border:"1px solid #3d8eff", borderRadius:14, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:6, zIndex:1 }}>
+            <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:48, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+            <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
           </div>
+        ) : (
+          <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ position:"absolute", right:0, top:150, width:"29%", height:118, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:14, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, zIndex:1 }}>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:14.5, letterSpacing:0.5, color:"#dcdcf0" }}>&#128167; WATER</span>
+            <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:21, color:"#3d8eff" }}>{todayCups}</span>
+            <span style={{ fontSize:10, color:"#9898b8" }}>/ {HYD_GOAL} cups</span>
+          </button>
+        )}
 
-          {/* Calories */}
-          <div style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"8px 10px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0" }}>🔥 CALORIES</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
-            </div>
-            <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:4 }}>
-              <div style={{ width:calPct+"%", height:"100%", background: calOver?"#ff7070":"#e8ff00", borderRadius:99, transition:"width 0.4s" }} />
-            </div>
-            <div style={{ color:"#9898b8", fontSize:13.2 }}>{calOver ? `${(totalCal-calGoal).toLocaleString()} over` : `${(calGoal-totalCal).toLocaleString()} of ${calGoal.toLocaleString()} remaining`}</div>
-          </div>
-        </div>
+        {/* VOICE COACH - center hero circle */}
+        <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ position:"absolute", top:78, left:"50%", transform:"translateX(-50%)", width:198, height:198, borderRadius:"50%", background:"#15151f", border:"1px solid #2a2a3d", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, zIndex:2, overflow:"hidden", padding:"10px" }}>
+          <span style={{ fontSize:36, lineHeight:1 }}>&#127897;&#65039;</span>
+          <span style={{ fontFamily:"'Bebas Neue'", fontSize:25, letterSpacing:1.5, color:accent }}>VOICE COACH</span>
+          <span style={{ color:"#9898b8", fontSize:11.5, maxWidth:150, textAlign:"center", lineHeight:1.3 }}>{voiceActive ? "Coaching... tap to stop" : "Tap to talk with your coach"}</span>
+        </button>
 
-        {/* Macros */}
-        <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"9px 14px" }}>
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:19.2, letterSpacing:1, color:"#dcdcf0", marginBottom:8 }}>TODAY'S MACROS</div>
-          <div style={{ display:"flex", gap:8 }}>
+        {/* TODAY'S MACROS - bottom long bar */}
+        <div style={{ position:"absolute", bottom:0, left:0, right:0, height:92, background:"#12121a", border:"1px solid #2a2a3d", borderRadius:16, padding:"9px 16px", zIndex:1, display:"flex", flexDirection:"column", justifyContent:"center" }}>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:14.5, letterSpacing:1, color:"#dcdcf0", textAlign:"center", marginBottom:5 }}>TODAY'S MACROS</div>
+          <div style={{ display:"flex", gap:12 }}>
             {[["PROTEIN", totalP, macros.protein||0, "#3ddc84"],["CARBS", totalC, macros.carbs||0, "#3d8eff"],["FATS", totalF, macros.fats||0, "#e8ff00"]].map(([label,val,goal,color])=>{
-              const over = goal > 0 && val > goal;
+              const over = goal>0 && val>goal;
               return (
-              <div key={label} style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:24, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:12, color:"#9898b8" }}>/{goal}g</span></div>
-                <div style={{ background:"#1e1e2e", borderRadius:99, height:5, overflow:"hidden", margin:"3px 0 3px" }}>
-                  <div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background: over?"#ff7070":color, borderRadius:99 }} />
+                <div key={label} style={{ flex:1, textAlign:"center" }}>
+                  <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:17, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:10, color:"#9898b8" }}>/{goal}g</span></div>
+                  <div style={{ background:"#1e1e2e", borderRadius:99, height:4, overflow:"hidden", margin:"3px 0" }}><div style={{ width:Math.min(100,goal?Math.round(val/goal*100):0)+"%", height:"100%", background:over?"#ff7070":color }} /></div>
+                  <div style={{ color:"#9898b8", fontSize:10, letterSpacing:0.5 }}>{label}</div>
                 </div>
-                <div style={{ color: over?"#ff7070":"#9898b8", fontSize:12, letterSpacing:0.5 }}>{label}{over?" ▲":""}</div>
-              </div>
               );
             })}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Quick actions */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10, padding:"4px 0 4px" }}>
-        <button onClick={onCalendar} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconToDo color="#3ddc84" /><span style={{ flex:1, textAlign:"center", color:"#3ddc84" }}>TO DO DAILY</span>
-        </button>
-        <button onClick={onTrainingWeek} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconTraining color={accent} /><span style={{ flex:1, textAlign:"center", color:accent }}>TRAINING</span>
-        </button>
-        <button onClick={onCardio} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconCardio /><span style={{ flex:1, textAlign:"center" }}>CARDIO</span>
-        </button>
-        <button onClick={onStretch} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconStretch /><span style={{ flex:1, textAlign:"center" }}>STRETCH</span>
-        </button>
-        <button onClick={onNutrition} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconNutrition /><span style={{ flex:1, textAlign:"center" }}>NUTRITION</span>
-        </button>
-        <button onClick={onSupplements} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconSupplements /><span style={{ flex:1, textAlign:"center" }}>SUPPLEMENTS</span>
-        </button>
-        <button onClick={onPeptides} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconPeptides /><span style={{ flex:1, textAlign:"center" }}>PEPTIDES</span>
-        </button>
-        <button onClick={onProgress} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 8px 10px 14px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:19.2, display:"flex", flexDirection:"row", alignItems:"center", gap:8 }}>
-          <IconProgress /><span style={{ flex:1, textAlign:"center" }}>PROGRESS</span>
-        </button>
+// ── MENU PAGE ─────────────────────────────────────────────────────────────────
+// Full-page list of every action, reached from the dashboard's MENU button.
+function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary }) {
+  const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
+  const items = [
+    ["TO DO DAILY",        <IconToDo color="#3ddc84" />,    "#3ddc84", onCalendar],
+    ["TRAINING",           <IconTraining color={accent} />, accent,    onTrainingWeek],
+    ["CARDIO",             <IconCardio />,                  "#f0f0f8", onCardio],
+    ["STRETCH",            <IconStretch />,                 "#f0f0f8", onStretch],
+    ["NUTRITION",          <IconNutrition />,               "#f0f0f8", onNutrition],
+    ["SUPPLEMENTS",        <IconSupplements />,              "#f0f0f8", onSupplements],
+    ["PEPTIDES",           <IconPeptides />,                "#f0f0f8", onPeptides],
+    ["PROGRESS",           <IconProgress />,                "#f0f0f8", onProgress],
+    ["MY PROGRAM SUMMARY", <IconProgramSummary />,          "#c8c8e0", onProgramSummary],
+  ];
+  return (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 0 12px" }}>
+        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1 }}>MENU</div>
       </div>
-
-      {/* My Program Summary — full width thin button */}
-      <div style={{ marginTop:12 }}>
-        <button onClick={onProgramSummary} style={{ width:"100%", background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"12px 6px", color:"#c8c8e0", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:20, textAlign:"center", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
-          <IconProgramSummary /> MY PROGRAM SUMMARY
-        </button>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {items.map(([label, icon, color, action]) => (
+          <button key={label} onClick={action} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"17px 18px", color:"#f0f0f8", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:22, display:"flex", alignItems:"center", gap:14, width:"100%" }}>
+            <span style={{ display:"flex", flexShrink:0 }}>{icon}</span>
+            <span style={{ flex:1, textAlign:"left", color }}>{label}</span>
+            <span style={{ color:"#4a4a6a", fontSize:20 }}>&#8250;</span>
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -6866,9 +6835,12 @@ export default function BodyMorph() {
         onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
+        onMenu={()=>setPhase("menu")}
         onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
+
+  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} /></>);
 
   if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} /></>);
 
