@@ -6884,7 +6884,7 @@ export default function BodyMorph() {
       .then(r => {
         if (cancelled) return;
         if (r.ok) console.info("%c[BodyMorph] ElevenLabs: key OK ✓ — natural coach voice is active.", "color:#3ad17a");
-        else if (r.status === 401) console.warn("[BodyMorph] ElevenLabs: key REJECTED (401). Check VITE_ELEVENLABS_KEY — falling back to phone voice.");
+        else if (r.status === 401) console.info("%c[BodyMorph] ElevenLabs: key present (couldn't verify account — this is normal for a restricted key without 'User: Read'). Voice still works if the key has Text-to-Speech and your plan allows the voice.", "color:#e8a000");
         else console.warn("[BodyMorph] ElevenLabs: status " + r.status + " — falling back to phone voice.");
       })
       .catch(e => { if (!cancelled) console.warn("[BodyMorph] ElevenLabs: couldn't reach API (" + e.message + ") — falling back to phone voice."); });
