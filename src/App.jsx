@@ -2855,8 +2855,18 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
   const recentSummaryRef = useRef([]); // rolling last-7-days summaries
   const idleNudgeRef = useRef(0); // how many times we've nudged a silent user in a row
   const turnRef = useRef(0); // monotonic turn id — only the latest turn is allowed to speak
+  const wakeLockRef = useRef(null); // screen wake lock so the phone doesn't auto-sleep mid-session
 
   const setState = (s) => { setVs(s); vsRef.current = s; if (onState) onState(s); };
+
+  // Keep the screen awake while coaching so the phone doesn't auto-sleep and kill the session.
+  const requestWakeLock = useCallback(async () => {
+    try {
+      if ("wakeLock" in navigator && document.visibilityState === "visible" && !closedRef.current) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch {}
+  }, []);
 
   // ── Arm: auto-runs on mount. TTS was already unlocked by primeTTS() in the
   // parent's tap handler, so here we just grab the mic + start the greeting. ───
@@ -2875,11 +2885,12 @@ function VoiceCoach({ profile, day, logs, onLogSet, onClose, videoOverrides, onS
       analyserRef.current = analyser;
       setArmed(true);
       closedRef.current = false;
+      requestWakeLock();
       askRef.current?.(null, true); // greeting
     } catch {
       setError("Microphone blocked. In Safari, tap 'aA' in the address bar → Website Settings → Microphone → Allow, then reopen the coach.");
     }
-  }, []);
+  }, [requestWakeLock]);
 
   // ── System prompt ──────────────────────────────────────────────────────────
   const isStretch = !!(stretchSession && stretchSession.items && stretchSession.items.length);
@@ -3321,9 +3332,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         });
       }
     } catch {}
+    // Wake lock auto-releases when the page is hidden — re-acquire when it returns.
+    const onVis = () => { if (document.visibilityState === "visible") requestWakeLock(); };
+    document.addEventListener("visibilitychange", onVis);
     arm();
     return () => {
       closedRef.current = true;
+      document.removeEventListener("visibilitychange", onVis);
+      try { wakeLockRef.current?.release(); wakeLockRef.current = null; } catch {}
       try { recogRef.current?.stop(); } catch {}
       window.speechSynthesis.cancel();
       try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
