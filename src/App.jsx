@@ -6674,13 +6674,16 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const prefBrandList = () => preferredBrands.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
   const [bodyFat, setBodyFat] = useState((profile && profile.bodyFat) || ""); // estimated body-fat %
   const [bfHelp, setBfHelp] = useState(false);
+  const [bfSaved, setBfSaved] = useState(false); // brief "Saved ✓" confirmation
   const [carbLevel, setCarbLevel] = useState((profile && profile.carbLevel) || "moderate");
-  const refreshTgt = (patch) => { const nm = macrosFor({ ...profile, bodyFat: bodyFat===""?null:parseFloat(bodyFat), carbLevel, ...patch }, dietPref); setTgt({ cal: parseInt(nm.dailyCalories)||2000, protein: parseInt(nm.protein)||150, carbs: parseInt(nm.carbs)||150, fats: parseInt(nm.fats)||60 }); };
+  const numOr = (v, d) => { const x = parseInt(v); return Number.isNaN(x) ? d : x; }; // keeps legit 0 (e.g. carnivore carbs)
+  const refreshTgt = (patch) => { const nm = macrosFor({ ...profile, bodyFat: bodyFat===""?null:parseFloat(bodyFat), carbLevel, ...patch }, dietPref); setTgt({ cal: numOr(nm.dailyCalories,2000), protein: numOr(nm.protein,150), carbs: numOr(nm.carbs,150), fats: numOr(nm.fats,60) }); };
   const saveCarbLevel = (lvl) => { setCarbLevel(lvl); if (onUpdateProfile) onUpdateProfile({ carbLevel: lvl }); refreshTgt({ carbLevel: lvl }); };
   const saveBodyFat = () => {
     const bfNum = bodyFat==="" ? null : parseFloat(bodyFat);
-    if (onUpdateProfile && String(bodyFat) !== String(profile?.bodyFat||"")) onUpdateProfile({ bodyFat: bfNum });
+    if (onUpdateProfile) onUpdateProfile({ bodyFat: bfNum });
     refreshTgt({ bodyFat: bfNum }); // reflect the new BF% in the target inputs right away
+    setBfSaved(true); setTimeout(()=>setBfSaved(false), 1800); // visible confirmation
   };
   const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
@@ -6794,10 +6797,10 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     carbs:a.carbs+(parseInt(x.carbs)||0), fats:a.fats+(parseInt(x.fats)||0),
   }), {cal:0,protein:0,carbs:0,fats:0});
 
-  const calGoal = parseInt(n.dailyCalories)||2000;
-  const proteinGoal = parseInt(n.protein)||150;
-  const carbsGoal = parseInt(n.carbs)||150;
-  const fatsGoal = parseInt(n.fats)||60;
+  const calGoal = numOr(n.dailyCalories,2000);
+  const proteinGoal = numOr(n.protein,150);
+  const carbsGoal = numOr(n.carbs,150); // numOr keeps a legit 0 (carnivore) instead of falling back
+  const fatsGoal = numOr(n.fats,60);
 
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
@@ -7040,8 +7043,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: bfHelp?8:16 }}>
                     <input type="number" inputMode="decimal" value={bodyFat} onChange={e=>setBodyFat(e.target.value)} onBlur={saveBodyFat} placeholder="e.g. 20" style={{ flex:1, background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"12px", fontSize:18, outline:"none", boxSizing:"border-box" }} />
                     <span style={{ color:"#9898b8", fontSize:18 }}>%</span>
-                    <button onClick={saveBodyFat} style={{ background:"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"12px 18px", cursor:"pointer", fontWeight:700, fontSize:16 }}>Save</button>
+                    <button onClick={saveBodyFat} style={{ background: bfSaved?"#3ddc84":"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"12px 18px", cursor:"pointer", fontWeight:700, fontSize:16, minWidth:78 }}>{bfSaved ? "Saved ✓" : "Save"}</button>
                   </div>
+                  {bfSaved && <div style={{ color:"#3ddc84", fontSize:15, marginBottom:12, marginTop:-4 }}>✓ Saved — your targets below have been updated.</div>}
                   {bfHelp && (
                     <div style={{ background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, padding:"12px 14px", marginBottom:16, fontSize:15, color:"#c8c8e0", lineHeight:1.6 }}>
                       A rough eyeball estimate is fine — you can update it later when you get a real measurement (calipers, a smart scale, or a DEXA scan).<br/>
