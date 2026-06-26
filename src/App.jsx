@@ -1642,8 +1642,8 @@ const WatermarkPlain = () => (
   </>
 );
 
-const Logo = ({ small, onSettings }) => (
-  <div style={{ lineHeight:1, textAlign:"center", position:"relative" }}>
+const Logo = ({ small, onSettings, align="center" }) => (
+  <div style={{ lineHeight:1, textAlign:align, position:"relative" }}>
     <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative" }}>
       NTF
       {onSettings && (
@@ -2824,7 +2824,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
-        <Logo small onSettings={onSettings} />
+        <Logo small onSettings={onSettings} align="left" />
       </div>
 
       {/* Greeting */}
