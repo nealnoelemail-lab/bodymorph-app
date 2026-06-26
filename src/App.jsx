@@ -1514,10 +1514,85 @@ function buildHomeProgram(profile) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── BodyMorph (No Gym) — bodyweight / calisthenics, beginner→advanced ─────────
+// Push / Pull / Legs / Core rotate across the user's days. No gym; a pull-up or
+// doorway bar helps for pulling but isn't required (rows are an alternative).
+const CALI_SESSIONS = [
+  {
+    type: "Push",
+    focus: "Chest, shoulders & triceps — bodyweight",
+    workout: [
+      { exercise:"Push-Up", sets:"3", reps:"8-15", rest:"60s", tempo:"controlled", coachCue:"Easier: hands on a wall/counter or knees down. Harder: feet elevated or archer push-ups. Chest toward the floor, full lockout." },
+      { exercise:"Chair / Bench Dip", sets:"3", reps:"8-12", rest:"60s", tempo:"controlled", coachCue:"Hands on a sturdy chair behind you, bend to 90 degrees, press up. Harder: feet elevated or use parallel surfaces for full dips." },
+      { exercise:"Pike Push-Up", sets:"3", reps:"6-12", rest:"60s", tempo:"controlled", coachCue:"Hips high in an upside-down V, lower the crown of your head toward the floor. Builds toward handstand push-ups." },
+      { exercise:"Diamond Push-Up", sets:"3", reps:"6-12", rest:"60s", tempo:"controlled", coachCue:"Hands together under the chest in a diamond shape. Hammers the triceps and inner chest." },
+    ],
+  },
+  {
+    type: "Pull",
+    focus: "Back & biceps — bodyweight",
+    workout: [
+      { exercise:"Pull-Up / Chin-Up", sets:"3", reps:"3-10", rest:"90s", tempo:"controlled", coachCue:"Use a bar or doorway bar. Beginner: jump up and lower slowly (negatives), or use a band. Full dead-hang to chin over the bar." },
+      { exercise:"Inverted Row", sets:"3", reps:"8-15", rest:"60s", tempo:"controlled", coachCue:"Under a sturdy table or low bar, body straight, pull your chest up to it. Great pulling work with no pull-up bar." },
+      { exercise:"Towel Door Row", sets:"3", reps:"10-15", rest:"60s", tempo:"controlled", coachCue:"Loop a towel around a sturdy door handle, lean back with straight arms, and row yourself in. A solid pull anywhere." },
+      { exercise:"Superman Hold", sets:"3", reps:"hold 20-30s", rest:"45s", tempo:"hold", coachCue:"Lie face down, lift arms and legs, squeeze the lower back. Strengthens the whole posterior chain." },
+    ],
+  },
+  {
+    type: "Legs",
+    focus: "Lower body — bodyweight",
+    workout: [
+      { exercise:"Bodyweight Squat", sets:"3", reps:"15-25", rest:"60s", tempo:"controlled", coachCue:"Feet shoulder-width, sit back and down, drive up tall. Harder: pause at the bottom, or work toward pistol squats." },
+      { exercise:"Reverse Lunge", sets:"3", reps:"10-12 each leg", rest:"60s", tempo:"controlled", coachCue:"Step back, drop the back knee toward the floor, push through the front heel to stand. Alternate legs." },
+      { exercise:"Bulgarian Split Squat", sets:"3", reps:"8-12 each", rest:"60s", tempo:"controlled", coachCue:"Back foot on a chair, drop straight down over the front leg. Hold a wall for balance. Brutal single-leg strength." },
+      { exercise:"Glute Bridge", sets:"3", reps:"15-20", rest:"45s", tempo:"controlled", coachCue:"On your back, drive the hips up, squeeze the glutes hard at the top. Harder: single-leg." },
+      { exercise:"Calf Raise", sets:"3", reps:"15-20", rest:"45s", tempo:"controlled", coachCue:"Rise onto your toes, lower slow. Do them off a step for a bigger stretch and range." },
+    ],
+  },
+  {
+    type: "Core",
+    focus: "Abs & midsection",
+    workout: [
+      { exercise:"Plank", sets:"3", reps:"hold 30-60s", rest:"45s", tempo:"hold", coachCue:"Forearms down, body in one straight line, brace the abs. Don't let the hips sag or pike up." },
+      { exercise:"Lying Leg Raise", sets:"3", reps:"10-15", rest:"45s", tempo:"controlled", coachCue:"On your back, legs straight, raise to vertical and lower slow without touching the floor. Press your low back down." },
+      { exercise:"Hollow Hold", sets:"3", reps:"hold 20-40s", rest:"45s", tempo:"hold", coachCue:"Low back pressed into the floor, arms and legs extended and lifted. The gymnastics core staple." },
+      { exercise:"Mountain Climbers", sets:"3", reps:"20-30", rest:"45s", tempo:"brisk", coachCue:"Plank position, drive the knees to the chest quickly. Core strength plus a little cardio." },
+      { exercise:"Bicycle Crunch", sets:"3", reps:"20", rest:"45s", tempo:"controlled", coachCue:"Elbow toward the opposite knee, slow and controlled. Hits the obliques." },
+    ],
+  },
+];
+
+function buildCalisthenicsProgram(profile) {
+  const rawUserDays = (profile.trainingDays && profile.trainingDays.length) ? [...profile.trainingDays] : [1,2,4,5];
+  const userDays = rawUserDays.map(toValidDayIndex).filter(d => d !== null).sort((a,b)=>a-b).filter((v,i,a)=>a.indexOf(v)===i);
+  const weeklySchedule = userDays.map((dayNum, i) => {
+    const s = CALI_SESSIONS[i % CALI_SESSIONS.length];
+    return { day: DAY_NAMES[dayNum], type: s.type, focus: s.focus, workout: s.workout };
+  });
+  return {
+    calisthenics: true,
+    overview: "A no-gym, bodyweight strength program — train anywhere with little to no equipment (a pull-up or doorway bar helps for pulling, but rows cover it if you don't have one). Every movement has beginner-to-advanced progressions, so it grows with you. The raw, equipment-free style made legendary in prison yards and military barracks — pick the progression that matches your level, warm up first, and build from there.",
+    weeklySchedule,
+    stretching: "full",
+    nutrition: macrosFor(profile),
+    progressMilestones: [
+      { week:1, goal:"Nail clean form on the basics and find the right progression for your level — quality reps over quantity." },
+      { week:2, goal:"Add reps, or step up to a harder progression on any movement that feels easy." },
+      { week:3, goal:"Push your hardest sets close to failure with strict form. Try one tougher variation." },
+      { week:4, goal:"Test yourself — more reps or a harder progression than week 1, then rebuild from the new level." },
+    ],
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildProgram(profile) {
   // Route to At-Home / Active-Aging builder if selected (no gym, low-impact)
   if (profile.focus && profile.focus.includes("Active Aging")) {
     return buildHomeProgram(profile);
+  }
+  // Route to BodyMorph (No Gym) bodyweight / calisthenics builder if selected
+  if (profile.focus && profile.focus.includes("BodyMorph (No Gym)")) {
+    return buildCalisthenicsProgram(profile);
   }
   // Route to HFT builder if selected
   if (profile.focus && profile.focus.includes("HFT")) {
@@ -1936,8 +2011,8 @@ function Wizard({ onComplete }) {
     () => !!p.activityLevel,
   ];
 
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
-  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = p.gender === "Female" ? femaleFocuses : maleFocuses;
 
   const Pill = ({ label, active, onClick }) => (
@@ -2191,8 +2266,8 @@ function Loading({ name }) {
 // ── HOME ──────────────────────────────────────────────────────────────────────
 // Clean landing: greeting, program summary, then the Mon-Fri week to pick from.
 function ChangeProgram({ profile, onSave, onBack }) {
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
-  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = profile.gender === "Female" ? femaleFocuses : maleFocuses;
   const [focus, setFocus] = useState(profile.focus || "Full Body");
   const [showHFTInfo, setShowHFTInfo] = useState(false);
