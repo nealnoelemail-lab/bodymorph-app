@@ -6669,6 +6669,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [genOpen, setGenOpen] = useState(false);
   const [allergies, setAllergies] = useState((nutritionGoals && nutritionGoals.allergies) || "");
   const [allergens, setAllergens] = useState((nutritionGoals && nutritionGoals.allergens) || []); // checked common allergens
+  const [allergenOpen, setAllergenOpen] = useState(false);
   const toggleAllergen = (a) => setAllergens(list => list.includes(a) ? list.filter(x=>x!==a) : [...list, a]);
   const combinedAllergies = () => [...allergens, allergies.trim()].filter(Boolean).join(", ");
   const [generating, setGenerating] = useState(false);
@@ -7022,52 +7023,59 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
 
               {!genPlan && (
                 <div>
-                  <div style={{ fontSize:13, color:"#9898b8", marginBottom:12, lineHeight:1.5 }}>
+                  <div style={{ fontSize:22, color:"#9898b8", marginBottom:16, lineHeight:1.45 }}>
                     A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
                   </div>
 
                   {/* Editable daily macro targets */}
-                  <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Daily targets (tap to adjust):</div>
-                  <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+                  <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Daily targets (tap to adjust):</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:16 }}>
                     {[["cal","CAL","#e8ff00"],["protein","PROTEIN","#3d8eff"],["carbs","CARBS","#9b5de5"],["fats","FATS","#3ddc84"]].map(([k,label,col])=>(
                       <div key={k} style={{ flex:1 }}>
-                        <div style={{ color:col, fontSize:10, fontWeight:700, marginBottom:3, textAlign:"center" }}>{label}</div>
-                        <input type="number" inputMode="numeric" value={tgt[k]} onChange={e=>setTgt(t=>({...t,[k]:e.target.value}))} style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"9px 4px", fontSize:15, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none", boxSizing:"border-box" }} />
+                        <div style={{ color:col, fontSize:14, fontWeight:700, marginBottom:4, textAlign:"center" }}>{label}</div>
+                        <input type="number" inputMode="numeric" value={tgt[k]} onChange={e=>setTgt(t=>({...t,[k]:e.target.value}))} style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"10px 4px", fontSize:21, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none", boxSizing:"border-box" }} />
                       </div>
                     ))}
                   </div>
 
-                  <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Allergies / foods to avoid (tap any):</div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
-                    {["Peanuts","Tree nuts","Shellfish","Fish","Dairy","Eggs","Gluten / Wheat","Soy","Sesame","Pork"].map(a => {
-                      const on = allergens.includes(a);
-                      return <button key={a} onClick={()=>toggleAllergen(a)} style={{ background: on?"rgba(255,61,61,0.15)":"#0e0e16", border:`1px solid ${on?"#ff5a5a":"#2a2a3d"}`, color: on?"#ff8a8a":"#c8c8e0", borderRadius:16, padding:"7px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'" }}>{on?"✕ ":""}{a}</button>;
-                    })}
-                  </div>
-                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="Type anything else to avoid…" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px", fontSize:14, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
+                  {/* Allergies — collapsible dropdown */}
+                  <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Allergies / foods to avoid:</div>
+                  <button onClick={()=>setAllergenOpen(o=>!o)} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, padding:"13px 14px", cursor:"pointer", marginBottom: allergenOpen?0:12 }}>
+                    <span style={{ flex:1, textAlign:"left", fontSize:17, color: allergens.length?"#f0f0f8":"#74748a" }}>{allergens.length ? allergens.join(", ") : "Tap to choose common allergens"}</span>
+                    <span style={{ color:"#e8ff00", fontSize:20, lineHeight:1 }}>{allergenOpen ? "▴" : "▾"}</span>
+                  </button>
+                  {allergenOpen && (
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:8, padding:"12px 2px 14px" }}>
+                      {["Peanuts","Tree nuts","Shellfish","Fish","Dairy","Eggs","Gluten / Wheat","Soy","Sesame","Pork"].map(a => {
+                        const on = allergens.includes(a);
+                        return <button key={a} onClick={()=>toggleAllergen(a)} style={{ background: on?"rgba(255,61,61,0.15)":"#1a1a26", border:`1px solid ${on?"#ff5a5a":"#2a2a3d"}`, color: on?"#ff8a8a":"#c8c8e0", borderRadius:18, padding:"9px 14px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'" }}>{on?"✕ ":""}{a}</button>;
+                      })}
+                    </div>
+                  )}
+                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="Type anything else to avoid…" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"13px", fontSize:17, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
 
                   {/* Branded foods toggle */}
-                  <button onClick={()=>setUseBranded(v=>!v)} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, padding:"11px 12px", cursor:"pointer", marginBottom:14 }}>
-                    <div style={{ width:38, height:22, borderRadius:11, background: useBranded?"#e8ff00":"#2a2a3d", position:"relative", flexShrink:0, transition:"background 0.15s" }}>
-                      <div style={{ width:18, height:18, borderRadius:9, background:"#fff", position:"absolute", top:2, left: useBranded?18:2, transition:"left 0.15s" }} />
+                  <button onClick={()=>setUseBranded(v=>!v)} style={{ display:"flex", alignItems:"center", gap:12, width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, padding:"13px 14px", cursor:"pointer", marginBottom:16 }}>
+                    <div style={{ width:44, height:26, borderRadius:13, background: useBranded?"#e8ff00":"#2a2a3d", position:"relative", flexShrink:0, transition:"background 0.15s" }}>
+                      <div style={{ width:22, height:22, borderRadius:11, background:"#fff", position:"absolute", top:2, left: useBranded?20:2, transition:"left 0.15s" }} />
                     </div>
                     <div style={{ textAlign:"left" }}>
-                      <div style={{ color:"#f0f0f8", fontSize:13.5, fontWeight:600 }}>Use specific brands when available</div>
-                      <div style={{ color:"#74748a", fontSize:11 }}>Off = reliable generic foods. On = branded products.</div>
+                      <div style={{ color:"#f0f0f8", fontSize:18, fontWeight:600 }}>Use specific brands when available</div>
+                      <div style={{ color:"#74748a", fontSize:14 }}>Off = reliable generic foods. On = branded products.</div>
                     </div>
                   </button>
 
-                  {genErr && <div style={{ color:"#ff7070", fontSize:13, marginBottom:12 }}>{genErr}</div>}
-                  <button disabled={generating} onClick={runGenerate} style={{ width:"100%", background: generating?"#3a3a4a":"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor: generating?"default":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:15 }}>
+                  {genErr && <div style={{ color:"#ff7070", fontSize:17, marginBottom:12 }}>{genErr}</div>}
+                  <button disabled={generating} onClick={runGenerate} style={{ width:"100%", background: generating?"#3a3a4a":"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"16px", cursor: generating?"default":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19 }}>
                     {generating ? "Building your plan… (10–20s)" : "Generate Plan"}
                   </button>
-                  {generating && <div style={{ color:"#74748a", fontSize:12, textAlign:"center", marginTop:10 }}>Picking foods, verifying macros, and dialing in portions…</div>}
+                  {generating && <div style={{ color:"#74748a", fontSize:15, textAlign:"center", marginTop:10 }}>Picking foods, verifying macros, and dialing in portions…</div>}
                 </div>
               )}
 
               {genPlan && (() => {
                 const tt = genPlan.totals||{}, tg = genPlan.target||{};
-                const chip = (label,val,goal,col) => (<div style={{ flex:1, textAlign:"center", background:"#12121a", borderRadius:10, padding:"8px 4px" }}><div style={{ color:col, fontSize:17, fontWeight:700, fontFamily:"'Oswald',sans-serif" }}>{val}</div><div style={{ color:"#74748a", fontSize:10 }}>/ {goal} {label}</div></div>);
+                const chip = (label,val,goal,col) => (<div style={{ flex:1, textAlign:"center", background:"#12121a", borderRadius:10, padding:"9px 4px" }}><div style={{ color:col, fontSize:22, fontWeight:700, fontFamily:"'Oswald',sans-serif" }}>{val}</div><div style={{ color:"#74748a", fontSize:13 }}>/ {goal} {label}</div></div>);
                 return (
                   <div>
                     <div style={{ display:"flex", gap:6, marginBottom:14 }}>
@@ -7075,21 +7083,21 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     </div>
                     {genPlan.meals.map((ml,mi)=>(
                       <div key={mi} style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
-                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:"#e8ff00", marginBottom:6, textTransform:"uppercase" }}>{ml.slot}</div>
+                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1, color:"#e8ff00", marginBottom:7, textTransform:"uppercase" }}>{ml.slot}</div>
                         {(ml.items||[]).map((it,ii)=>{ const isSw = swapping===(mi+"-"+ii); return (
-                          <div key={ii} style={{ display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#d2d2ec", padding:"4px 0", opacity: isSw?0.5:1 }}>
-                            <button onClick={()=>swapFood(mi,ii)} disabled={!!swapping} title="Swap this food" style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#e8ff00", cursor: swapping?"default":"pointer", fontSize:12, padding:"2px 6px", flexShrink:0 }}>{isSw?"…":"⇄"}</button>
-                            <span style={{ flex:1 }}>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span>{it.brand && <span style={{ color:"#3ddc84", fontSize:11 }}> · {it.brand}</span>}</span>
+                          <div key={ii} style={{ display:"flex", alignItems:"center", gap:9, fontSize:16, color:"#d2d2ec", padding:"5px 0", opacity: isSw?0.5:1 }}>
+                            <button onClick={()=>swapFood(mi,ii)} disabled={!!swapping} title="Swap this food" style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#e8ff00", cursor: swapping?"default":"pointer", fontSize:15, padding:"3px 8px", flexShrink:0 }}>{isSw?"…":"⇄"}</button>
+                            <span style={{ flex:1 }}>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span>{it.brand && <span style={{ color:"#3ddc84", fontSize:13 }}> · {it.brand}</span>}</span>
                             <span style={{ color:"#9898b8", whiteSpace:"nowrap" }}>{it.cal}c · {it.protein}p</span>
                           </div>
                         ); })}
                       </div>
                     ))}
                     <div style={{ display:"flex", gap:8, marginTop:6 }}>
-                      <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"13px", cursor:"pointer", fontWeight:600, fontSize:14 }}>Regenerate</button>
-                      <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"13px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Use This Plan</button>
+                      <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontWeight:600, fontSize:17 }}>Regenerate</button>
+                      <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17 }}>Use This Plan</button>
                     </div>
-                    <div style={{ color:"#74748a", fontSize:11, textAlign:"center", marginTop:10, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
+                    <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
                   </div>
                 );
               })()}
