@@ -1449,7 +1449,76 @@ function buildGLBProgram(profile) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 
+// ── Active-Aging / At-Home program (no gym, low-impact, senior-friendly) ──────
+// Three gentle session types rotate across the user's chosen days. Bodyweight +
+// a sturdy chair (and optional light weights / water bottles). The AI voice coach
+// guides each session hands-free. NOT medical/clinical — general gentle fitness.
+const HOME_SESSIONS = [
+  {
+    type: "Gentle Strength",
+    focus: "Chair & standing — everyday strength",
+    workout: [
+      { exercise:"Sit-to-Stand (Chair Squat)", sets:"2", reps:"10", rest:"as needed", tempo:"slow", coachCue:"Use a sturdy chair. Stand up tall, then sit down slow and controlled. Rest whenever you need to." },
+      { exercise:"Wall Push-Up", sets:"2", reps:"10", rest:"as needed", tempo:"slow", coachCue:"Hands flat on the wall, lower your chest toward it, then push back. Easy on the wrists and shoulders." },
+      { exercise:"Standing March", sets:"2", reps:"20", rest:"as needed", tempo:"steady", coachCue:"Hold the chair if you like. Lift each knee in turn — great for the hips and balance." },
+      { exercise:"Calf Raise", sets:"2", reps:"12", rest:"as needed", tempo:"slow", coachCue:"Hold a counter, rise onto your toes, lower slowly. Strengthens ankles for steadier walking." },
+      { exercise:"Seated Knee Extension", sets:"2", reps:"10 each leg", rest:"as needed", tempo:"slow", coachCue:"Sit tall, straighten one knee, lower slow. Light and easy on the joints." },
+      { exercise:"Light Bicep Curl", sets:"2", reps:"12", rest:"as needed", tempo:"slow", coachCue:"Use light weights or water bottles. Curl up, lower with control. Keep it pain-free." },
+    ],
+  },
+  {
+    type: "Mobility & Stretch",
+    focus: "Stay loose, limber, and comfortable",
+    workout: [
+      { exercise:"Neck & Shoulder Rolls", sets:"1", reps:"8 each way", rest:"-", tempo:"slow", coachCue:"Slow, easy circles to loosen the neck and shoulders. Keep breathing." },
+      { exercise:"Seated Cat-Cow", sets:"1", reps:"8", rest:"-", tempo:"slow", coachCue:"Sit tall, gently round and arch the back with your breath. Keeps the spine supple." },
+      { exercise:"Seated Hamstring Stretch", sets:"1", reps:"hold 20-30s each", rest:"-", tempo:"hold", coachCue:"Extend one leg, reach gently toward the toes — only as far as comfortable. No bouncing." },
+      { exercise:"Chest Opener", sets:"1", reps:"hold 20-30s", rest:"-", tempo:"hold", coachCue:"Clasp hands behind you, gently lift and open the chest. Great for posture." },
+      { exercise:"Ankle Circles", sets:"1", reps:"10 each way", rest:"-", tempo:"slow", coachCue:"Seated, circle each ankle slowly. Keeps the joints mobile for steady footing." },
+      { exercise:"Gentle Side Bend", sets:"1", reps:"5 each side", rest:"-", tempo:"slow", coachCue:"Reach one arm overhead and lean gently to the side. Feel the easy stretch along your ribs." },
+    ],
+  },
+  {
+    type: "Balance & Walk",
+    focus: "Steadiness, confidence, and a daily walk",
+    workout: [
+      { exercise:"Single-Leg Stand", sets:"2", reps:"hold 10-20s each", rest:"as needed", tempo:"hold", coachCue:"Hold a chair, lift one foot slightly off the floor, balance, then switch. Builds steadiness." },
+      { exercise:"Heel-to-Toe Walk", sets:"2", reps:"10 steps", rest:"as needed", tempo:"slow", coachCue:"Walk a straight line, heel touching toe each step. Stay near a wall or counter for safety." },
+      { exercise:"Standing Side Leg Raise", sets:"2", reps:"10 each leg", rest:"as needed", tempo:"slow", coachCue:"Hold the chair, lift one leg out to the side, lower slowly. Hips and balance." },
+      { exercise:"Toe & Heel Raises", sets:"2", reps:"12", rest:"as needed", tempo:"slow", coachCue:"Rise onto your toes, then rock back onto your heels. Hold support if you need it." },
+      { exercise:"Daily Walk", sets:"1", reps:"10-20 min", rest:"-", tempo:"comfortable", coachCue:"Aim for a comfortable 10 to 20 minute walk. Go at your own pace — fresh air counts." },
+    ],
+  },
+];
+
+function buildHomeProgram(profile) {
+  const rawUserDays = (profile.trainingDays && profile.trainingDays.length) ? [...profile.trainingDays] : [1,3,5];
+  const userDays = rawUserDays.map(toValidDayIndex).filter(d => d !== null).sort((a,b)=>a-b).filter((v,i,a)=>a.indexOf(v)===i);
+  const weeklySchedule = userDays.map((dayNum, i) => {
+    const s = HOME_SESSIONS[i % HOME_SESSIONS.length];
+    return { day: DAY_NAMES[dayNum], type: s.type, focus: s.focus, workout: s.workout };
+  });
+  return {
+    homeProgram: true,
+    overview: "An at-home, low-impact program for staying strong, mobile, and steady — no gym and little to no equipment (just a sturdy chair, and maybe light weights or water bottles). Move at your own pace, rest whenever you need, and stop if anything hurts. 👉 Please check with your doctor before starting any new exercise program.",
+    weeklySchedule,
+    stretching: "full",
+    nutrition: macrosFor(profile),
+    progressMilestones: [
+      { week:1, goal:"Get comfortable with each movement. Focus on control and steady balance — quality over quantity." },
+      { week:2, goal:"Add a few more reps where it feels easy. Keep up your daily walks." },
+      { week:3, goal:"Notice everyday things getting easier — standing from a chair, stairs, balance. That's real progress." },
+      { week:4, goal:"Stay consistent. A gentle pace done regularly beats intensity every time." },
+    ],
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildProgram(profile) {
+  // Route to At-Home / Active-Aging builder if selected (no gym, low-impact)
+  if (profile.focus && profile.focus.includes("Active Aging")) {
+    return buildHomeProgram(profile);
+  }
   // Route to HFT builder if selected
   if (profile.focus && profile.focus.includes("HFT")) {
     return buildHFTProgram(profile);
@@ -1867,8 +1936,8 @@ function Wizard({ onComplete }) {
     () => !!p.activityLevel,
   ];
 
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)"];
-  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
+  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
   const focuses = p.gender === "Female" ? femaleFocuses : maleFocuses;
 
   const Pill = ({ label, active, onClick }) => (
@@ -2122,8 +2191,8 @@ function Loading({ name }) {
 // ── HOME ──────────────────────────────────────────────────────────────────────
 // Clean landing: greeting, program summary, then the Mon-Fri week to pick from.
 function ChangeProgram({ profile, onSave, onBack }) {
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)"];
-  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
+  const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)"];
   const focuses = profile.gender === "Female" ? femaleFocuses : maleFocuses;
   const [focus, setFocus] = useState(profile.focus || "Full Body");
   const [showHFTInfo, setShowHFTInfo] = useState(false);
