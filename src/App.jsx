@@ -7026,7 +7026,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             <div style={{ maxWidth:440, margin:"0 auto" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#e8ff00" }}>✨ AI MEAL PLAN</div>
-                <button onClick={()=>setGenOpen(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", width:34, height:34, cursor:"pointer", fontSize:20, lineHeight:1 }}>×</button>
+                <button onClick={()=>setGenOpen(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", width:60, height:60, cursor:"pointer", fontSize:38, lineHeight:1 }}>×</button>
               </div>
 
               {!genPlan && (
