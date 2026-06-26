@@ -15,6 +15,8 @@ const GLOBAL_CSS = `
   ::-webkit-scrollbar-thumb { background: #2a2a3d; border-radius: 2px; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
   @keyframes spin { to { transform:rotate(360deg); } }
+  /* Home MENU letters pop one-by-one (a little wave) then rest — full cycle every 3s. */
+  @keyframes menuPop { 0%,12%,100% { transform:scale(1); } 6% { transform:scale(1.4); } }
   .fade-in { animation: fadeIn 0.35s ease both; }
   @keyframes voiceSlide { 0% { transform:translateX(-100%); } 100% { transform:translateX(330%); } }
   .voice-bar-seg { animation: voiceSlide 1.1s ease-in-out infinite; }
@@ -2833,7 +2835,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
               <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
               <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
             </svg>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>MENU</span>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>{"MENU".split("").map((ch,i)=>(<span key={i} style={{ display:"inline-block", animation:"menuPop 3s ease-in-out infinite", animationDelay:(i*0.12)+"s" }}>{ch}</span>))}</span>
           </button>
 
           {/* STEPS */}
