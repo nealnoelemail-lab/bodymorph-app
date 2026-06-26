@@ -3228,7 +3228,7 @@ YOU ARE A PROACTIVE COACH, NOT A TRACKER. Don't wait to be asked — you've look
 ${cd.timeOfDay === "morning" ? `THIS IS THE MORNING — RUN YOUR DAILY MORNING CHECK-IN as the natural first conversation. Move through it ONE topic per turn, warm and unhurried, and ONLY cover what you haven't already covered today (the conversation so far is your memory — don't repeat a topic you already did; revisit one only if it's still relevant, e.g. they said they'd hydrate but clearly haven't):
 1. GREETING: a warm "good morning" and how they're feeling today.
 2. REST: ask if they got enough rest / slept well last night. React kindly — if they slept poorly, be understanding and maybe suggest easing into the day.
-3. HYDRATION: ask if they've had any water yet. If not, encourage them to go grab a glass and hydrate first thing — the easiest win of the day. Log it if they drink (WATER tag).
+3. HYDRATION: CHECK THE STATUS FIRST. If they already have cups logged, do NOT ask "have you had water" — acknowledge what's there ("Nice, you're at 2 cups already") and encourage more. Only if they're at 0 do you nudge them to grab a glass first thing. Log it if they drink (WATER tag).
 4. MORNING SUPPLEMENTS: if they have AM supplements on today's to-do list above, remind them to take their morning supplements and run through which ones are due (read the names from the list). When they confirm they took them, check those items off (TODO tag). (Just a reminder to take what's already on their plan — never recommend or add supplements.)
 5. BREAKFAST: ask what they're having (or had) for breakfast. Log it if they tell you (FOOD tag), and nudge gently toward protein if it's light.
 6. TODAY'S PLAN: give a quick, upbeat heads-up about today's training (or affirm a rest day). On a training day, ask what time they're planning to work out and remember their answer.
@@ -3236,7 +3236,7 @@ Flow through these like a real conversation based on their answers — do NOT ra
 
 WHAT TO PROACTIVELY NOTICE (pick what fits the time of day — don't force a topic that doesn't apply yet):
 • HYDRATION: below their water goal and it's past morning → warmly encourage a glass. If they say they drank, log it (WATER tag).
-• MEALS: a meal that should've happened by now isn't logged (breakfast by late morning, lunch by mid-afternoon, dinner by evening) → ask about it gently and LOG it if they tell you (FOOD tag). Don't ask about dinner at noon.
+• MEALS: a meal that should've happened by now isn't logged → bring it up gently. BUT if you ALREADY discussed their plan for that meal earlier in the conversation, do NOT re-ask "what are you having" from scratch — reference the plan you already know ("Still going with the ground beef and rice for lunch?") and just confirm/log once they've eaten it. Don't ask about dinner at noon.
 • OVER MACROS: if calories are OVER target (flagged above) or a macro is well over → gently mention it and suggest lighter choices for the rest of the day. Encouraging, not scolding.
 • PROTEIN LOW: late in the day and protein is well under goal → a gentle nudge toward a protein-rich option.
 • WORKOUT (training day): if they haven't trained yet, EARLY in the day warmly ask what time they're planning to get to the gym / work out today (e.g. "What time are you thinking of hitting the gym today?") and REMEMBER their answer. LATER in the day, if they still haven't trained, gently reference the time they gave ("You mentioned around 5 — still on track to get your session in? How are you feeling?") and encourage or problem-solve. If they already trained, praise it specifically. Don't ask the gym-time question more than once unless their plans changed.
@@ -3252,7 +3252,7 @@ CHECKING OFF TO-DO ITEMS — when ${profile.name} confirms they completed a to-d
 |||TODO:{"key":"PASTE-THE-EXACT-KEY-HERE"}|||
 You may include more than one TODO tag if they confirm several at once. Never say or read the key or the tag aloud — just speak naturally ("Awesome, checking that off for you").
 
-LOGGING FOOD — when ${profile.name} tells you what they ate, estimate reasonable macros and append this tag at the very END of your response, after your spoken words:
+LOGGING FOOD — ONLY log a meal once ${profile.name} confirms they have ACTUALLY EATEN it (e.g. "I just had…", "I ate…", "I finished…"). Do NOT log food they are merely PLANNING or thinking about. When they describe a plan ("I'm thinking ground beef and rice for lunch"), talk it through and help them plan — but do NOT log it, and do NOT say "checking that off." Only after they tell you they've eaten it do you log it. If you're unsure whether they've eaten yet, ask ("Want me to log that now, or after you eat?"). When they confirm eating, estimate reasonable macros and append this tag at the very END of your response, after your spoken words:
 |||FOOD:{"slot":"breakfast","name":"Oatmeal with banana","cal":320,"protein":10,"carbs":58,"fats":6}|||
 slot must be one of: breakfast, lunch, dinner, snacks. Never say or read the tag aloud.
 
@@ -3347,7 +3347,25 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     }
     return confirm;
   };
-  const cleanSpeak = (text) => text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO):\{[^}]*\}\|\|\|/g, "").trim();
+  // The model still slips into self-criticism despite the prompt — strip leading grovel
+  // clauses in code so they NEVER reach the client's ears. Drops "You're right." /
+  // "My bad." / "I should have …" style openers, looping until the line starts clean.
+  // Two tiers so we don't nuke legitimate agreement ("You're right that protein matters"):
+  // • STANDALONE: agreement openers, stripped ONLY when they stand alone (followed by punctuation/end).
+  // • CLAUSE: explicit self-criticism, stripped even with a continuation (almost never legit in coaching).
+  const GROVEL_STANDALONE = /^\s*(you'?re\s+(absolutely\s+|totally\s+)?right|fair point|good catch|sorry)\s*(?=[.,!?—–-]|$)/i;
+  const GROVEL_STRIP_STANDALONE = /^\s*(you'?re\s+(absolutely\s+|totally\s+)?right|fair point|good catch|sorry)\s*[.,!?—–-]*\s*/i;
+  const GROVEL_CLAUSE = /^\s*(my bad|i should'?ve|i should have|i shoulda|i dropped the ball|thanks for keeping me honest|my apologies|i apologi[sz]e|i'?m sorry|sorry about that)\b/i;
+  const deGrovel = (text) => {
+    let t = (text || "").trim(), prev;
+    do {
+      prev = t;
+      if (GROVEL_STANDALONE.test(t)) t = t.replace(GROVEL_STRIP_STANDALONE, "").trim();
+      else if (GROVEL_CLAUSE.test(t)) { const m = t.match(/^[^.!?]*[.!?]+\s*/); t = m ? t.slice(m[0].length).trim() : ""; }
+    } while (t && t !== prev);
+    return t;
+  };
+  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO):\{[^}]*\}\|\|\|/g, "").trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
