@@ -6668,6 +6668,9 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   // AI meal-plan generator
   const [genOpen, setGenOpen] = useState(false);
   const [allergies, setAllergies] = useState((nutritionGoals && nutritionGoals.allergies) || "");
+  const [allergens, setAllergens] = useState((nutritionGoals && nutritionGoals.allergens) || []); // checked common allergens
+  const toggleAllergen = (a) => setAllergens(list => list.includes(a) ? list.filter(x=>x!==a) : [...list, a]);
+  const combinedAllergies = () => [...allergens, allergies.trim()].filter(Boolean).join(", ");
   const [generating, setGenerating] = useState(false);
   const [genPlan, setGenPlan] = useState(null);
   const [genErr, setGenErr] = useState(null);
@@ -6793,11 +6796,11 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
     setGenerating(true); setGenErr(null); setGenPlan(null);
-    if (allergies !== ((nutritionGoals && nutritionGoals.allergies)||"")) onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies }); // remember allergies
+    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens }); // remember checklist + custom text
     try {
       const plan = await generateMealPlan({
         name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
-        allergies: allergies.trim(), useBranded,
+        allergies: combinedAllergies(), useBranded,
         targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
       });
       setGenPlan(plan);
@@ -6810,7 +6813,8 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
     setSwapping(mi+"-"+ii);
     try {
       const cur = genPlan.meals[mi].items[ii];
-      const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${allergies.trim()?` Avoid anything containing: ${allergies}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
+      const av = combinedAllergies();
+      const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${av?` Avoid anything containing: ${av}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{ "Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:120, messages:[{role:"user", content:prompt}] }),
@@ -7033,8 +7037,14 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     ))}
                   </div>
 
-                  <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Allergies / foods to avoid (optional):</div>
-                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="e.g. shellfish, peanuts, dairy" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px", fontSize:14, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
+                  <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Allergies / foods to avoid (tap any):</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                    {["Peanuts","Tree nuts","Shellfish","Fish","Dairy","Eggs","Gluten / Wheat","Soy","Sesame","Pork"].map(a => {
+                      const on = allergens.includes(a);
+                      return <button key={a} onClick={()=>toggleAllergen(a)} style={{ background: on?"rgba(255,61,61,0.15)":"#0e0e16", border:`1px solid ${on?"#ff5a5a":"#2a2a3d"}`, color: on?"#ff8a8a":"#c8c8e0", borderRadius:16, padding:"7px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'" }}>{on?"✕ ":""}{a}</button>;
+                    })}
+                  </div>
+                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="Type anything else to avoid…" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px", fontSize:14, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
 
                   {/* Branded foods toggle */}
                   <button onClick={()=>setUseBranded(v=>!v)} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, padding:"11px 12px", cursor:"pointer", marginBottom:14 }}>
