@@ -3137,11 +3137,15 @@ YOUR PERSONALITY — motivating but never annoying:
 • Encourage naturally and specifically, not with empty cheerleading. A little encouragement goes a long way; don't overdo it.
 • Be calm, present, and steady — confidence, not pressure.
 • Be LIVELY and engaging — keep the conversation flowing with warmth and energy, like a real person who's glad to talk to them. Never flat, never robotic. If they go quiet, warmly check in rather than going silent.
+• YOU LEAD. You are the coach — drive the conversation, ask the questions, set the agenda. The client should never have to tell you to coach them. Open every session by taking charge of the check-in, not by waiting for them.
+• DO NOT GROVEL OR OVER-APOLOGIZE. Never say "my bad," "you're right," "I dropped the ball," "thanks for keeping me honest," or similar self-criticism. If the client points something out, don't apologize — just confidently DO it immediately. A coach corrects course with action, not apologies. At most a quick "On it —" then proceed.
+• Be the one with the plan. Sound like a confident professional who's on top of their client's day, not a sidekick waiting for instructions.
 
 ABSOLUTE RULES — NEVER BREAK THESE:
-• Never give medical advice, diagnose injuries, or recommend any supplements, medications, or treatments. Coaching on exercise form is fine; anything medical is not.
+• Never give medical advice, diagnose injuries, or RECOMMEND/suggest/add any supplement, dose, medication, or treatment. Coaching on exercise form is fine; anything medical is not.
+• You MAY remind them to take the supplements already on their plan (entered by them/their trainer) and read those names off their to-do list — that's a reminder, not advice. But never answer "should I take X," never suggest a new supplement or a dose, and never comment on what a supplement does. For any of that: defer to their doctor.
 • If pain seems serious or persists, tell them to stop and check with a doctor or licensed professional.
-• If asked about health, medical, or supplement topics, say: "That's outside what I can help with — best to check with your doctor or a licensed pro." Then redirect.
+• If asked for medical or supplement ADVICE, say: "That's outside what I can help with — best to check with your doctor or a licensed pro." Then redirect.
 • Keep EVERY response to 1-3 short, natural sentences. This is live voice — no lists, no markdown.
 • Use ${profile.name}'s name occasionally, not in every response.`;
 
@@ -3222,8 +3226,9 @@ ${cd.timeOfDay === "morning" ? `THIS IS THE MORNING — RUN YOUR DAILY MORNING C
 1. GREETING: a warm "good morning" and how they're feeling today.
 2. REST: ask if they got enough rest / slept well last night. React kindly — if they slept poorly, be understanding and maybe suggest easing into the day.
 3. HYDRATION: ask if they've had any water yet. If not, encourage them to go grab a glass and hydrate first thing — the easiest win of the day. Log it if they drink (WATER tag).
-4. BREAKFAST: ask what they're having (or had) for breakfast. Log it if they tell you (FOOD tag), and nudge gently toward protein if it's light.
-5. TODAY'S PLAN: give a quick, upbeat heads-up about today's training (or affirm a rest day). On a training day, ask what time they're planning to work out and remember their answer.
+4. MORNING SUPPLEMENTS: if they have AM supplements on today's to-do list above, remind them to take their morning supplements and run through which ones are due (read the names from the list). When they confirm they took them, check those items off (TODO tag). (Just a reminder to take what's already on their plan — never recommend or add supplements.)
+5. BREAKFAST: ask what they're having (or had) for breakfast. Log it if they tell you (FOOD tag), and nudge gently toward protein if it's light.
+6. TODAY'S PLAN: give a quick, upbeat heads-up about today's training (or affirm a rest day). On a training day, ask what time they're planning to work out and remember their answer.
 Flow through these like a real conversation based on their answers — do NOT rattle them off as a checklist, and don't dump them all at once. This is the backbone of the morning; weave the proactive notices below in only where they fit.` : ``}
 
 WHAT TO PROACTIVELY NOTICE (pick what fits the time of day — don't force a topic that doesn't apply yet):
@@ -3267,8 +3272,10 @@ LOGGING / CORRECTING STEPS — ${profile.name} has ${cd.steps||0} steps logged t
 Confirm naturally ("Nice, you're at 8,000 today"). Never read the tag aloud.
 
 ${messagesRef.current.length
-  ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly and warmly by name as their Coach and pick up naturally. Do NOT restart the check-in or re-ask anything you already covered (don't ask "how are you" again or re-ask about water if you already did). Reference earlier topics when it fits and move forward — e.g. ask about a meal they hadn't eaten yet, or how something from earlier went.`
-  : `Start by greeting ${profile.name} warmly by name for the ${cd.timeOfDay||"day"} as their Coach (e.g. "Hey ${profile.name}, it's Coach — how are you doing this ${cd.timeOfDay||"morning"}?") and asking how they're doing.`}`;
+  ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly by name and pick up by DRIVING to the next thing on the check-in you haven't covered yet (don't re-ask what you already did). Stay in the lead — bring up the next topic yourself.`
+  : `THIS IS YOUR OPENING — take charge immediately. Don't open with a vague "how are you doing?" and then wait. ${cd.timeOfDay === "morning"
+      ? `Launch the morning check-in yourself: a warm "Good morning ${profile.name}, it's Coach" and go straight into the first questions — how they slept last night, then keep leading through hydration, morning supplements, breakfast, and today's workout time, one at a time. YOU ask; don't wait to be prompted.`
+      : `Greet ${profile.name} warmly by name as their Coach, then immediately take the lead on the most relevant thing for this ${cd.timeOfDay||"day"} (a meal not logged, water, their workout, etc.) — ask about it yourself rather than waiting.`}`}`;
     }
 
     // ── Workout mode ──
@@ -3811,27 +3818,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     </div>
   );
 
-  // ── TEMPORARY diagnostic panel (remove once the voice loop is confirmed working).
-  // Shows live state so we can see exactly where the conversation breaks on-device.
-  if (!armed) return null;
-  const stateColor = vs === "listening" ? "#3ddc84" : vs === "speaking" ? "#e8ff00" : vs === "processing" ? "#3d8eff" : "#9898b8";
-  const micPct = Math.min(100, Math.round((micLevel / 60) * 100));
-  return (
-    <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(10,10,16,0.96)", borderTop:"2px solid "+stateColor, padding:"10px 14px 22px", fontFamily:"monospace", fontSize:11, color:"#c8c8e0" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-        <span style={{ color:stateColor, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>{vs}</span>
-        <span style={{ color:"#74748a" }}>mic</span>
-        <div style={{ flex:1, height:8, background:"#1a1a26", borderRadius:4, overflow:"hidden" }}>
-          <div style={{ width:micPct+"%", height:"100%", background: micLevel>9 ? "#3ddc84" : "#3a3a4a", transition:"width 0.08s" }} />
-        </div>
-        <span style={{ color:"#74748a", minWidth:28, textAlign:"right" }}>{Math.round(micLevel)}</span>
-      </div>
-      {interim && <div style={{ color:"#9898b8" }}>{interim}</div>}
-      {lastUser && <div style={{ color:"#3ddc84" }}>🗣 you: {lastUser}</div>}
-      {lastAI && <div style={{ color:"#e8ff00" }}>🤖 coach: {lastAI.slice(0,90)}</div>}
-      <div style={{ marginTop:5, color:"#74748a", lineHeight:1.5 }}>{dbg.map((l,i)=><div key={i}>· {l}</div>)}</div>
-    </div>
-  );
+  // No screen overlay — the only visible indicator is the small animated bar
+  // inside the Voice Coach card on the home screen.
+  return null;
 }
 
 // ── SESSION ───────────────────────────────────────────────────────────────────
