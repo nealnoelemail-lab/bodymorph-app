@@ -2837,7 +2837,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       </div>
 
       {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
-      <div style={{ marginTop:51, marginBottom:8 }}>
+      <div style={{ marginTop:43, marginBottom:8 }}>
 
         {/* 2x2 metric grid: MENU + STEPS, CALORIES + WATER */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
@@ -2896,7 +2896,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         </div>
 
         {/* Voice Coach circle, sitting on top of Today's Macros */}
-        <div style={{ display:"flex", justifyContent:"center", marginTop:18 }}>
+        <div style={{ display:"flex", justifyContent:"center", marginTop:9 }}>
           <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ width:196, height:196, borderRadius:"50%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, overflow:"hidden", padding:"10px", position:"relative", zIndex:2 }}>
             <span style={{ fontSize:43.2, lineHeight:1 }}>&#127897;&#65039;</span>
             <span style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1.5, color:accent }}>VOICE COACH</span>
@@ -2905,7 +2905,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         </div>
 
         {/* TODAY'S MACROS - tucked just under the circle */}
-        <div style={{ marginTop:4, paddingTop:26, paddingLeft:16, paddingRight:16, display:"flex", flexDirection:"column", justifyContent:"center" }}>
+        <div style={{ marginTop:4, paddingTop:12, paddingLeft:16, paddingRight:16, display:"flex", flexDirection:"column", justifyContent:"center" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:17.4, letterSpacing:1, color:"#dcdcf0", textAlign:"center", marginBottom:5 }}>TODAY'S MACROS</div>
           <div style={{ display:"flex", gap:12 }}>
             {[["PROTEIN", totalP, macros.protein||0, "#3ddc84"],["CARBS", totalC, macros.carbs||0, "#3d8eff"],["FATS", totalF, macros.fats||0, "#e8ff00"]].map(([label,val,goal,color])=>{
@@ -2922,15 +2922,10 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
           </div>
         </div>
 
-        {/* MENU — centered, under Today's Macros */}
+        {/* MENU — centered button (outlined + translucent), under Today's Macros */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:18 }}>
-          <button onClick={onMenu} style={{ background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <svg width="32" height="19" viewBox="0 0 32 19" fill="none">
-              <line x1="3" y1="3" x2="29" y2="3" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-              <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-              <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-            </svg>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>{"MENU".split("").map((ch,i)=>(<span key={i} style={{ display:"inline-block", animation:"menuPop 3s ease-in-out infinite", animationDelay:(i*0.12)+"s" }}>{ch}</span>))}</span>
+          <button onClick={onMenu} style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:14, cursor:"pointer", padding:"12px 44px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1.5, color:accent }}>{"MENU".split("").map((ch,i)=>(<span key={i} style={{ display:"inline-block", animation:"menuPop 3s ease-in-out infinite", animationDelay:(i*0.12)+"s" }}>{ch}</span>))}</span>
           </button>
         </div>
       </div>
