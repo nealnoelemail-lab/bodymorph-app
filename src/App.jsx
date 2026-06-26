@@ -97,6 +97,7 @@ const MEDAL_KEY   = "bodymorph_medals_v2";
 const BODY_KEY    = "bodymorph_body_v2";
 const CARDIO_KEY  = "bodymorph_cardio_v2";
 const STEPS_KEY   = "bodymorph_steps_v2";
+const SLEEP_KEY   = "bodymorph_sleep_v2";
 const SUPP_KEY    = "bodymorph_supplements_v2";
 const PEPTIDE_KEY = "bodymorph_peptides_v2";
 const MEALS_KEY   = "bodymorph_meals_v2";
@@ -2755,7 +2756,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
   );
 }
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu }) {
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -2776,6 +2777,19 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
     const updated = [...(stepEntries||[]).filter(e=>e.date!==today), { date:today, steps:val }];
     onSaveSteps(updated);
     setEditingSteps(false);
+  };
+
+  // Sleep state (mirrors Steps): tap to type hours slept last night, check to save. Goal = 8 hrs.
+  const SLEEP_GOAL = 8;
+  const todaySleepEntry = (sleepEntries||[]).find(e=>e.date===today);
+  const todaySleep = todaySleepEntry ? parseFloat(todaySleepEntry.hours)||0 : 0;
+  const [editingSleep, setEditingSleep] = useState(false);
+  const [sleepInput, setSleepInput] = useState(String(todaySleep||""));
+  const saveSleep = () => {
+    const val = parseFloat(sleepInput)||0;
+    const updated = [...(sleepEntries||[]).filter(e=>e.date!==today), { date:today, hours:val }];
+    onSaveSleep && onSaveSleep(updated);
+    setEditingSleep(false);
   };
 
   // Hydration state (mirrors Steps): tap to type cups, check to save. Goal = 8 cups/day.
@@ -2823,20 +2837,24 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       </div>
 
       {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
-      <div style={{ marginTop:64, marginBottom:8 }}>
+      <div style={{ marginTop:51, marginBottom:8 }}>
 
         {/* 2x2 metric grid: MENU + STEPS, CALORIES + WATER */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
 
-          {/* MENU */}
-          <button onClick={onMenu} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:4 }}>
-            <svg width="32" height="19" viewBox="0 0 32 19" fill="none">
-              <line x1="3" y1="3" x2="29" y2="3" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-              <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-              <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
-            </svg>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>{"MENU".split("").map((ch,i)=>(<span key={i} style={{ display:"inline-block", animation:"menuPop 3s ease-in-out infinite", animationDelay:(i*0.12)+"s" }}>{ch}</span>))}</span>
-          </button>
+          {/* SLEEP (tap to enter hours slept last night) */}
+          {editingSleep ? (
+            <div style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"1px solid #9b5de5", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+              <input autoFocus type="number" inputMode="decimal" step="0.5" value={sleepInput} onChange={e=>setSleepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSleep(); }} style={{ width:56, background:"#0e0e16", border:"1px solid #9b5de5", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <button onClick={saveSleep} style={{ background:"#9b5de5", border:"none", borderRadius:6, color:"#fff", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
+            </div>
+          ) : (
+            <button onClick={()=>{ setSleepInput(String(todaySleep||"")); setEditingSleep(true); }} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:1 }}>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#dcdcf0" }}>&#128564; SLEEP</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#9b5de5" }}>{todaySleep||0}</span>
+              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todaySleep||0} / {SLEEP_GOAL} hrs</span>
+            </button>
+          )}
 
           {/* STEPS */}
           {editingSteps ? (
@@ -2902,6 +2920,18 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
               );
             })}
           </div>
+        </div>
+
+        {/* MENU — centered, under Today's Macros */}
+        <div style={{ display:"flex", justifyContent:"center", marginTop:18 }}>
+          <button onClick={onMenu} style={{ background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <svg width="32" height="19" viewBox="0 0 32 19" fill="none">
+              <line x1="3" y1="3" x2="29" y2="3" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+              <line x1="3" y1="9.5" x2="29" y2="9.5" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+              <line x1="3" y1="16" x2="29" y2="16" stroke="#f0f0f8" strokeWidth="2.6" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:22.8, letterSpacing:2, color:accent }}>{"MENU".split("").map((ch,i)=>(<span key={i} style={{ display:"inline-block", animation:"menuPop 3s ease-in-out infinite", animationDelay:(i*0.12)+"s" }}>{ch}</span>))}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -7373,6 +7403,7 @@ export default function BodyMorph() {
   const [bodyEntries, setBodyEntries] = useState([]);
   const [cardioSessions, setCardioSessions] = useState([]);
   const [stepEntries, setStepEntries] = useState([]);
+  const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
   const [meals, setMeals] = useState({});
@@ -7401,6 +7432,8 @@ export default function BodyMorph() {
         const sb = await Store.get(BODY_KEY);
         const sc = await Store.get(CARDIO_KEY);
         const sst = await Store.get(STEPS_KEY);
+        const sslp = await Store.get(SLEEP_KEY);
+        if (sslp) setSleepEntries(sslp);
         const svid = await Store.get(VIDEO_KEY);
         if (svid) setVideoOverrides(svid);
         const ssup = await Store.get(SUPP_KEY);
@@ -7478,6 +7511,7 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(BODY_KEY, bodyEntries); }, [bodyEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(CARDIO_KEY, cardioSessions); }, [cardioSessions, loaded]);
   useEffect(() => { if (loaded) Store.set(STEPS_KEY, stepEntries); }, [stepEntries, loaded]);
+  useEffect(() => { if (loaded) Store.set(SLEEP_KEY, sleepEntries); }, [sleepEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(SUPP_KEY, supplements); }, [supplements, loaded]);
   useEffect(() => { if (loaded) Store.set(PEPTIDE_KEY, peptides); }, [peptides, loaded]);
   useEffect(() => { if (loaded) Store.set(MEALS_KEY, meals); }, [meals, loaded]);
@@ -7890,7 +7924,7 @@ export default function BodyMorph() {
         onSupplements={()=>setPhase("supplements")}
         onPeptides={()=>setPhase("peptides")}
         onCalendar={()=>setPhase("calendar")}
-        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
+        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} sleepEntries={sleepEntries} onSaveSleep={setSleepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
         onMenu={()=>setPhase("menu")}
