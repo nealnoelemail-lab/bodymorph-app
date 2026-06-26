@@ -1644,7 +1644,7 @@ const WatermarkPlain = () => (
 
 const Logo = ({ small, onSettings, align="center" }) => (
   <div style={{ lineHeight:1, textAlign:align, position:"relative" }}>
-    <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative" }}>
+    <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative", textAlign:"center" }}>
       NTF
       {onSettings && (
         <button onClick={onSettings} aria-label="Settings" style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:"0 2px" }}>
