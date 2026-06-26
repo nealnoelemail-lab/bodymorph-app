@@ -372,10 +372,12 @@ function macrosFor(profile, dietId) {
   let protein = Math.round(pBase * pPerLb);
 
   // FAT — per lb of bodyweight, shaped by the diet style (keto/carnivore high; lean diets lower),
-  // never below a hormone-health floor.
+  // then nudged by the carb-level preference: Low carb → MORE fat (so carbs come down), High → less.
+  const carbLevel = profile.carbLevel || "moderate";
+  const fatMult = carbLevel === "low" ? 1.4 : carbLevel === "high" ? 0.72 : 1.0;
   const fatPerLb = diet==="keto" ? 0.9 : diet==="carnivore" ? 0.85 : diet==="paleo" ? 0.5
                  : diet==="mediterranean" ? 0.45 : (diet==="vegan"||diet==="bodybuilder") ? 0.35 : 0.4;
-  let fats = Math.round(w * fatPerLb);
+  let fats = Math.round(w * fatPerLb * fatMult);
 
   // CARBS fill whatever calories remain (carnivore stays ~0). If protein+fat overshoot the
   // calorie budget (aggressive cut), pull fat down to its floor so protein is preserved.
@@ -6672,12 +6674,13 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const prefBrandList = () => preferredBrands.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
   const [bodyFat, setBodyFat] = useState((profile && profile.bodyFat) || ""); // estimated body-fat %
   const [bfHelp, setBfHelp] = useState(false);
+  const [carbLevel, setCarbLevel] = useState((profile && profile.carbLevel) || "moderate");
+  const refreshTgt = (patch) => { const nm = macrosFor({ ...profile, bodyFat: bodyFat===""?null:parseFloat(bodyFat), carbLevel, ...patch }, dietPref); setTgt({ cal: parseInt(nm.dailyCalories)||2000, protein: parseInt(nm.protein)||150, carbs: parseInt(nm.carbs)||150, fats: parseInt(nm.fats)||60 }); };
+  const saveCarbLevel = (lvl) => { setCarbLevel(lvl); if (onUpdateProfile) onUpdateProfile({ carbLevel: lvl }); refreshTgt({ carbLevel: lvl }); };
   const saveBodyFat = () => {
     const bfNum = bodyFat==="" ? null : parseFloat(bodyFat);
     if (onUpdateProfile && String(bodyFat) !== String(profile?.bodyFat||"")) onUpdateProfile({ bodyFat: bfNum });
-    // Recompute the target inputs so the new BF% is reflected right away.
-    const nm = macrosFor({ ...profile, bodyFat: bfNum }, dietPref);
-    setTgt({ cal: parseInt(nm.dailyCalories)||2000, protein: parseInt(nm.protein)||150, carbs: parseInt(nm.carbs)||150, fats: parseInt(nm.fats)||60 });
+    refreshTgt({ bodyFat: bfNum }); // reflect the new BF% in the target inputs right away
   };
   const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
@@ -7047,6 +7050,16 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                       <span style={{color:"#74748a"}}>Leave blank if unsure — we'll just use your bodyweight.</span>
                     </div>
                   )}
+
+                  {/* Carb level — re-balances carbs vs fat inside any diet */}
+                  <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Carb level:</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                    {[["low","Low"],["moderate","Moderate"],["high","High"]].map(([v,label])=>{
+                      const on = carbLevel===v;
+                      return <button key={v} onClick={()=>saveCarbLevel(v)} style={{ flex:1, background: on?"#e8ff00":"#0e0e16", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#000":"#c8c8e0", borderRadius:10, padding:"13px 4px", cursor:"pointer", fontSize:16, fontWeight: on?700:500, fontFamily:"'DM Sans'" }}>{label}</button>;
+                    })}
+                  </div>
+                  <div style={{ fontSize:14, color:"#74748a", marginBottom:16 }}>Low = more fat, fewer carbs · High = leaner, more carbs</div>
 
                   {/* Editable daily macro targets */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Daily targets (tap to adjust):</div>
