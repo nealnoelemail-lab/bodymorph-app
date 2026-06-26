@@ -3636,10 +3636,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (done || !url) { if (url) URL.revokeObjectURL(url); return; }
         if (!coachAudio) coachAudio = new Audio();
         setState("speaking");
+        // Advance to the next sentence EXACTLY ONCE — whether playback ends normally,
+        // errors, or (iOS Safari) never fires 'onended'. The duration-based cap is the
+        // safety net that prevents the coach from freezing mid-turn and never listening.
+        let advanced = false, capT = null;
+        const advance = () => { if (advanced || done) return; advanced = true; clearTimeout(capT); try { URL.revokeObjectURL(url); } catch {} playNext(); };
+        const armCap = () => { clearTimeout(capT); const d = coachAudio.duration; const secs = (isFinite(d) && d > 0) ? d + 2 : 15; capT = setTimeout(advance, secs * 1000); };
+        coachAudio.onended = advance;
+        coachAudio.onerror = advance;
+        coachAudio.onloadedmetadata = armCap;
         coachAudio.src = url;
-        coachAudio.onended = () => { URL.revokeObjectURL(url); playNext(); };
-        coachAudio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
-        try { await coachAudio.play(); } catch { URL.revokeObjectURL(url); playNext(); return; }
+        try { await coachAudio.play(); } catch { advance(); return; }
+        armCap(); // in case metadata was already available before play() resolved
         startBarge();
       };
       const enqueue = (sentence) => {
@@ -3759,6 +3767,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       try { wakeLockRef.current?.release(); wakeLockRef.current = null; } catch {}
       try { recogRef.current?.stop(); } catch {}
       window.speechSynthesis.cancel();
+      // Stop AND clear the ElevenLabs audio element — otherwise a buffered/last line
+      // can replay on the next user tap (the "it repeats the greeting when I close it" bug).
+      try { if (coachAudio) { coachAudio.pause(); coachAudio.onended = null; coachAudio.onerror = null; coachAudio.onloadedmetadata = null; coachAudio.removeAttribute("src"); coachAudio.load(); } } catch {}
       try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
       try { audioCtxRef.current?.close(); } catch {}
     };
