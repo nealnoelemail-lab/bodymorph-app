@@ -6235,18 +6235,23 @@ async function searchUSDA(query) {
 // AI proposes the foods (honoring goal, diet style, allergies) → USDA supplies the
 // REAL per-100g macros → portions are scaled so the day hits the calorie target.
 // Generic verified foods (Foundation / SR Legacy) keep the macros accurate & stable.
-async function usdaMacrosPer100g(query, useBranded) {
+async function usdaMacrosPer100g(query, useBranded, prefBrands) {
   try {
     // Generic verified foods are stable; branded adds specificity when requested.
     const dataType = useBranded ? "Branded,Foundation,SR%20Legacy" : "Foundation,SR%20Legacy";
-    const sort = useBranded ? "&sortBy=dataType.keyword&sortOrder=asc" : "";
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=4&dataType=${dataType}${sort}`;
+    const size = useBranded ? 12 : 4; // more candidates when we may need to match a preferred brand
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=${size}&dataType=${dataType}`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const foods = ((await res.json()).foods || []);
-    // Pick the first food that actually has calorie data. If branded is on, prefer one with a brand.
     const valid = foods.filter(f => f.foodNutrients && (f.foodNutrients.find(x => x.nutrientId === 1008)?.value || 0) > 0);
-    const f = (useBranded ? valid.find(x => x.brandOwner || x.brandName) : null) || valid[0];
+    let f = null;
+    if (useBranded) {
+      const brandOf = (x) => (x.brandOwner || x.brandName || "").toLowerCase();
+      if (prefBrands && prefBrands.length) f = valid.find(x => prefBrands.some(b => b && brandOf(x).includes(b))); // preferred brand if present
+      if (!f) f = valid.find(x => x.brandOwner || x.brandName); // any branded
+    }
+    f = f || valid[0]; // generic fallback
     if (!f) return null;
     const n = (id) => f.foodNutrients.find(x => x.nutrientId === id)?.value || 0;
     return { desc: f.description, brand: f.brandOwner || f.brandName || null, cal: n(1008), protein: n(1003), carbs: n(1005), fats: n(1004) }; // all per 100 g
@@ -6289,7 +6294,7 @@ function applySolver(plan, target) {
   return plan;
 }
 
-async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded }) {
+async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands }) {
   // 1. AI proposes the day's foods with simple USDA-friendly search terms + gram portions.
   const prompt = `You are a sports nutritionist building ONE day's meal plan for ${name || "a client"}.
 Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
@@ -6312,7 +6317,7 @@ Reply ONLY with JSON, no markdown, no commentary:
   //    entries (they corrupt totals) and fall back to an AI per-100g estimate for those.
   const allItems = plan.meals.flatMap(m => m.items);
   await Promise.all(allItems.map(async (it) => {
-    let m = await usdaMacrosPer100g(it.query || it.food, useBranded);
+    let m = await usdaMacrosPer100g(it.query || it.food, useBranded, preferredBrands);
     if (m && (m.cal <= 0 || (m.protein + m.carbs + m.fats) <= 0)) m = null; // missing/empty data → unreliable
     if (m) { it.per100 = { cal: m.cal, protein: m.protein, carbs: m.carbs, fats: m.fats }; it.verified = true; it.usdaDesc = m.desc; it.brand = m.brand || null; }
     else {
@@ -6677,6 +6682,8 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [genErr, setGenErr] = useState(null);
   const [tgt, setTgt] = useState({ cal: parseInt(n.dailyCalories)||2000, protein: parseInt(n.protein)||150, carbs: parseInt(n.carbs)||150, fats: parseInt(n.fats)||60 });
   const [useBranded, setUseBranded] = useState(false);
+  const [preferredBrands, setPreferredBrands] = useState((nutritionGoals && nutritionGoals.preferredBrands) || "");
+  const prefBrandList = () => preferredBrands.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
   const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
   const MEAL_SLOTS = [
@@ -6797,11 +6804,11 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
     setGenerating(true); setGenErr(null); setGenPlan(null);
-    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens }); // remember checklist + custom text
+    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands }); // remember prefs
     try {
       const plan = await generateMealPlan({
         name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
-        allergies: combinedAllergies(), useBranded,
+        allergies: combinedAllergies(), useBranded, preferredBrands: useBranded ? prefBrandList() : [],
         targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
       });
       setGenPlan(plan);
@@ -6823,7 +6830,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
       if (!res.ok) throw new Error("ai");
       const alt = JSON.parse(((await res.json()).content?.[0]?.text||"").replace(/```json|```/g,"").trim());
       if (!alt || !alt.food) throw new Error("parse");
-      let m = await usdaMacrosPer100g(alt.query || alt.food, useBranded);
+      let m = await usdaMacrosPer100g(alt.query || alt.food, useBranded, useBranded ? prefBrandList() : []);
       if (m && (m.cal <= 0 || (m.protein+m.carbs+m.fats) <= 0)) m = null;
       let per100, verified, brand=null;
       if (m) { per100 = { cal:m.cal, protein:m.protein, carbs:m.carbs, fats:m.fats }; verified=true; brand=m.brand||null; }
@@ -7064,6 +7071,12 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                       <div style={{ color:"#74748a", fontSize:14 }}>Off = reliable generic foods. On = branded products.</div>
                     </div>
                   </button>
+                  {useBranded && (
+                    <div style={{ marginBottom:16 }}>
+                      <div style={{ fontSize:15, color:"#9898b8", marginBottom:6 }}>Preferred brands (optional) — used when available:</div>
+                      <input value={preferredBrands} onChange={e=>setPreferredBrands(e.target.value)} placeholder="e.g. Kraft, Wild Planet, Fage" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"13px", fontSize:17, outline:"none", boxSizing:"border-box" }} />
+                    </div>
+                  )}
 
                   {genErr && <div style={{ color:"#ff7070", fontSize:17, marginBottom:12 }}>{genErr}</div>}
                   <button disabled={generating} onClick={runGenerate} style={{ width:"100%", background: generating?"#3a3a4a":"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"16px", cursor: generating?"default":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19 }}>
