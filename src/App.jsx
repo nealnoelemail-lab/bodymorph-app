@@ -357,45 +357,31 @@ function macrosFor(profile, dietId) {
   else                              calPerLb = 15;
   const cals = Math.round(w * calPerLb / 10) * 10;
 
-  // Diet-specific macro splits (protein g, fat g, carbs from remainder)
-  let protein, fats, carbs;
+  // PROTEIN FIRST — anchored to bodyweight (or LEAN mass if body-fat % is known), scaled by
+  // goal. This is the fix for the old "flat % of calories" split that left protein too low and
+  // carbs too high. Cutting → more protein per lb; bulking → less.
   const diet = dietId || profile.dietPref || "standard";
-  if (diet === "keto") {
-    // Keto: ~5% carbs (20-50g net), 65% fat, 30% protein (0.7-1.0g/lb for muscle retention)
-    protein = Math.round(cals * 0.30 / 4);
-    fats    = Math.round(cals * 0.65 / 9);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  } else if (diet === "carnivore") {
-    // Carnivore: zero carbs, 35% protein (~1g/lb), 65% fat
-    protein = Math.round(cals * 0.35 / 4);
-    fats    = Math.round(cals * 0.65 / 9);
-    carbs   = 0;
-  } else if (diet === "vegan") {
-    // Vegan: higher protein needed (lower bioavailability), 30% protein, 20% fat, 50% carbs
-    protein = Math.round(cals * 0.30 / 4);
-    fats    = Math.round(cals * 0.20 / 9);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  } else if (diet === "paleo") {
-    // Paleo: 30% protein, 40% fat (healthy animal/nut fats), 30% carbs (fruit/veg/sweet potato)
-    protein = Math.round(cals * 0.30 / 4);
-    fats    = Math.round(cals * 0.40 / 9);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  } else if (diet === "bodybuilder") {
-    // Bodybuilder: 25% protein (~1.0-1.1g/lb), 20% fat (0.3-0.4g/lb for hormones), 55% carbs for training fuel
-    protein = Math.round(cals * 0.25 / 4);
-    fats    = Math.round(cals * 0.20 / 9);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  } else if (diet === "mediterranean") {
-    // Mediterranean: 20% protein, 35% fat (olive oil/fish/nuts), 45% carbs (whole grains/legumes/fruit)
-    protein = Math.round(cals * 0.20 / 4);
-    fats    = Math.round(cals * 0.35 / 9);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  } else {
-    // Standard / generic
-    protein = Math.round(w * 1.0);
-    fats    = Math.round(w * 0.4);
-    carbs   = Math.max(Math.round((cals - protein*4 - fats*9) / 4), 0);
-  }
+  const bf = parseFloat(profile.bodyFat);
+  const leanMass = (bf > 4 && bf < 60) ? w * (1 - bf/100) : null; // valid BF% → use lean mass
+  const pBase = leanMass || w;
+  let pPerLb;
+  if (goal.includes("Cut"))          pPerLb = leanMass ? 1.3 : 1.1;
+  else if (goal.includes("Reshape")) pPerLb = leanMass ? 1.2 : 1.0;
+  else if (goal.includes("Bulk"))    pPerLb = leanMass ? 1.0 : 0.85;
+  else                               pPerLb = leanMass ? 1.15 : 0.95; // athletic / general
+  let protein = Math.round(pBase * pPerLb);
+
+  // FAT — per lb of bodyweight, shaped by the diet style (keto/carnivore high; lean diets lower),
+  // never below a hormone-health floor.
+  const fatPerLb = diet==="keto" ? 0.9 : diet==="carnivore" ? 0.85 : diet==="paleo" ? 0.5
+                 : diet==="mediterranean" ? 0.45 : (diet==="vegan"||diet==="bodybuilder") ? 0.35 : 0.4;
+  let fats = Math.round(w * fatPerLb);
+
+  // CARBS fill whatever calories remain (carnivore stays ~0). If protein+fat overshoot the
+  // calorie budget (aggressive cut), pull fat down to its floor so protein is preserved.
+  let carbCals = cals - protein*4 - fats*9;
+  if (carbCals < 0) { fats = Math.max(Math.round(w*0.3), Math.round((cals - protein*4)/9)); carbCals = cals - protein*4 - fats*9; }
+  let carbs = diet==="carnivore" ? 0 : Math.max(Math.round(carbCals/4), 0);
 
   return {
     dailyCalories: String(cals),
@@ -6660,7 +6646,7 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   );
 }
 
-function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onBack }) {
+function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onBack }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
   const dietAwareMacros = macrosFor(profile || {}, dietPref);
@@ -6684,6 +6670,15 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [useBranded, setUseBranded] = useState(false);
   const [preferredBrands, setPreferredBrands] = useState((nutritionGoals && nutritionGoals.preferredBrands) || "");
   const prefBrandList = () => preferredBrands.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const [bodyFat, setBodyFat] = useState((profile && profile.bodyFat) || ""); // estimated body-fat %
+  const [bfHelp, setBfHelp] = useState(false);
+  const saveBodyFat = () => {
+    const bfNum = bodyFat==="" ? null : parseFloat(bodyFat);
+    if (onUpdateProfile && String(bodyFat) !== String(profile?.bodyFat||"")) onUpdateProfile({ bodyFat: bfNum });
+    // Recompute the target inputs so the new BF% is reflected right away.
+    const nm = macrosFor({ ...profile, bodyFat: bfNum }, dietPref);
+    setTgt({ cal: parseInt(nm.dailyCalories)||2000, protein: parseInt(nm.protein)||150, carbs: parseInt(nm.carbs)||150, fats: parseInt(nm.fats)||60 });
+  };
   const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
   const MEAL_SLOTS = [
@@ -7033,6 +7028,25 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                   <div style={{ fontSize:22, color:"#9898b8", marginBottom:16, lineHeight:1.45 }}>
                     A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
                   </div>
+
+                  {/* Body-fat % — refines protein (lean mass). Estimate now, update later. */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                    <div style={{ fontSize:19, color:"#9898b8" }}>Body fat % <span style={{color:"#74748a", fontSize:15}}>(optional)</span></div>
+                    <button onClick={()=>setBfHelp(h=>!h)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#9898b8", fontSize:14, padding:"4px 10px", cursor:"pointer" }}>How do I estimate?</button>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: bfHelp?8:16 }}>
+                    <input type="number" inputMode="decimal" value={bodyFat} onChange={e=>setBodyFat(e.target.value)} onBlur={saveBodyFat} placeholder="e.g. 20" style={{ flex:1, background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"12px", fontSize:18, outline:"none", boxSizing:"border-box" }} />
+                    <span style={{ color:"#9898b8", fontSize:18 }}>%</span>
+                    <button onClick={saveBodyFat} style={{ background:"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"12px 18px", cursor:"pointer", fontWeight:700, fontSize:16 }}>Save</button>
+                  </div>
+                  {bfHelp && (
+                    <div style={{ background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, padding:"12px 14px", marginBottom:16, fontSize:15, color:"#c8c8e0", lineHeight:1.6 }}>
+                      A rough eyeball estimate is fine — you can update it later when you get a real measurement (calipers, a smart scale, or a DEXA scan).<br/>
+                      <b style={{color:"#3d8eff"}}>Men:</b> ~10–12% = lean/athletic, ~15–18% = average, ~20–25%+ = higher.<br/>
+                      <b style={{color:"#ff79c6"}}>Women:</b> ~18–22% = lean/athletic, ~23–28% = average, ~30%+ = higher.<br/>
+                      <span style={{color:"#74748a"}}>Leave blank if unsure — we'll just use your bodyweight.</span>
+                    </div>
+                  )}
 
                   {/* Editable daily macro targets */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Daily targets (tap to adjust):</div>
@@ -7569,6 +7583,15 @@ export default function BodyMorph() {
     setPhase("trainingweek");
   };
 
+  // Patch a few profile fields (e.g. body-fat %) without leaving the current screen; rebuilds
+  // the program so macros/nutrition update immediately.
+  const updateProfileFields = async (patch) => {
+    const updated = { ...profile, ...patch };
+    setProfile(updated);
+    try { setProgram(buildProgram(updated)); } catch (e) { console.warn("rebuild:", e); }
+    await Store.set(PROFILE_KEY, updated);
+  };
+
   const saveProgramFocus = async (focus) => {
     const updated = { ...profile, focus };
     // Starting HFT fresh resets the 90-day clock to today
@@ -7876,7 +7899,7 @@ export default function BodyMorph() {
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
-  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
+  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
