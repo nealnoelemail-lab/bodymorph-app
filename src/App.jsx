@@ -6975,9 +6975,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             <div key={d.id} style={{ position:"relative" }}>
               <button onClick={()=>onSaveDietPref(d.id)} style={{ width:"100%", textAlign:"left", background:"#1a1a26", border:"2px solid "+(dietPref===d.id?"#e8ff00":"#2a2a3d"), borderRadius:8, padding:"8px 8px 8px 8px", cursor:"pointer" }}>
                 <div style={{ fontSize:14 }}>{d.emoji}</div>
-                <div style={{ fontFamily:"'Bebas Neue'", fontSize:13, letterSpacing:0.5, marginTop:2, paddingRight:18 }}>{d.label}</div>
+                <div style={{ fontFamily:"'Bebas Neue'", fontSize:19.5, letterSpacing:0.5, marginTop:2, paddingRight:20 }}>{d.label}</div>
               </button>
-              <button onClick={()=>setDiet(d)} style={{ position:"absolute", top:4, right:4, background:"rgba(255,255,255,0.08)", border:"none", borderRadius:4, color:"#9898b8", fontSize:11, cursor:"pointer", padding:"2px 5px", lineHeight:1, fontWeight:700 }}>ⓘ</button>
+              <button onClick={()=>setDiet(d)} style={{ position:"absolute", top:4, right:4, background:"rgba(255,255,255,0.14)", border:"none", borderRadius:4, color:"#dcdcf0", fontSize:12, cursor:"pointer", padding:"2px 5px", lineHeight:1, fontWeight:700 }}>ⓘ</button>
             </div>
           ))}
         </div>
