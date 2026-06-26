@@ -6235,16 +6235,21 @@ async function searchUSDA(query) {
 // AI proposes the foods (honoring goal, diet style, allergies) → USDA supplies the
 // REAL per-100g macros → portions are scaled so the day hits the calorie target.
 // Generic verified foods (Foundation / SR Legacy) keep the macros accurate & stable.
-async function usdaMacrosPer100g(query) {
+async function usdaMacrosPer100g(query, useBranded) {
   try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=2&dataType=Foundation,SR%20Legacy`;
+    // Generic verified foods are stable; branded adds specificity when requested.
+    const dataType = useBranded ? "Branded,Foundation,SR%20Legacy" : "Foundation,SR%20Legacy";
+    const sort = useBranded ? "&sortBy=dataType.keyword&sortOrder=asc" : "";
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=4&dataType=${dataType}${sort}`;
     const res = await fetch(url);
     if (!res.ok) return null;
-    const data = await res.json();
-    const f = (data.foods || [])[0];
-    if (!f || !f.foodNutrients) return null;
+    const foods = ((await res.json()).foods || []);
+    // Pick the first food that actually has calorie data. If branded is on, prefer one with a brand.
+    const valid = foods.filter(f => f.foodNutrients && (f.foodNutrients.find(x => x.nutrientId === 1008)?.value || 0) > 0);
+    const f = (useBranded ? valid.find(x => x.brandOwner || x.brandName) : null) || valid[0];
+    if (!f) return null;
     const n = (id) => f.foodNutrients.find(x => x.nutrientId === id)?.value || 0;
-    return { desc: f.description, cal: n(1008), protein: n(1003), carbs: n(1005), fats: n(1004) }; // all per 100 g
+    return { desc: f.description, brand: f.brandOwner || f.brandName || null, cal: n(1008), protein: n(1003), carbs: n(1005), fats: n(1004) }; // all per 100 g
   } catch { return null; }
 }
 
@@ -6269,7 +6274,22 @@ function solvePortions(per100List, target, initGrams) {
   return g;
 }
 
-async function generateMealPlan({ name, goal, dietPref, allergies, targets }) {
+// Re-balance an existing plan's portions to hit the target macros (used after a food swap too).
+function applySolver(plan, target) {
+  const items = plan.meals.flatMap(m => m.items);
+  const grams = solvePortions(items.map(it => it.per100 || { cal: 0, protein: 0, carbs: 0, fats: 0 }), target, items.map(it => it.grams || 100));
+  items.forEach((it, i) => {
+    const g = Math.max(1, Math.round(grams[i] || 100));
+    const f = g / 100; const p = it.per100 || {};
+    it.grams = g; it.cal = Math.round((p.cal || 0) * f); it.protein = Math.round((p.protein || 0) * f); it.carbs = Math.round((p.carbs || 0) * f); it.fats = Math.round((p.fats || 0) * f);
+  });
+  const sumK = (k) => plan.meals.reduce((s, ml) => s + ml.items.reduce((a, it) => a + (it[k] || 0), 0), 0);
+  plan.totals = { cal: sumK("cal"), protein: sumK("protein"), carbs: sumK("carbs"), fats: sumK("fats") };
+  plan.target = target;
+  return plan;
+}
+
+async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded }) {
   // 1. AI proposes the day's foods with simple USDA-friendly search terms + gram portions.
   const prompt = `You are a sports nutritionist building ONE day's meal plan for ${name || "a client"}.
 Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
@@ -6292,35 +6312,19 @@ Reply ONLY with JSON, no markdown, no commentary:
   //    entries (they corrupt totals) and fall back to an AI per-100g estimate for those.
   const allItems = plan.meals.flatMap(m => m.items);
   await Promise.all(allItems.map(async (it) => {
-    let m = await usdaMacrosPer100g(it.query || it.food);
+    let m = await usdaMacrosPer100g(it.query || it.food, useBranded);
     if (m && (m.cal <= 0 || (m.protein + m.carbs + m.fats) <= 0)) m = null; // missing/empty data → unreliable
-    if (m) { it.per100 = m; it.verified = true; it.usdaDesc = m.desc; }
+    if (m) { it.per100 = { cal: m.cal, protein: m.protein, carbs: m.carbs, fats: m.fats }; it.verified = true; it.usdaDesc = m.desc; it.brand = m.brand || null; }
     else {
       const est = await lookupFoodMacros(`100 grams of ${it.food}`); // AI estimate, per 100 g
       it.per100 = { cal: est?.cal || 0, protein: est?.protein || 0, carbs: est?.carbs || 0, fats: est?.fats || 0 };
-      it.verified = false;
+      it.verified = false; it.brand = null;
     }
   }));
 
-  // 3. SOLVER: deterministic gradient descent on portion sizes (grams) to minimize the
-  //    relative error across all four macros at once. Far more reliable than asking the LLM
-  //    to do the arithmetic. Calories + protein weighted highest.
-  const grams = solvePortions(allItems.map(it => it.per100), targets, allItems.map(it => parseFloat(it.grams) || 100));
-
-  // Apply solved portions and compute final macros from the REAL per-100g data.
-  allItems.forEach((it, i) => {
-    const g = Math.max(1, Math.round(grams[i] || 100));
-    const fac = g / 100;
-    it.grams = g;
-    it.cal = Math.round(it.per100.cal * fac);
-    it.protein = Math.round(it.per100.protein * fac);
-    it.carbs = Math.round(it.per100.carbs * fac);
-    it.fats = Math.round(it.per100.fats * fac);
-  });
-  const sumK = (k) => plan.meals.reduce((s, ml) => s + ml.items.reduce((a, it) => a + (it[k] || 0), 0), 0);
-  plan.totals = { cal: sumK("cal"), protein: sumK("protein"), carbs: sumK("carbs"), fats: sumK("fats") };
-  plan.target = targets;
-  return plan;
+  // 3. SOLVER: deterministic gradient descent dials grams to hit all four macros at once
+  //    (far more reliable than asking the LLM to do the portion arithmetic).
+  return applySolver(plan, targets);
 }
 function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
@@ -6667,6 +6671,9 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   const [generating, setGenerating] = useState(false);
   const [genPlan, setGenPlan] = useState(null);
   const [genErr, setGenErr] = useState(null);
+  const [tgt, setTgt] = useState({ cal: parseInt(n.dailyCalories)||2000, protein: parseInt(n.protein)||150, carbs: parseInt(n.carbs)||150, fats: parseInt(n.fats)||60 });
+  const [useBranded, setUseBranded] = useState(false);
+  const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
   const MEAL_SLOTS = [
     { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
@@ -6786,16 +6793,42 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
     setGenerating(true); setGenErr(null); setGenPlan(null);
-    if (nutritionGoals && allergies !== (nutritionGoals.allergies||"")) onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies }); // remember allergies
+    if (allergies !== ((nutritionGoals && nutritionGoals.allergies)||"")) onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies }); // remember allergies
     try {
       const plan = await generateMealPlan({
         name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
-        allergies: allergies.trim(),
-        targets: { cal: calGoal, protein: proteinGoal, carbs: carbsGoal, fats: fatsGoal },
+        allergies: allergies.trim(), useBranded,
+        targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
       });
       setGenPlan(plan);
     } catch (e) { setGenErr("Couldn't generate a plan ("+e.message+"). Please try again."); }
     setGenerating(false);
+  };
+  // Swap one food for an AI-suggested alternative, then re-balance the whole day's portions.
+  const swapFood = async (mi, ii) => {
+    if (!genPlan || swapping) return;
+    setSwapping(mi+"-"+ii);
+    try {
+      const cur = genPlan.meals[mi].items[ii];
+      const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${allergies.trim()?` Avoid anything containing: ${allergies}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{ "Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" },
+        body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:120, messages:[{role:"user", content:prompt}] }),
+      });
+      if (!res.ok) throw new Error("ai");
+      const alt = JSON.parse(((await res.json()).content?.[0]?.text||"").replace(/```json|```/g,"").trim());
+      if (!alt || !alt.food) throw new Error("parse");
+      let m = await usdaMacrosPer100g(alt.query || alt.food, useBranded);
+      if (m && (m.cal <= 0 || (m.protein+m.carbs+m.fats) <= 0)) m = null;
+      let per100, verified, brand=null;
+      if (m) { per100 = { cal:m.cal, protein:m.protein, carbs:m.carbs, fats:m.fats }; verified=true; brand=m.brand||null; }
+      else { const est = await lookupFoodMacros(`100 grams of ${alt.food}`); per100 = { cal:est?.cal||0, protein:est?.protein||0, carbs:est?.carbs||0, fats:est?.fats||0 }; verified=false; }
+      const plan = JSON.parse(JSON.stringify(genPlan));
+      plan.meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
+      applySolver(plan, genPlan.target); // re-balance so macros still hit
+      setGenPlan(plan);
+    } catch { /* leave as-is on failure */ }
+    setSwapping(null);
   };
   // Write the generated plan into the day's food log (as the plan — NOT yet eaten).
   const applyGenPlan = () => {
@@ -6973,7 +7006,7 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>MEAL PLAN</div>
           <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
         </div>
-        <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"13px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14.5 }}>✨ Generate AI Meal Plan</button>
+        <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"13px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14.5 }}>✨ Generate AI Meal Plan</button>
 
         {genOpen && (
           <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", padding:"20px 16px 40px" }}>
@@ -6985,11 +7018,35 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
 
               {!genPlan && (
                 <div>
-                  <div style={{ fontSize:13, color:"#9898b8", marginBottom:10, lineHeight:1.5 }}>
-                    A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet — using real foods, portioned to hit <b style={{color:"#e8ff00"}}>{calGoal} cal · {proteinGoal}p · {carbsGoal}c · {fatsGoal}f</b>.
+                  <div style={{ fontSize:13, color:"#9898b8", marginBottom:12, lineHeight:1.5 }}>
+                    A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
                   </div>
+
+                  {/* Editable daily macro targets */}
+                  <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Daily targets (tap to adjust):</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+                    {[["cal","CAL","#e8ff00"],["protein","PROTEIN","#3d8eff"],["carbs","CARBS","#9b5de5"],["fats","FATS","#3ddc84"]].map(([k,label,col])=>(
+                      <div key={k} style={{ flex:1 }}>
+                        <div style={{ color:col, fontSize:10, fontWeight:700, marginBottom:3, textAlign:"center" }}>{label}</div>
+                        <input type="number" inputMode="numeric" value={tgt[k]} onChange={e=>setTgt(t=>({...t,[k]:e.target.value}))} style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"9px 4px", fontSize:15, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none", boxSizing:"border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+
                   <div style={{ fontSize:12, color:"#9898b8", marginBottom:6 }}>Allergies / foods to avoid (optional):</div>
-                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="e.g. shellfish, peanuts, dairy" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px", fontSize:14, outline:"none", boxSizing:"border-box", marginBottom:14 }} />
+                  <input value={allergies} onChange={e=>setAllergies(e.target.value)} placeholder="e.g. shellfish, peanuts, dairy" style={{ width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px", fontSize:14, outline:"none", boxSizing:"border-box", marginBottom:12 }} />
+
+                  {/* Branded foods toggle */}
+                  <button onClick={()=>setUseBranded(v=>!v)} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, padding:"11px 12px", cursor:"pointer", marginBottom:14 }}>
+                    <div style={{ width:38, height:22, borderRadius:11, background: useBranded?"#e8ff00":"#2a2a3d", position:"relative", flexShrink:0, transition:"background 0.15s" }}>
+                      <div style={{ width:18, height:18, borderRadius:9, background:"#fff", position:"absolute", top:2, left: useBranded?18:2, transition:"left 0.15s" }} />
+                    </div>
+                    <div style={{ textAlign:"left" }}>
+                      <div style={{ color:"#f0f0f8", fontSize:13.5, fontWeight:600 }}>Use specific brands when available</div>
+                      <div style={{ color:"#74748a", fontSize:11 }}>Off = reliable generic foods. On = branded products.</div>
+                    </div>
+                  </button>
+
                   {genErr && <div style={{ color:"#ff7070", fontSize:13, marginBottom:12 }}>{genErr}</div>}
                   <button disabled={generating} onClick={runGenerate} style={{ width:"100%", background: generating?"#3a3a4a":"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor: generating?"default":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:15 }}>
                     {generating ? "Building your plan… (10–20s)" : "Generate Plan"}
@@ -7009,12 +7066,13 @@ function Nutrition({ program, profile, meals, onSaveMeals, foodLog, onSaveFoodLo
                     {genPlan.meals.map((ml,mi)=>(
                       <div key={mi} style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
                         <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:"#e8ff00", marginBottom:6, textTransform:"uppercase" }}>{ml.slot}</div>
-                        {(ml.items||[]).map((it,ii)=>(
-                          <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#d2d2ec", padding:"3px 0" }}>
-                            <span>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span></span>
-                            <span style={{ color:"#9898b8", whiteSpace:"nowrap", marginLeft:8 }}>{it.cal}c · {it.protein}p</span>
+                        {(ml.items||[]).map((it,ii)=>{ const isSw = swapping===(mi+"-"+ii); return (
+                          <div key={ii} style={{ display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#d2d2ec", padding:"4px 0", opacity: isSw?0.5:1 }}>
+                            <button onClick={()=>swapFood(mi,ii)} disabled={!!swapping} title="Swap this food" style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#e8ff00", cursor: swapping?"default":"pointer", fontSize:12, padding:"2px 6px", flexShrink:0 }}>{isSw?"…":"⇄"}</button>
+                            <span style={{ flex:1 }}>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span>{it.brand && <span style={{ color:"#3ddc84", fontSize:11 }}> · {it.brand}</span>}</span>
+                            <span style={{ color:"#9898b8", whiteSpace:"nowrap" }}>{it.cal}c · {it.protein}p</span>
                           </div>
-                        ))}
+                        ); })}
                       </div>
                     ))}
                     <div style={{ display:"flex", gap:8, marginTop:6 }}>
