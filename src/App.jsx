@@ -3811,9 +3811,27 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     </div>
   );
 
-  // No screen overlay — the only visible indicator is the small animated bar
-  // inside the Voice Coach card on the home screen.
-  return null;
+  // ── TEMPORARY diagnostic panel (remove once the voice loop is confirmed working).
+  // Shows live state so we can see exactly where the conversation breaks on-device.
+  if (!armed) return null;
+  const stateColor = vs === "listening" ? "#3ddc84" : vs === "speaking" ? "#e8ff00" : vs === "processing" ? "#3d8eff" : "#9898b8";
+  const micPct = Math.min(100, Math.round((micLevel / 60) * 100));
+  return (
+    <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(10,10,16,0.96)", borderTop:"2px solid "+stateColor, padding:"10px 14px 22px", fontFamily:"monospace", fontSize:11, color:"#c8c8e0" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+        <span style={{ color:stateColor, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>{vs}</span>
+        <span style={{ color:"#74748a" }}>mic</span>
+        <div style={{ flex:1, height:8, background:"#1a1a26", borderRadius:4, overflow:"hidden" }}>
+          <div style={{ width:micPct+"%", height:"100%", background: micLevel>9 ? "#3ddc84" : "#3a3a4a", transition:"width 0.08s" }} />
+        </div>
+        <span style={{ color:"#74748a", minWidth:28, textAlign:"right" }}>{Math.round(micLevel)}</span>
+      </div>
+      {interim && <div style={{ color:"#9898b8" }}>{interim}</div>}
+      {lastUser && <div style={{ color:"#3ddc84" }}>🗣 you: {lastUser}</div>}
+      {lastAI && <div style={{ color:"#e8ff00" }}>🤖 coach: {lastAI.slice(0,90)}</div>}
+      <div style={{ marginTop:5, color:"#74748a", lineHeight:1.5 }}>{dbg.map((l,i)=><div key={i}>· {l}</div>)}</div>
+    </div>
+  );
 }
 
 // ── SESSION ───────────────────────────────────────────────────────────────────
