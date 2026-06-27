@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -2692,7 +2693,7 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
+function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut }) {
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -2711,8 +2712,13 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
       .then(b => { const a = new Audio(URL.createObjectURL(b)); a.onended = () => setPreviewing(false); a.onerror = () => setPreviewing(false); return a.play(); })
       .catch(e => { setPreviewing(false); alert("Couldn't play preview: " + e.message); });
   };
+  const changePassword = async () => {
+    if (!user?.email) { alert("Coming soon."); return; }
+    const { error } = await sendPasswordReset(user.email);
+    alert(error ? ("Couldn't send reset email: " + error) : `Password-reset link sent to ${user.email}.`);
+  };
   const items = [
-    { label:"Change Password", icon:"🔒", note:"Coming soon — requires account backend", action: ()=>alert("Coming soon.") },
+    { label:"Change Password", icon:"🔒", note: user?.email ? "Email yourself a reset link" : "Coming soon — requires account backend", action: changePassword },
     { label:"Update Payment", icon:"💳", note:"Coming soon — requires payment backend", action: ()=>alert("Coming soon.") },
     { label:"Change Subscription", icon:"📋", note:"Coaching · App Only — coming soon", action: ()=>alert("Coming soon.") },
     { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
@@ -2726,7 +2732,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>SETTINGS</div>
       </div>
       <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
-        <div style={{ color:"#9898b8", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}</div>
+        <div style={{ color:"#9898b8", fontSize:12, marginBottom:4 }}>Signed in as {profile.name}{user?.email ? ` · ${user.email}` : ""}</div>
 
         {/* ── Coach voice (ElevenLabs) — collapsible dropdown ── */}
         <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px" }}>
@@ -2784,6 +2790,17 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice }) {
           </div>
           <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
         </button>
+
+        {user && (
+          <button onClick={onSignOut} style={{ display:"flex", alignItems:"center", gap:14, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+            <span style={{ fontSize:22 }}>🚪</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:"#f0f0f8" }}>Sign Out</div>
+              <div style={{ fontSize:12, color:"#9898b8", marginTop:2 }}>Your data stays on this device</div>
+            </div>
+            <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -7422,6 +7439,101 @@ function migrateProfile(p) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── AUTH SCREEN ───────────────────────────────────────────────────────────────
+// Email + password sign-in / create-account, shown when a backend is configured
+// and there's no active session. Falls back to "Continue offline" so the app is
+// never a dead end during development. Successful auth flips the session, which
+// the onAuth listener in <BodyMorph> picks up to route into the app.
+function AuthScreen({ onSkip }) {
+  const [mode, setMode]   = useState("signin");   // signin | signup
+  const [email, setEmail] = useState("");
+  const [pw, setPw]       = useState("");
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo]   = useState("");         // success / "check your email" messages
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    setError(""); setInfo("");
+    const mail = email.trim();
+    if (!mail || !pw) { setError("Enter your email and password."); return; }
+    if (mode === "signup" && pw.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setBusy(true);
+    if (mode === "signup") {
+      const { needsConfirm, error } = await signUpEmail(mail, pw);
+      setBusy(false);
+      if (error) { setError(error); return; }
+      if (needsConfirm) setInfo(`Account created. Check ${mail} for a confirmation link, then sign in.`);
+      // If confirmation is off, a session arrives and the listener routes us in.
+    } else {
+      const { error } = await signInEmail(mail, pw);
+      setBusy(false);
+      if (error) setError(error);
+      // On success the onAuth listener takes over — this screen unmounts.
+    }
+  };
+
+  const forgot = async () => {
+    setError(""); setInfo("");
+    const mail = email.trim();
+    if (!mail) { setError("Enter your email above first, then tap “Forgot password.”"); return; }
+    setBusy(true);
+    const { error } = await sendPasswordReset(mail);
+    setBusy(false);
+    if (error) setError(error);
+    else setInfo(`Password-reset link sent to ${mail}.`);
+  };
+
+  return (
+    <div style={S.center}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div className="fade-in" style={{ width:"100%", maxWidth:360, display:"flex", flexDirection:"column", alignItems:"center", gap:22 }}>
+        <Logo small />
+        <div style={S.stepLabel}>{mode === "signup" ? "CREATE YOUR ACCOUNT" : "WELCOME BACK"}</div>
+
+        <form onSubmit={submit} style={{ width:"100%", display:"flex", flexDirection:"column", gap:12 }}>
+          <div>
+            <div style={S.inputLabel}>Email</div>
+            <input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)}
+              placeholder="you@email.com" style={S.input} />
+          </div>
+          <div>
+            <div style={S.inputLabel}>Password</div>
+            <input type="password" autoComplete={mode==="signup"?"new-password":"current-password"} value={pw}
+              onChange={e=>setPw(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"••••••••"} style={S.input} />
+          </div>
+
+          {error && <div style={{ color:C.red, fontSize:13, lineHeight:1.5 }}>{error}</div>}
+          {info  && <div style={{ color:C.green, fontSize:13, lineHeight:1.5 }}>{info}</div>}
+
+          <button type="submit" disabled={busy} style={{ ...S.btnPri, width:"100%", marginTop:4, borderColor:"#e8ff00", color:"#e8ff00", opacity: busy?0.6:1, cursor: busy?"default":"pointer" }}>
+            {busy ? "Please wait…" : (mode==="signup" ? "Create Account" : "Sign In")}
+          </button>
+        </form>
+
+        {mode === "signin" && (
+          <button onClick={forgot} disabled={busy} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer", textDecoration:"underline" }}>
+            Forgot password?
+          </button>
+        )}
+
+        <div style={{ fontSize:13, color:"#9898b8" }}>
+          {mode==="signup" ? "Already have an account? " : "New here? "}
+          <button onClick={()=>{ setMode(mode==="signup"?"signin":"signup"); setError(""); setInfo(""); }}
+            style={{ background:"transparent", border:"none", color:"#e8ff00", fontSize:13, cursor:"pointer", fontWeight:600 }}>
+            {mode==="signup" ? "Sign in" : "Create one"}
+          </button>
+        </div>
+
+        <button onClick={onSkip} style={{ ...S.btnSec, width:"100%", marginTop:6 }}>
+          Continue offline
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BodyMorph() {
   const [phase, setPhase]     = useState("init");   // init | wizard | loading | home | session | progress | nutrition
   const [profile, setProfile] = useState(null);
@@ -7452,10 +7564,13 @@ export default function BodyMorph() {
   const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
   const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items})
   const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
+  const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
+  const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
 
-  // Load saved profile + logs + medals on first mount
-  useEffect(() => {
-    (async () => {
+  // Load all saved data from storage, then route to home (has profile) or wizard.
+  // Extracted so it can run on first mount AND after a sign-in.
+  const hydrate = useCallback(async () => {
+    {
       try {
         const sp = await Store.get(PROFILE_KEY);
         const sl = await Store.get(LOG_KEY);
@@ -7530,8 +7645,31 @@ export default function BodyMorph() {
         setPhase("wizard");
       }
       setLoaded(true);
-    })();
+    }
   }, []);
+
+  // Boot: with a backend, gate on a session (auth screen if none); without one,
+  // load straight from local storage exactly as before. Then listen for
+  // sign-in / sign-out so the app reacts live.
+  useEffect(() => {
+    let unsub = () => {};
+    (async () => {
+      if (!hasBackend) { await hydrate(); return; }
+      const u = await getUser();
+      userRef.current = u; setUser(u);
+      if (u) await hydrate();
+      else { setPhase("auth"); setLoaded(true); }
+      unsub = onAuth(async (nextUser) => {
+        const prevId = userRef.current?.id || null;
+        const nextId = nextUser?.id || null;
+        if (prevId === nextId) return;          // ignore the listener's initial echo
+        userRef.current = nextUser; setUser(nextUser);
+        if (nextUser) { setLoaded(false); setPhase("init"); await hydrate(); }
+        else { setProfile(null); setProgram(null); setPhase("auth"); }
+      });
+    })();
+    return () => unsub();
+  }, [hydrate]);
 
   useEffect(() => {
     if (loaded && profile) {
@@ -7652,6 +7790,15 @@ export default function BodyMorph() {
     await Store.set(PROFILE_KEY, null);
     setProfile(null); setProgram(null);
     setPhase("wizard");
+  };
+
+  // Sign out of the account but KEEP local data (that's resetProfile's job).
+  // The onAuth listener flips us to the auth screen once the session clears.
+  const handleSignOut = async () => {
+    await signOut();
+    userRef.current = null; setUser(null);
+    setProfile(null); setProgram(null);
+    setPhase("auth");
   };
 
   const saveTrainingDays = async (days) => {
@@ -7943,6 +8090,7 @@ export default function BodyMorph() {
 
   const screen = (() => {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
+  if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
@@ -7983,7 +8131,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
