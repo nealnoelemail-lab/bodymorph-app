@@ -96,6 +96,7 @@ const BODY_KEY    = "bodymorph_body_v2";
 const CARDIO_KEY  = "bodymorph_cardio_v2";
 const STEPS_KEY   = "bodymorph_steps_v2";
 const SLEEP_KEY   = "bodymorph_sleep_v2";
+const MEALPLAN_KEY = "bodymorph_mealplan_v2"; // last AI-generated meal plan (for Program Summary)
 const SUPP_KEY    = "bodymorph_supplements_v2";
 const PEPTIDE_KEY = "bodymorph_peptides_v2";
 const MEALS_KEY   = "bodymorph_meals_v2";
@@ -2456,9 +2457,10 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
   );
 }
 
-function ProgramSummary({ profile, program, onReset, onBack }) {
+function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack }) {
   const accent = "#e8ff00";
   const sched = (program && program.weeklySchedule) || [];
+  const nMac = macrosFor(profile, dietPref || profile.dietPref || "mediterranean"); // current nutrition targets
   const DAY_SHORT = ["Su","Mo","Tu","We","Th","Fr","Sa"];
   const trainDays = (profile.trainingDays||[]).sort((a,b)=>a-b).map(d=>DAY_NAMES[d]).join(", ");
   const levelMap = {"Beginner":"I","Intermediate":"II","Advanced":"III","Pro":"IV"};
@@ -2513,6 +2515,39 @@ function ProgramSummary({ profile, program, onReset, onBack }) {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Nutrition + Meal Plan */}
+      <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:accent, marginBottom:12 }}>NUTRITION</div>
+        <Row label="DIET STYLE"   value={(dietPref || profile.dietPref || "mediterranean")} color={accent} />
+        <Row label="DAILY CALORIES" value={`${nMac.dailyCalories} cal`} />
+        <Row label="PROTEIN"      value={nMac.protein} />
+        <Row label="CARBS"        value={nMac.carbs} />
+        <Row label="FATS"         value={nMac.fats} />
+        {profile.bodyFat ? <Row label="BODY FAT" value={profile.bodyFat+"%"} /> : null}
+
+        {mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length > 0 ? (
+          <div style={{ marginTop:14 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:1, color:"#dcdcf0" }}>✨ AI MEAL PLAN</span>
+              {mealPlan.totals && <span style={{ fontSize:11.5, color:"#9898b8" }}>{mealPlan.totals.cal} cal · {mealPlan.totals.protein}p · {mealPlan.totals.carbs}c · {mealPlan.totals.fats}f</span>}
+            </div>
+            {mealPlan.meals.map((ml,mi)=>(
+              <div key={mi} style={{ marginBottom:10 }}>
+                <div style={{ fontFamily:"'Bebas Neue'", fontSize:14, letterSpacing:0.5, color:accent, textTransform:"uppercase", marginBottom:4 }}>{ml.slot}</div>
+                {(ml.items||[]).map((it,ii)=>(
+                  <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, color:"#c8c8e0", padding:"2px 0" }}>
+                    <span>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span></span>
+                    <span style={{ color:"#9898b8", whiteSpace:"nowrap", marginLeft:8 }}>{it.cal}c · {it.protein}p</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ marginTop:12, fontSize:12.5, color:"#74748a", lineHeight:1.5 }}>No AI meal plan saved yet — generate one in Nutrition → ✨ Generate AI Meal Plan, tap “Use This Plan,” and it'll appear here.</div>
+        )}
       </div>
 
       {/* Reset notice */}
@@ -6673,7 +6708,7 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   );
 }
 
-function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onBack }) {
+function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onSaveMealPlan, onBack }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
   const dietAwareMacros = macrosFor(profile || {}, dietPref);
@@ -6884,6 +6919,8 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     });
     updated[dateKey] = day;
     onSaveFoodLog(updated);
+    // Persist the plan so it shows in My Program Summary.
+    if (onSaveMealPlan) onSaveMealPlan({ meals: genPlan.meals, totals: genPlan.totals, target: genPlan.target, diet: dietPref, savedDate: dateKey });
     setGenOpen(false); setGenPlan(null);
   };
 
@@ -7397,6 +7434,7 @@ export default function BodyMorph() {
   const [cardioSessions, setCardioSessions] = useState([]);
   const [stepEntries, setStepEntries] = useState([]);
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
+  const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
   const [meals, setMeals] = useState({});
@@ -7427,6 +7465,8 @@ export default function BodyMorph() {
         const sst = await Store.get(STEPS_KEY);
         const sslp = await Store.get(SLEEP_KEY);
         if (sslp) setSleepEntries(sslp);
+        const smp = await Store.get(MEALPLAN_KEY);
+        if (smp) setMealPlan(smp);
         const svid = await Store.get(VIDEO_KEY);
         if (svid) setVideoOverrides(svid);
         const ssup = await Store.get(SUPP_KEY);
@@ -7505,6 +7545,7 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(CARDIO_KEY, cardioSessions); }, [cardioSessions, loaded]);
   useEffect(() => { if (loaded) Store.set(STEPS_KEY, stepEntries); }, [stepEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(SLEEP_KEY, sleepEntries); }, [sleepEntries, loaded]);
+  useEffect(() => { if (loaded) Store.set(MEALPLAN_KEY, mealPlan); }, [mealPlan, loaded]);
   useEffect(() => { if (loaded) Store.set(SUPP_KEY, supplements); }, [supplements, loaded]);
   useEffect(() => { if (loaded) Store.set(PEPTIDE_KEY, peptides); }, [peptides, loaded]);
   useEffect(() => { if (loaded) Store.set(MEALS_KEY, meals); }, [meals, loaded]);
@@ -7943,9 +7984,9 @@ export default function BodyMorph() {
   );
 
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} /></>);
-  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
+  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
-  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onBack={()=>setPhase("home")} /></>);
+  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
