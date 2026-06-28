@@ -361,6 +361,88 @@ function calorieTargets(profile, deficitId) {
   };
 }
 
+// ── TIME-TO-GOAL ESTIMATOR ───────────────────────────────────────────────────
+// A realistic timeline to reach the client's goal weight / body-fat, so they
+// commit to the true finish line up front — not an arbitrary 4-week block.
+const MS_PER_WEEK = 7 * 24 * 3600 * 1000;
+
+// Effective target weight from whichever goals are set. If a goal body-fat % is
+// given (and current BF is known), derive the weight at that BF assuming lean mass
+// is preserved; otherwise fall back to the explicit goal weight.
+function effectiveTargetWeight(profile) {
+  const w = parseFloat(profile.weight);
+  const gw = parseFloat(profile.goalWeight);
+  const bf = parseFloat(profile.bodyFat);
+  const gbf = parseFloat(profile.goalBodyFat);
+  if (w && bf > 0 && bf < 60 && gbf > 0 && gbf < bf) {
+    const lean = w * (1 - bf / 100);
+    return Math.round(lean / (1 - gbf / 100));   // weight at goal BF, lean mass preserved
+  }
+  return gw || null;
+}
+
+function fmtGoalDate(d) {
+  try { return d.toLocaleDateString(undefined, { month:"short", day:"numeric", year:"numeric" }); }
+  catch { return ""; }
+}
+
+function weeksToHuman(weeks) {
+  if (!weeks || weeks <= 0) return "—";
+  if (weeks < 9) return `${weeks} week${weeks === 1 ? "" : "s"}`;
+  const months = Math.round(weeks / 4.345);
+  if (months < 12) return `~${months} month${months === 1 ? "" : "s"}`;
+  return `~${(months / 12).toFixed(1)} years`;
+}
+
+// Realistic timeline for one deficit option, or null if no weight/BF goal is set
+// (e.g. "maintain" / general fitness). `now` (ms) is injectable for testing.
+function goalTimeline(profile, deficitId, now) {
+  const w = parseFloat(profile.weight);
+  const target = effectiveTargetWeight(profile);
+  if (!w || !target) return null;
+  const goal = profile.goal || "";
+  const today = now ? new Date(now) : new Date();
+
+  // GAIN path — goal weight above current, or an explicit bulk: lean mass accrues slowly.
+  if (target > w + 1 || (goal.includes("Bulk") && target >= w)) {
+    const lbsToGain = Math.max(target - w, 0);
+    if (lbsToGain < 1) return null;
+    const lvl = (profile.fitnessLevel || "Intermediate").toLowerCase();
+    const lbsPerMonth = lvl.startsWith("beg") ? 1.25 : lvl.startsWith("adv") ? 0.4 : 0.75;
+    const weeklyRate = lbsPerMonth / 4.345;
+    const weeks = Math.ceil(lbsToGain / weeklyRate);
+    const eta = new Date(today.getTime() + weeks * MS_PER_WEEK);
+    return { mode:"gain", lbs: Math.round(lbsToGain), weeklyRate:+weeklyRate.toFixed(2),
+             weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks) };
+  }
+
+  // LOSS path — weekly rate from the calorie deficit, capped at ~1%/week for safety.
+  const lbsToLose = Math.max(w - target, 0);
+  if (lbsToLose < 1) return null;
+  const t = calorieTargets(profile, deficitId);
+  const dailyDeficit = Math.max(t.tdee - t.target, 0);
+  let weeklyRate = (dailyDeficit * 7) / 3500;
+  weeklyRate = Math.min(weeklyRate, w * 0.01);   // ~1% of bodyweight/week ceiling
+  if (weeklyRate < 0.1) weeklyRate = 0.1;
+  const weeks = Math.ceil(lbsToLose / weeklyRate);
+  const eta = new Date(today.getTime() + weeks * MS_PER_WEEK);
+  return { mode:"loss", lbs: Math.round(lbsToLose), weeklyRate:+weeklyRate.toFixed(2),
+           weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks) };
+}
+
+// All three deficit options with their timelines. Gain goals collapse to the same
+// estimate across options (the deficit doesn't apply to muscle gain).
+function allTimelines(profile, now) {
+  return DEFICIT_LEVELS.map(d => ({ ...d, timeline: goalTimeline(profile, d.id, now) }));
+}
+
+// A program is a "quick hit" (keep the short 4-week framing) when there's no
+// weight/BF goal, or the realistic timeline is already short.
+function isQuickHit(profile) {
+  const tl = goalTimeline(profile, profile.deficit || "moderate");
+  return !tl || tl.weeks <= 6;
+}
+
 function macrosFor(profile, dietId) {
   const w = parseFloat(profile.weight) || 170;
   const goal = profile.goal || "";
@@ -1648,7 +1730,7 @@ function programSignature(profile) {
   return [
     profile.focus, profile.goal, profile.gender, profile.fitnessLevel,
     profile.sessionTime, (profile.trainingDays || []).join(","),
-    profile.goalWeight, profile.goalBodyFat, profile.age,
+    profile.goalWeight, profile.goalBodyFat, profile.age, (profile.deficit || "moderate"),
   ].join("|");
 }
 
@@ -1682,8 +1764,23 @@ async function generateProgram(profile) {
   const exCount = exercisesForTime(profile.sessionTime);
   const { stretch } = pickFocusGroups(profile);
 
+  // Realistic time-to-goal drives the program's horizon: the client commits to the
+  // full journey, not an arbitrary 4 weeks. Short/no-goal cases stay a 4-week block.
+  const tl = goalTimeline(profile, profile.deficit || "moderate");
+  const quick = !tl || tl.weeks <= 6;
+  const totalWeeks = tl ? tl.weeks : 4;
+  const milestoneCount = quick ? 4 : Math.min(6, Math.max(4, Math.round(totalWeeks / 3)));
+
+  const horizonLine = tl
+    ? `- REALISTIC TIMELINE TO GOAL: about ${totalWeeks} weeks (${tl.human}), losing/gaining ~${tl.weeklyRate} lb/week to go from ${profile.weight} lbs to a ~${effectiveTargetWeight(profile)} lb target. This is the duration the client is committing to.`
+    : `- No specific weight/body-fat goal set — treat this as a focused 4-week block the client can repeat.`;
+
+  const milestoneRule = quick
+    ? `- progressMilestones: exactly 4 entries (week 1 through 4), each a concrete week-by-week progression instruction.`
+    : `- progressMilestones: exactly ${milestoneCount} checkpoint entries spread across the FULL ${totalWeeks}-week journey (e.g. weeks 1, then roughly evenly up to ${totalWeeks}). The "week" field is the checkpoint week number. Each entry states the realistic physique/performance progress expected by that week AND how training intensifies (load, volume, technique) into the next phase. The final entry is at week ${totalWeeks} — reaching the goal.`;
+
   const prompt =
-`You are an elite strength & physique coach building a precise, individualized 4-week training block for a real client. Tailor exercise selection, split, volume and intensity to THIS person — their goal, focus, experience level, sex, age and weekly schedule. This is not a generic template; make choices a thoughtful human coach would make for them.
+`You are an elite strength & physique coach building a precise, individualized training program for a real client — one they will follow for the WHOLE realistic duration it takes to reach their goal, not a throwaway 4-week block. Tailor exercise selection, split, volume and intensity to THIS person. This is not a generic template; make choices a thoughtful human coach would make for them.
 
 CLIENT
 - Name: ${profile.name}
@@ -1696,19 +1793,20 @@ CLIENT
 - Experience level: ${profile.fitnessLevel}
 - Training days (use EXACTLY these labels, in this order, one workout each): ${dayNames.join(", ")}
 - Session length: ${profile.sessionTime} minutes -> about ${exCount} exercises per session
+${horizonLine}
 
 REQUIREMENTS
-- Produce one workout per training day listed above. The "day" field MUST equal the day name exactly.
+- Produce the weekly split: one workout per training day listed above. The "day" field MUST equal the day name exactly. The client repeats this weekly structure, progressing it over the full timeline.
 - Each workout: ${exCount} exercises (give or take one), ordered big compounds first.
 - Hit each major muscle group it targets about twice per week across the week; avoid redundant back-to-back overlap.
 - Match volume/intensity to the experience level (beginners: simpler movements, moderate volume; advanced: more demanding variations, intensity techniques).
 - Every exercise needs realistic sets, a rep range, rest, a tempo (e.g. "3-1-2"), and a short, specific coachCue in second person.
 - Tempo format: "ecc-pause-con" digits like "3-1-2". Rest like "90s" or "120s". Reps like "8-12" or "12".
-- progressMilestones: exactly 4 entries, week 1 through 4, each a concrete progression instruction.
-- overview: 1-2 sentences, personal and specific to this client's goal + focus.
+${milestoneRule}
+- overview: 2-3 sentences, personal and specific. ${tl ? `State the realistic commitment up front — about ${totalWeeks} weeks (${tl.human}) to reach the goal at a sustainable pace — so the client knows what they're signing up for.` : "Speak to the client's goal and focus."}
 
 Respond with ONLY valid minified JSON, no markdown, no commentary, in exactly this shape:
-{"overview":"...","weeklySchedule":[{"day":"Monday","type":"Push","focus":"Chest, Shoulders, Triceps","workout":[{"exercise":"...","sets":"4","reps":"8-12","rest":"90s","tempo":"3-1-2","coachCue":"..."}]}],"progressMilestones":[{"week":1,"goal":"..."},{"week":2,"goal":"..."},{"week":3,"goal":"..."},{"week":4,"goal":"..."}]}`;
+{"overview":"...","weeklySchedule":[{"day":"Monday","type":"Push","focus":"Chest, Shoulders, Triceps","workout":[{"exercise":"...","sets":"4","reps":"8-12","rest":"90s","tempo":"3-1-2","coachCue":"..."}]}],"progressMilestones":[{"week":1,"goal":"..."},{"week":${quick?4:totalWeeks},"goal":"..."}]}`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -1738,6 +1836,8 @@ Respond with ONLY valid minified JSON, no markdown, no commentary, in exactly th
     progressMilestones: (Array.isArray(parsed.progressMilestones) && parsed.progressMilestones.length)
       ? parsed.progressMilestones
       : buildProgram(profile).progressMilestones,
+    timeline: tl,            // realistic time-to-goal the program is built around
+    totalWeeks,              // committed program length in weeks
     aiGenerated: true,
   };
 }
@@ -2361,47 +2461,99 @@ function Wizard({ onComplete, onCoachCode, seed }) {
 }
 
 // ── LOADING ───────────────────────────────────────────────────────────────────
+// YOUR PLAN & TIMELINE — shown after signup for any goal with a weight/body-fat
+// target. The whole point: the client sees the REALISTIC timeline they're
+// committing to up front (weeks/months + a target date), not a vague 4 weeks.
+// Fat-loss goals also pick a pace (mild/moderate/aggressive), each with its own
+// honest timeline; the choice persists and drives the program's horizon.
 function FatLossResults({ profile, onContinue }) {
-  const [deficit, setDeficit] = useState("moderate");
+  const accent = profile.gender === "Female" ? APP_PINK : "#e8ff00";
+  const mode = (goalTimeline(profile, "moderate") || {}).mode;   // "loss" | "gain" | undefined
+  const isLoss = mode === "loss";
+  const isGain = mode === "gain";
+  const [deficit, setDeficit] = useState(profile.deficit || "moderate");
   const t = calorieTargets(profile, deficit);
+  const tl = goalTimeline(profile, deficit);
+  const m = macrosFor(profile, profile.dietPref);
+  const targetW = effectiveTargetWeight(profile);
+  const goalLabel = `${targetW ? `~${targetW} lbs` : ""}${profile.goalBodyFat ? `${targetW ? " · " : ""}${profile.goalBodyFat}% body fat` : ""}`;
+
+  const macroCells = isLoss
+    ? [["PROTEIN", t.protein, "#3d8eff"],["CARBS", t.carbs, "#9b5de5"],["FATS", t.fats, "#3ddc84"]]
+    : [["PROTEIN", parseInt(m.protein), "#3d8eff"],["CARBS", parseInt(m.carbs), "#9b5de5"],["FATS", parseInt(m.fats), "#3ddc84"]];
+  const dailyCals = isLoss ? t.target : m.cals;
+
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ padding:"24px 20px 8px", textAlign:"center" }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, color:"#e8ff00" }}>YOUR FAT-LOSS TARGET</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, color:accent }}>YOUR PLAN &amp; TIMELINE</div>
         <div style={{ color:"#c8c8e0", fontSize:13.5, lineHeight:1.6, marginTop:6, maxWidth:360, marginLeft:"auto", marginRight:"auto" }}>
-          Based on your stats and activity level. Pick how fast you want to go.
+          {tl ? "Here's how long it realistically takes to reach your goal — and what to commit to."
+              : "Your weekly program is ready. Stay consistent and track your progress."}
         </div>
       </div>
 
       <div style={{ padding:"8px 20px 0" }}>
-        {/* Deficit picker */}
-        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
-          {DEFICIT_LEVELS.map(d => {
-            const on = deficit===d.id;
-            return (
-              <button key={d.id} onClick={()=>setDeficit(d.id)} style={{ textAlign:"left", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"13px 20px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
-                <div style={{ fontWeight:600, fontSize:15 }}>{d.label} Deficit</div>
-                <div style={{ fontSize:12.5, opacity:0.8, marginTop:2 }}>{d.desc}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Calorie target */}
-        <div style={{ background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:16, padding:"20px 20px", textAlign:"center", marginBottom:14 }}>
-          <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1 }}>DAILY CALORIE TARGET</div>
-          <div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:48, color:"#e8ff00", lineHeight:1.1 }}>{t.target}</div>
-          <div style={{ color:"#c8c8e0", fontSize:12.5 }}>calories / day</div>
-          <div style={{ display:"flex", justifyContent:"center", gap:16, marginTop:10, color:"#9898b8", fontSize:12 }}>
-            <span>Maintenance: {t.tdee}</span><span>BMR: {t.bmr}</span>
+        {/* Commitment / timeline headline */}
+        {tl && (
+          <div style={{ background:"#1a1a26", border:"2px solid "+accent, borderRadius:16, padding:"20px", textAlign:"center", marginBottom:16 }}>
+            <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1 }}>REALISTIC TIME TO YOUR GOAL</div>
+            <div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:44, color:accent, lineHeight:1.1, marginTop:2 }}>{tl.human}</div>
+            <div style={{ color:"#f0f0f8", fontSize:13.5, marginTop:4 }}>
+              to reach {goalLabel || "your goal"} &middot; target <b>{tl.etaDate}</b>
+            </div>
+            <div style={{ color:"#9898b8", fontSize:12, marginTop:6 }}>
+              about {tl.weeks} weeks of consistency at ~{tl.weeklyRate} lb {isGain ? "of lean gain" : "lost"} per week
+            </div>
           </div>
+        )}
+
+        {/* Fat-loss: pick the pace — each shows its own honest timeline */}
+        {isLoss && (
+          <>
+            <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1, marginBottom:8 }}>CHOOSE YOUR PACE</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
+              {DEFICIT_LEVELS.map(d => {
+                const on = deficit===d.id;
+                const dtl = goalTimeline(profile, d.id);
+                return (
+                  <button key={d.id} onClick={()=>setDeficit(d.id)} style={{ textAlign:"left", background: on ? accent : "#1a1a26", border:"1px solid " + (on ? accent : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"13px 16px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                      <span style={{ fontWeight:700, fontSize:15 }}>{d.label}</span>
+                      {dtl && <span style={{ fontWeight:700, fontSize:14 }}>{dtl.human}</span>}
+                    </div>
+                    <div style={{ fontSize:12, opacity:0.85, marginTop:2 }}>
+                      {d.desc}{dtl ? ` · target ${dtl.etaDate}` : ""}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {isGain && (
+          <div style={{ color:"#c8c8e0", fontSize:12.5, lineHeight:1.6, textAlign:"center", marginBottom:16 }}>
+            Muscle is built slowly. Eat at a slight surplus, train hard, and expect steady lean gains — there's no shortcut, and that's why the timeline is what it is.
+          </div>
+        )}
+
+        {/* Daily target + macros */}
+        <div style={{ background:"#1a1a26", border:"1px solid "+accent, borderRadius:16, padding:"18px", textAlign:"center", marginBottom:14 }}>
+          <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1 }}>DAILY CALORIE TARGET</div>
+          <div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:46, color:accent, lineHeight:1.1 }}>{dailyCals}</div>
+          <div style={{ color:"#c8c8e0", fontSize:12.5 }}>calories / day</div>
+          {isLoss && (
+            <div style={{ display:"flex", justifyContent:"center", gap:16, marginTop:10, color:"#9898b8", fontSize:12 }}>
+              <span>Maintenance: {t.tdee}</span><span>BMR: {t.bmr}</span>
+            </div>
+          )}
         </div>
 
-        {/* Macros */}
         <div style={{ display:"flex", gap:10, marginBottom:18 }}>
-          {[["PROTEIN", t.protein, "#3d8eff"],["CARBS", t.carbs, "#9b5de5"],["FATS", t.fats, "#3ddc84"]].map(([k,v,col]) => (
+          {macroCells.map(([k,v,col]) => (
             <div key={k} style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 6px", textAlign:"center" }}>
               <div style={{ color:col, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:22 }}>{v}g</div>
               <div style={{ color:"#c8c8e0", fontSize:11, letterSpacing:0.5, marginTop:2 }}>{k}</div>
@@ -2410,11 +2562,11 @@ function FatLossResults({ profile, onContinue }) {
         </div>
 
         <div style={{ color:"#9898b8", fontSize:11.5, lineHeight:1.6, textAlign:"center", marginBottom:18 }}>
-          These are science-based estimates (Mifflin-St Jeor). Real results vary &mdash; adjust based on weekly progress. This is guidance, not medical advice.
+          Science-based estimates (Mifflin-St Jeor). Real results vary with consistency, sleep and adherence &mdash; we'll adjust from your weekly progress. Guidance, not medical advice.
         </div>
 
-        <button onClick={()=>onContinue()} style={{ width:"100%", background:"#e8ff00", color:"#000", border:"none", borderRadius:14, padding:"17px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:22 }}>
-          GO TO MY PROGRAM
+        <button onClick={()=>onContinue(deficit)} style={{ width:"100%", background:accent, color:"#000", border:"none", borderRadius:14, padding:"17px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:22 }}>
+          {tl ? "I'M COMMITTED — START" : "GO TO MY PROGRAM"}
         </button>
       </div>
     </div>
@@ -2625,6 +2777,20 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
             style={{ background:"transparent", border:"1px solid "+(aiGenerating?"#2a2a3d":trainAccent), borderRadius:8, color:aiGenerating?"#6a6a80":trainAccent, padding:"6px 12px", cursor:aiGenerating?"default":"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>
             {aiGenerating ? "Generating…" : (aiOn ? "Re-personalize with AI" : "Personalize with AI")}
           </button>
+        </div>
+      )}
+
+      {program.timeline && (
+        <div style={{ margin:"2px 5% 8px", background:"#16161f", border:"1px solid #2a2a3d", borderRadius:12, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
+          <div style={{ minWidth:0 }}>
+            <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1 }}>YOUR COMMITMENT</div>
+            <div style={{ color:"#f0f0f8", fontSize:14, marginTop:2 }}>
+              <b style={{ color:trainAccent }}>{program.timeline.human}</b> to your goal &middot; target {program.timeline.etaDate}
+            </div>
+          </div>
+          <div style={{ color:"#9898b8", fontSize:11.5, textAlign:"right" }}>
+            ~{program.timeline.weeklyRate} lb/wk &middot; {program.totalWeeks} wks
+          </div>
         </div>
       )}
 
@@ -7647,6 +7813,7 @@ function migrateProfile(p) {
     bodyFat:       "",
     goalWeight:    "",
     goalBodyFat:   "",
+    deficit:       "moderate",
     hftStartDate: null,
     glbStartDate: null,
   };
@@ -8967,9 +9134,19 @@ export default function BodyMorph() {
     if (prof.goalWeight) setNutritionGoals(g => ({ ...g, goalWeight: String(prof.goalWeight) }));
     await new Promise(r => setTimeout(r, 1400));
     setProgram(resolveProgram(prof));
-    // For fat-loss goals, show the calorie deficit + macro target screen first.
-    if ((prof.goal || "").includes("Cut")) setPhase("fatloss");
+    // Any goal with a real weight/body-fat target gets the Plan & Timeline screen
+    // first, so the client commits to the realistic finish line up front.
+    if (goalTimeline(prof, prof.deficit || "moderate")) setPhase("fatloss");
     else setPhase("home");
+  };
+
+  // Persist the chosen fat-loss pace; the program effect regenerates the AI plan
+  // around the new horizon (deficit is part of the program signature).
+  const saveDeficit = async (deficitId) => {
+    if (!deficitId || !profile) return;
+    const updated = { ...profile, deficit: deficitId };
+    setProfile(updated);
+    await Store.set(PROFILE_KEY, updated);
   };
 
   const resetProfile = async () => {
@@ -9302,7 +9479,7 @@ export default function BodyMorph() {
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} /></>;
-  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
+  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d)=>{ saveDeficit(d); setPhase("home"); }} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 
   if (phase === "home") return (
