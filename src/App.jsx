@@ -7974,7 +7974,7 @@ export default function BodyMorph() {
         if (prevId === nextId) return;          // ignore the listener's initial echo
         userRef.current = nextUser; setUser(nextUser);
         if (nextUser) { setLoaded(false); setPhase("init"); await hydrate(); }
-        else { setProfile(null); setProgram(null); setRole(null); setSubscription(null); setPhase("auth"); }
+        else { clearLocalAppData(); setProfile(null); setProgram(null); setRole(null); setSubscription(null); setPhase("auth"); }
       });
     })();
     return () => unsub();
@@ -8144,10 +8144,18 @@ export default function BodyMorph() {
     setPhase("wizard");
   };
 
-  // Sign out of the account but KEEP local data (that's resetProfile's job).
-  // The onAuth listener flips us to the auth screen once the session clears.
+  // Wipe locally-cached app data so the next sign-in hydrates cleanly from the
+  // cloud. Without this, switching accounts on one device leaks the previous
+  // user's data — and worse, pushes their profile up into the new account's row.
+  const clearLocalAppData = () => {
+    try { Object.keys(localStorage).filter(k => k.startsWith("bodymorph_")).forEach(k => localStorage.removeItem(k)); } catch {}
+  };
+
+  // Sign out. Local cache is cleared (data is safe in the cloud); the onAuth
+  // listener flips us to the auth screen once the session clears.
   const handleSignOut = async () => {
     await signOut();
+    clearLocalAppData();
     userRef.current = null; setUser(null); setSubscription(null); setRole(null);
     setProfile(null); setProgram(null);
     setPhase("auth");
