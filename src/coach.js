@@ -1,5 +1,7 @@
 import { supabase } from "./supabase";
 
+const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
+
 // ── COACH (client data layer) ───────────────────────────────────────────────────
 // Role lookup, coach-access / invite-code redemption (Postgres RPCs), and the
 // coach-side reads of client data (allowed by the is_coach_of() RLS policies).
@@ -68,29 +70,85 @@ export async function fetchRoster(coachId) {
   });
 }
 
-// Full per-client read for the detail view. Returns app-shaped data so the
-// existing chart transforms apply directly.
+// Full per-client read for the detail view + weekly summary. Returns app-shaped
+// data so the existing chart transforms apply directly.
 export async function fetchClientDetail(clientId) {
   if (!supabase || !clientId) return null;
-  const [profile, body, steps, logs, food, rewards] = await Promise.all([
+  const [profile, body, steps, sleep, logs, food, rewards] = await Promise.all([
     supabase.from("profiles").select("first_name, extra").eq("id", clientId).maybeSingle(),
     supabase.from("body_entries").select("*").eq("user_id", clientId),
     supabase.from("step_entries").select("*").eq("user_id", clientId),
-    supabase.from("workout_logs").select("*").eq("user_id", clientId),
-    supabase.from("food_log_days").select("*").eq("user_id", clientId),
+    supabase.from("sleep_entries").select("*").eq("user_id", clientId),
+    supabase.from("workout_logs").select("day").eq("user_id", clientId),
+    supabase.from("food_log_days").select("day, cal, protein, carbs, fats").eq("user_id", clientId),
     supabase.from("rewards").select("*").eq("user_id", clientId).maybeSingle(),
   ]);
   const bodyEntries = (body.data || [])
     .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
   const stepEntries = (steps.data || []).map(r => ({ date: r.day, steps: r.steps }));
+  const sleepEntries = (sleep.data || []).map(r => ({ date: r.day, hours: r.hours }));
+  const workoutDays = [...new Set((logs.data || []).map(r => r.day))].sort();
+  const foodDays = (food.data || []).map(r => ({ date: r.day, cal: r.cal, protein: r.protein, carbs: r.carbs, fats: r.fats }));
   return {
     name: nameOf(profile.data),
-    bodyEntries,
-    stepEntries,
-    workoutCount: (logs.data || []).length,
-    foodDays: (food.data || []).length,
+    bodyEntries, stepEntries, sleepEntries, workoutDays, foodDays,
     rewards: rewards.data ? { coins: rewards.data.coins, stats: rewards.data.stats || {} } : null,
-    lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0]),
+    lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0], workoutDays.slice(-1)[0]),
   };
+}
+
+// ── AI weekly briefing ───────────────────────────────────────────────────────────
+// Distill the client's last 7 days into compact metrics for the prompt.
+function summarizeWeek(d) {
+  const cut = new Date(); cut.setDate(cut.getDate() - 6);
+  const cutStr = cut.toISOString().slice(0, 10);
+  const wk = (arr, key = "date") => (arr || []).filter(x => x[key] >= cutStr);
+  const body = d.bodyEntries || [], body7 = wk(body), steps7 = wk(d.stepEntries), sleep7 = wk(d.sleepEntries), food7 = wk(d.foodDays);
+  const avg = (a, f) => a.length ? Math.round(a.reduce((s, x) => s + (+f(x) || 0), 0) / a.length) : null;
+  return {
+    weightLatest: body.length ? body[body.length - 1].weight : null,
+    weightChange7d: body7.length >= 2 ? +(body7[body7.length - 1].weight - body7[0].weight).toFixed(1) : null,
+    weightChangeAllTime: body.length >= 2 ? +(body[body.length - 1].weight - body[0].weight).toFixed(1) : null,
+    avgSteps7d: avg(steps7, x => x.steps),
+    daysStepsLogged7d: steps7.length,
+    avgSleepHours7d: sleep7.length ? +(sleep7.reduce((s, x) => s + (+x.hours || 0), 0) / sleep7.length).toFixed(1) : null,
+    workouts7d: (d.workoutDays || []).filter(x => x >= cutStr).length,
+    daysFoodLogged7d: food7.length,
+    currentStreak: d.rewards?.stats?.currentStreak || 0,
+  };
+}
+
+// Generate a short coach-facing briefing with Claude (Haiku — cheap, plenty here).
+export async function generateClientSummary(detail) {
+  if (!ANTHROPIC_KEY) return { error: "No AI key configured." };
+  const w = summarizeWeek(detail);
+  const prompt =
+    "You are an assistant to a fitness coach. Write a SHORT briefing (2-3 sentences, plain prose — no greeting, no preamble, no bullet points) about this client's past 7 days, so the coach can skim it before a check-in. Use the actual numbers, note what's going well, and flag the one thing to address.\n\n" +
+    `Client: ${detail.name}\nMetrics: ${JSON.stringify(w)}`;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) return { error: `AI error (${res.status})` };
+    const data = await res.json();
+    const text = (data.content?.[0]?.text || "").trim();
+    return text ? { text } : { error: "Empty response" };
+  } catch (e) { return { error: e.message }; }
+}
+
+// Read / write the cached briefing (no-op without the table / backend).
+export async function fetchClientSummary(coachId, clientId) {
+  if (!supabase || !coachId || !clientId) return null;
+  const { data } = await supabase.from("client_summaries")
+    .select("summary, generated_at").eq("coach_id", coachId).eq("client_id", clientId).maybeSingle();
+  return data || null;
+}
+export async function saveClientSummary(coachId, clientId, summary) {
+  if (!supabase || !coachId || !clientId) return;
+  await supabase.from("client_summaries").upsert(
+    { coach_id: coachId, client_id: clientId, summary, generated_at: new Date().toISOString() },
+    { onConflict: "coach_id,client_id" });
 }

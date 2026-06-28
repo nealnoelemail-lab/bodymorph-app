@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail } from "./coach";
+import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary } from "./coach";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -7651,7 +7651,7 @@ function CoachDashboard({ user, onSignOut }) {
   const gen = async () => { const c = await generateInvite(); if (c) setInvite(c); };
   const copy = () => { if (invite) { navigator.clipboard?.writeText(invite); setCopied(true); setTimeout(()=>setCopied(false), 1500); } };
 
-  if (selected) return <CoachClientView detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />;
+  if (selected) return <CoachClientView coachId={user?.id} clientId={selected} detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />;
 
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
@@ -7708,7 +7708,24 @@ function CoachDashboard({ user, onSignOut }) {
 }
 
 // Read-only per-client view for a coach.
-function CoachClientView({ detail, loading, onBack }) {
+function CoachClientView({ coachId, clientId, detail, loading, onBack }) {
+  const [summary, setSummary] = useState(null);   // { summary, generated_at }
+  const [genBusy, setGenBusy] = useState(false);
+  const [genErr, setGenErr] = useState("");
+  useEffect(() => {
+    let on = true;
+    (async () => { const s = await fetchClientSummary(coachId, clientId); if (on) setSummary(s); })();
+    return () => { on = false; };
+  }, [coachId, clientId]);
+  const generate = async () => {
+    if (!detail) return;
+    setGenErr(""); setGenBusy(true);
+    const res = await generateClientSummary(detail);
+    setGenBusy(false);
+    if (res.error) { setGenErr(res.error); return; }
+    setSummary({ summary: res.text, generated_at: new Date().toISOString() });
+    saveClientSummary(coachId, clientId, res.text);   // cache (best-effort)
+  };
   const Back = () => (
     <button onClick={onBack} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
   );
@@ -7749,9 +7766,28 @@ function CoachClientView({ detail, loading, onBack }) {
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
       <div style={{ fontSize:12, color:C.muted, marginBottom:14 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
 
+      {/* AI weekly briefing */}
+      <div style={{ background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.25)", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+          <div style={{ ...S.inputLabel, marginBottom:0 }}>Weekly briefing</div>
+          <button onClick={generate} disabled={genBusy} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5, opacity:genBusy?0.6:1 }}>
+            {genBusy ? "Generating…" : (summary ? "Refresh" : "Generate")}
+          </button>
+        </div>
+        {genErr && <div style={{ color:C.red, fontSize:12.5, marginBottom:6 }}>{genErr}</div>}
+        {summary?.summary ? (
+          <>
+            <div style={{ fontSize:14, color:C.text, lineHeight:1.6 }}>{summary.summary}</div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Generated {new Date(summary.generated_at).toLocaleDateString()}</div>
+          </>
+        ) : (
+          <div style={{ fontSize:13, color:C.muted }}>No briefing yet — tap Generate for an AI summary of this client's week.</div>
+        )}
+      </div>
+
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
         <Stat label="Day streak" value={stats.currentStreak || 0} />
-        <Stat label="Workouts" value={stats.workoutsCompleted || detail.workoutCount || 0} />
+        <Stat label="Workouts" value={stats.workoutsCompleted || (detail.workoutDays||[]).length || 0} />
         <Stat label="PRs" value={stats.totalPRs || 0} />
         <Stat label="Coins" value={detail.rewards?.coins || 0} />
       </div>
@@ -7768,7 +7804,7 @@ function CoachClientView({ detail, loading, onBack }) {
       </div>
 
       <div style={{ fontSize:12.5, color:C.muted, marginTop:14, lineHeight:1.6 }}>
-        {detail.foodDays} day(s) of food logged · {(detail.bodyEntries||[]).length} weigh-in(s).
+        {(detail.foodDays||[]).length} day(s) of food logged · {(detail.bodyEntries||[]).length} weigh-in(s).
       </div>
     </>
   );
