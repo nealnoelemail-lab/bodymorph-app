@@ -63,13 +63,16 @@ const DOMAINS = {
     fromRows: (rows) => (rows || []).map(r => ({ date: r.day, hours: r.hours })),
     merge: byDate,
   },
-  // Body: weight/bodyFat/notes sync; inline base64 `photos` stay LOCAL-only for now
-  // (heavy for JSON — progress photos move to Supabase Storage in a later task).
+  // Body: weight/bodyFat/notes + photo PATHS sync. Inline base64 photos (legacy /
+  // offline fallback) are filtered out so they never bloat the row — they stay
+  // local-only; uploaded photos sync as tiny Storage paths.
   body: {
     table: "body_entries", onConflict: "user_id,day",
-    toRows: (v, uid) => (v || []).filter(e => e && e.date)
-      .map(e => ({ user_id: uid, day: e.date, weight: numOrNull(e.weight), body_fat: numOrNull(e.bodyFat), notes: e.notes || null })),
-    fromRows: (rows) => (rows || []).map(r => ({ date: r.day, weight: strOrEmpty(r.weight), bodyFat: strOrEmpty(r.body_fat), ...(r.notes ? { notes: r.notes } : {}) })),
+    toRows: (v, uid) => (v || []).filter(e => e && e.date).map(e => ({
+      user_id: uid, day: e.date, weight: numOrNull(e.weight), body_fat: numOrNull(e.bodyFat), notes: e.notes || null,
+      photos: Object.fromEntries(Object.entries(e.photos || {}).filter(([, p]) => p && !String(p).startsWith("data:"))),
+    })),
+    fromRows: (rows) => (rows || []).map(r => ({ date: r.day, weight: strOrEmpty(r.weight), bodyFat: strOrEmpty(r.body_fat), ...(r.notes ? { notes: r.notes } : {}), ...(r.photos && Object.keys(r.photos).length ? { photos: r.photos } : {}) })),
     merge: byDate,
   },
 

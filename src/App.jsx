@@ -3,6 +3,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary } from "./coach";
+import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -4264,7 +4265,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
 }
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────────
-function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack }) {
+function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId }) {
   const [view, setView] = useState("body");          // body | charts | log | report
   const exNames = Object.keys(logs);
   const [selectedEx, setSelectedEx] = useState(exNames[0] || null);
@@ -4352,7 +4353,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
 
         {/* BODY view */}
         {view === "body" && (
-          <BodyProgress entries={bodyEntries} onAdd={onAddBody} onDelete={onDeleteBody} />
+          <BodyProgress entries={bodyEntries} onAdd={onAddBody} onDelete={onDeleteBody} userId={userId} />
         )}
 
         {view !== "body" && view !== "charts" && !hasData ? (
@@ -4473,7 +4474,22 @@ function compressImage(file, maxDim = 700, quality = 0.7) {
   });
 }
 
-function BodyProgress({ entries, onAdd, onDelete }) {
+// Renders a progress photo whether it's an inline base64 dataURL (legacy/offline)
+// or a private Storage path (resolved to a short-lived signed URL).
+function ProgressImg({ value, alt, style, onClick }) {
+  const [src, setSrc] = useState(value && value.startsWith("data:") ? value : null);
+  useEffect(() => {
+    let on = true;
+    if (value && value.startsWith("data:")) { setSrc(value); return; }
+    setSrc(null);
+    if (isStoragePath(value)) signedPhotoUrl(value).then(u => { if (on) setSrc(u); });
+    return () => { on = false; };
+  }, [value]);
+  if (!src) return <div style={{ ...style, background:"#0e0e16", display:"flex", alignItems:"center", justifyContent:"center", color:"#3a3a52", fontSize:11 }}>…</div>;
+  return <img src={src} alt={alt} style={style} onClick={onClick} />;
+}
+
+function BodyProgress({ entries, onAdd, onDelete, userId }) {
   const [photos, setPhotos]   = useState({});      // { front: dataURL, ... }
   const [weight, setWeight]   = useState("");
   const [bodyFat, setBodyFat] = useState("");
@@ -4491,10 +4507,17 @@ function BodyProgress({ entries, onAdd, onDelete }) {
 
   const canSave = weight || bodyFat || Object.keys(photos).length > 0;
 
-  const save = () => {
+  const save = async () => {
     if (!canSave) return;
     setBusy(true);
-    onAdd({ date: dateStr, weight: String(weight), bodyFat: String(bodyFat), photos: { ...photos } });
+    // Upload each photo to Storage (store the path); fall back to the inline
+    // dataURL if there's no backend / the upload fails (offline-safe).
+    const stored = {};
+    for (const [angle, dataURL] of Object.entries(photos)) {
+      const path = userId ? await uploadPhoto(userId, dateStr, angle, dataURL) : null;
+      stored[angle] = path || dataURL;
+    }
+    onAdd({ date: dateStr, weight: String(weight), bodyFat: String(bodyFat), photos: stored });
     setPhotos({}); setWeight(""); setBodyFat("");
     setTimeout(()=>setBusy(false), 600);
   };
@@ -4515,7 +4538,7 @@ function BodyProgress({ entries, onAdd, onDelete }) {
       {/* Fullscreen photo viewer */}
       {viewer && (
         <div onClick={()=>setViewer(null)} style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:20, maxWidth:480, margin:"0 auto" }}>
-          <img src={viewer.src} alt="progress" style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:10 }} />
+          <ProgressImg value={viewer.src} alt="progress" style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:10 }} />
         </div>
       )}
 
@@ -4614,7 +4637,7 @@ function BodyProgress({ entries, onAdd, onDelete }) {
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:6 }}>
                   {ANGLES.map(a => e.photos[a.id] ? (
                     <div key={a.id} onClick={()=>setViewer({ src:e.photos[a.id] })} style={{ position:"relative", aspectRatio:"3/4", borderRadius:8, overflow:"hidden", cursor:"pointer" }}>
-                      <img src={e.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      <ProgressImg value={e.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
                       <span style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.6)", color:"#fff", fontSize:12, textAlign:"center", padding:"2px 0", letterSpacing:1 }}>{a.label.toUpperCase()}</span>
                     </div>
                   ) : (
@@ -7803,6 +7826,25 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack }) {
         )}
       </div>
 
+      {(() => {
+        const pe = [...(detail.bodyEntries || [])].reverse().find(e => e.photos && Object.keys(e.photos).length);
+        if (!pe) return null;
+        return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
+            <div style={{ ...S.inputLabel, marginBottom:8 }}>Progress photos · {pe.date}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:6 }}>
+              {ANGLES.map(a => pe.photos[a.id] ? (
+                <div key={a.id} style={{ position:"relative", aspectRatio:"3/4", borderRadius:8, overflow:"hidden" }}>
+                  <ProgressImg value={pe.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                </div>
+              ) : (
+                <div key={a.id} style={{ aspectRatio:"3/4", borderRadius:8, background:"#0e0e16", border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", color:"#3a3a52", fontSize:11 }}>{a.label}</div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ fontSize:12.5, color:C.muted, marginTop:14, lineHeight:1.6 }}>
         {(detail.foodDays||[]).length} day(s) of food logged · {(detail.bodyEntries||[]).length} weigh-in(s).
       </div>
@@ -8509,7 +8551,7 @@ export default function BodyMorph() {
 
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
-  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
+  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);

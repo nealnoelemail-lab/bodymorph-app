@@ -84,7 +84,7 @@ export async function fetchClientDetail(clientId) {
     supabase.from("rewards").select("*").eq("user_id", clientId).maybeSingle(),
   ]);
   const bodyEntries = (body.data || [])
-    .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat }))
+    .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat, photos: r.photos || {} }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
   const stepEntries = (steps.data || []).map(r => ({ date: r.day, steps: r.steps }));
   const sleepEntries = (sleep.data || []).map(r => ({ date: r.day, hours: r.hours }));
