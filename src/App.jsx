@@ -6,7 +6,8 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchM
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
-  fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee } from "./coach";
+  fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee, detectFollowups,
+  listEvents, addEvent, deleteEvent } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 
 const C = {
@@ -7811,6 +7812,80 @@ function FinancialsSection({ coachId, roster }) {
   );
 }
 
+// Coach weekly calendar — BodyMorph-native events now; Google/Outlook/personal
+// merge in later via GoHighLevel.
+function CalendarSection({ coachId, roster }) {
+  const startOfWeek = (d) => { const x=new Date(d); const dow=(x.getDay()+6)%7; x.setHours(0,0,0,0); x.setDate(x.getDate()-dow); return x; };
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [events, setEvents] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), time:"09:00", title:"", client_id:"", type:"appointment" });
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+  const load = async () => setEvents(await listEvents(coachId, weekStart.toISOString(), weekEnd.toISOString()));
+  useEffect(() => { load(); }, [coachId, weekStart.getTime()]);
+  const days = Array.from({ length:7 }, (_, i) => { const d=new Date(weekStart); d.setDate(d.getDate()+i); return d; });
+  const evForDay = (d) => events.filter(e => new Date(e.starts_at).toDateString() === d.toDateString()).sort((a,b)=> a.starts_at < b.starts_at ? -1 : 1);
+  const nameOf = (cid) => (roster||[]).find(c=>c.id===cid)?.name;
+  const shiftWeek = (n) => setWeekStart(w => { const x=new Date(w); x.setDate(x.getDate()+n*7); return x; });
+  const addOne = async () => {
+    if (!form.date) return;
+    const starts_at = new Date(form.date + "T" + (form.time || "09:00")).toISOString();
+    await addEvent(coachId, { client_id:form.client_id, starts_at, title:form.title || "(untitled)", type:form.type });
+    setForm(f => ({ ...f, title:"", client_id:"" })); setOpen(false); load();
+  };
+  const typeColor = (t) => t === "session" ? C.green : t === "followup" ? C.blue : "#e8ff00";
+  const rng = `${weekStart.toLocaleDateString(undefined,{month:"short",day:"numeric"})} – ${new Date(weekEnd.getTime()-1).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`;
+  const fld2 = { background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"7px 9px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+
+  return (
+    <>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:6 }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>CALENDAR</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <button onClick={()=>shiftWeek(-1)} style={{ ...S.btnSec, padding:"6px 11px" }}>‹</button>
+          <span style={{ fontSize:13, color:C.muted, minWidth:130, textAlign:"center" }}>{rng}</span>
+          <button onClick={()=>shiftWeek(1)} style={{ ...S.btnSec, padding:"6px 11px" }}>›</button>
+          <button onClick={()=>setOpen(o=>!o)} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", padding:"7px 13px" }}>{open ? "Cancel" : "+ Event"}</button>
+        </div>
+      </div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:14 }}>Your BodyMorph schedule. <button onClick={()=>alert("Coming with GoHighLevel: connect your Google, Outlook, and personal calendars to merge everything into this view.")} style={{ background:"transparent", border:"none", color:C.blue, cursor:"pointer", textDecoration:"underline", fontSize:12.5, padding:0 }}>Connect Google / Outlook / personal →</button></div>
+
+      {open && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 16px", marginBottom:14, display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} style={fld2} />
+          <input type="time" value={form.time} onChange={e=>setForm({...form,time:e.target.value})} style={fld2} />
+          <input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Title" style={{ ...fld2, flex:1, minWidth:140 }} />
+          <select value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})} style={fld2}><option value="">No client</option>{(roster||[]).map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select value={form.type} onChange={e=>setForm({...form,type:e.target.value})} style={fld2}><option value="appointment">Appointment</option><option value="session">Session</option><option value="followup">Follow-up</option></select>
+          <button onClick={addOne} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>Add</button>
+        </div>
+      )}
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(120px, 1fr))", gap:8 }}>
+        {days.map((d, i) => {
+          const today = d.toDateString() === new Date().toDateString();
+          return (
+            <div key={i} style={{ background:C.card, border:`1px solid ${today ? "#e8ff00" : C.border}`, borderRadius:10, padding:"10px 9px", minHeight:120 }}>
+              <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:0.5 }}>{d.toLocaleDateString(undefined,{weekday:"short"})}</div>
+              <div style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:16, color: today ? "#e8ff00" : C.text, marginBottom:6 }}>{d.getDate()}</div>
+              {evForDay(d).map(e => (
+                <div key={e.id} style={{ background:"#0e0e16", borderLeft:`3px solid ${typeColor(e.type)}`, borderRadius:5, padding:"5px 7px", marginBottom:5 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:4 }}>
+                    <span style={{ fontSize:11.5, color:C.muted }}>{new Date(e.starts_at).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"})}</span>
+                    <span onClick={async()=>{ await deleteEvent(e.id); load(); }} style={{ color:"#4a4a6a", cursor:"pointer", fontSize:13, lineHeight:1 }}>×</span>
+                  </div>
+                  <div style={{ fontSize:12.5, color:C.text, lineHeight:1.3 }}>{e.title}</div>
+                  {nameOf(e.client_id) && <div style={{ fontSize:11, color:typeColor(e.type) }}>{nameOf(e.client_id)}</div>}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function CoachApp({ user, profile, onSignOut }) {
   const uid = user?.id;
   const coachName = (profile && profile.name) || (user?.email ? user.email.split("@")[0] : "Coach");
@@ -7818,6 +7893,9 @@ function CoachApp({ user, profile, onSignOut }) {
   const [roster, setRoster] = useState([]);
   const [prospects, setProspects] = useState([]);
   const [invites, setInvites] = useState([]);
+  const [followups, setFollowups] = useState([]);
+  const [fuDone, setFuDone] = useState({});   // locally dismissed follow-ups (key: clientId:key)
+  const [fuMsg, setFuMsg] = useState({});     // coach-edited message overrides
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -7834,8 +7912,8 @@ function CoachApp({ user, profile, onSignOut }) {
 
   const load = useCallback(async () => {
     if (!uid) return;
-    const [ros, pros, inv] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid)]);
-    setRoster(ros); setProspects(pros); setInvites(inv); setLoading(false);
+    const [ros, pros, inv, fu] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid), detectFollowups(uid)]);
+    setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setLoading(false);
   }, [uid]);
   useEffect(() => { load(); }, [load]);
 
@@ -7871,7 +7949,8 @@ function CoachApp({ user, profile, onSignOut }) {
   const filteredRoster = roster.filter(c => !search || (c.name||"").toLowerCase().includes(search.toLowerCase()));
   const attention = roster.filter(c => { const d = daysSince(c.lastActive); return d == null || d >= 7; });
 
-  const NAV = [["overview","Overview"],["clients","Clients"],["prospects","Prospects"],["financials","Financials"]];
+  const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
+  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
 
   return (
     <div style={{ position:"relative" }}>
@@ -7950,6 +8029,40 @@ function CoachApp({ user, profile, onSignOut }) {
               onBack={()=>{ setSelected(null); setDetail(null); }} />
           )}
 
+          {/* FOLLOW-UPS */}
+          {section==="followups" && (
+            <>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:6 }}>FOLLOW-UPS ({activeFu.length})</div>
+              <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>Auto-detected from each client's week. Messages are drafted for you — review + send with one tap. (Hands-off auto-send activates with GoHighLevel.)</div>
+              {loading ? <div style={{ color:C.muted, fontSize:13 }}>Checking your clients…</div>
+              : activeFu.length === 0 ? <div style={{ color:C.muted, fontSize:13 }}>All caught up — no follow-ups needed right now. 🎉</div>
+              : (
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {activeFu.map(f => {
+                    const key = f.clientId + ":" + f.key;
+                    const color = f.severity === "alert" ? C.red : f.severity === "good" ? C.green : C.blue;
+                    const msg = fuMsg[key] != null ? fuMsg[key] : f.message;
+                    return (
+                      <div key={key} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${color}`, borderRadius:12, padding:"13px 16px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                          <span style={{ fontWeight:600, fontSize:14.5, color:C.text }}>{f.name}</span>
+                          <span style={{ fontSize:11, color, border:`1px solid ${color}`, borderRadius:5, padding:"1px 7px", textTransform:"uppercase", letterSpacing:0.5 }}>{f.label}</span>
+                        </div>
+                        <textarea value={msg} onChange={e=>setFuMsg(p=>({ ...p, [key]:e.target.value }))} rows={2}
+                          style={{ width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13.5, fontFamily:"'DM Sans'", outline:"none", resize:"vertical", lineHeight:1.5 }} />
+                        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+                          <a href={`sms:?&body=${encodeURIComponent(msg)}`} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", textDecoration:"none", padding:"7px 14px" }}>Text</a>
+                          <button onClick={()=>navigator.clipboard?.writeText(msg)} style={{ ...S.btnSec, padding:"7px 12px" }}>Copy</button>
+                          <button onClick={()=>setFuDone(p=>({ ...p, [key]:true }))} style={{ ...S.btnSec, padding:"7px 12px" }}>Done</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
           {/* PROSPECTS */}
           {section==="prospects" && (
             <>
@@ -7984,6 +8097,9 @@ function CoachApp({ user, profile, onSignOut }) {
               )}
             </>
           )}
+
+          {/* CALENDAR */}
+          {section==="calendar" && <CalendarSection coachId={uid} roster={roster} />}
 
           {/* FINANCIALS */}
           {section==="financials" && <FinancialsSection coachId={uid} roster={roster} />}

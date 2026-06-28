@@ -269,6 +269,74 @@ export async function setClientFee(coachId, clientId, fee) {
     .eq("coach_id", coachId).eq("client_id", clientId);
 }
 
+// ── COACH CALENDAR ───────────────────────────────────────────────────────────────
+export async function listEvents(coachId, fromISO, toISO) {
+  if (!supabase || !coachId) return [];
+  const { data, error } = await supabase.from("coach_events")
+    .select("*").eq("coach_id", coachId).gte("starts_at", fromISO).lt("starts_at", toISO).order("starts_at");
+  if (error) { console.warn("listEvents:", error.message); return []; }
+  return data || [];
+}
+export async function addEvent(coachId, { client_id, starts_at, title, type, note } = {}) {
+  if (!supabase || !coachId) return { error: "No backend." };
+  const { error } = await supabase.from("coach_events").insert(
+    { coach_id: coachId, client_id: client_id || null, starts_at, title: title || null, type: type || "appointment", note: note || null });
+  return { error: error?.message || null };
+}
+export async function deleteEvent(id) {
+  if (!supabase || !id) return;
+  await supabase.from("coach_events").delete().eq("id", id);
+}
+
+// ── AUTOMATED FOLLOW-UPS (trigger detection) ─────────────────────────────────────
+// Evaluates each active client's last 7 days and emits follow-up triggers. This is
+// the in-house "brain"; the same output later drives GoHighLevel auto-send. Each
+// item carries a ready-to-send drafted message (template now; GHL/AI personalizes later).
+export async function detectFollowups(coachId) {
+  if (!supabase || !coachId) return [];
+  const { data: rels } = await supabase.from("relationships").select("client_id").eq("coach_id", coachId).eq("status", "active");
+  const ids = (rels || []).map(r => r.client_id);
+  if (!ids.length) return [];
+  const cut = new Date(); cut.setDate(cut.getDate() - 6);
+  const from = cut.toISOString().slice(0, 10);
+  const [profiles, workouts, foods, rewards] = await Promise.all([
+    supabase.from("profiles").select("id, first_name, extra").in("id", ids),
+    supabase.from("workout_logs").select("user_id, day").in("user_id", ids).gte("day", from),
+    supabase.from("food_log_days").select("user_id, day").in("user_id", ids).gte("day", from),
+    supabase.from("rewards").select("user_id, stats").in("user_id", ids),
+  ]);
+  const distinctDays = (rows, id) => new Set((rows || []).filter(r => r.user_id === id).map(r => r.day)).size;
+
+  const items = [];
+  for (const id of ids) {
+    const p = (profiles.data || []).find(x => x.id === id);
+    const name = (p?.extra?.name) || p?.first_name || "there";
+    const first = name.split(" ")[0];
+    const w = distinctDays(workouts.data, id);
+    const m = distinctDays(foods.data, id);
+    const streak = ((rewards.data || []).find(r => r.user_id === id)?.stats || {}).currentStreak || 0;
+
+    // Workout consistency
+    if (w >= 4 || streak >= 7) {
+      items.push({ clientId:id, name, key:"weekComplete", severity:"good", label:"Consistent week",
+        message:`Great week, ${first}! You crushed ${w} workout${w===1?"":"s"}. That consistency is exactly how results happen — keep the momentum going 💪` });
+    } else if (w === 0) {
+      items.push({ clientId:id, name, key:"workoutGap", severity:"alert", label:"No workouts this week",
+        message:`Hey ${first}, I haven't seen a workout logged this week. Everything okay? Let's get one in today — even a short session counts. I'm in your corner.` });
+    } else {
+      items.push({ clientId:id, name, key:"weekMissed", severity:"warn", label:`Only ${w}/4 workouts`,
+        message:`Hey ${first}, you got ${w} workout${w===1?"":"s"} in this week — let's finish strong. What's getting in the way? Tell me and we'll adjust.` });
+    }
+    // Nutrition logging
+    if (m < 5) {
+      items.push({ clientId:id, name, key:"mealGaps", severity:"warn", label:`Meals logged ${m}/7`,
+        message:`${first}, you logged meals ${m} of 7 days this week. Tracking is half the battle — let's tighten it up. Try logging today's meals as you eat them!` });
+    }
+  }
+  const rank = { alert:0, warn:1, good:2 };
+  return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
 // ── AI INTAKE EVALUATION (coach decision-support) ────────────────────────────────
 export async function fetchEvaluation(coachId, clientId) {
   if (!supabase || !coachId || !clientId) return null;
