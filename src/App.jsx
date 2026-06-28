@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
+import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -2694,7 +2695,7 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut }) {
+function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut, subscription }) {
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -2718,10 +2719,15 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
     const { error } = await sendPasswordReset(user.email);
     alert(error ? ("Couldn't send reset email: " + error) : `Password-reset link sent to ${user.email}.`);
   };
+  const openBillingPortal = async () => {
+    if (!billingEnabled) { alert("Coming soon."); return; }
+    try { await openPortal(); } catch (e) { alert("Couldn't open billing portal: " + e.message); }
+  };
+  const subStatus = subscription?.status;
   const items = [
     { label:"Change Password", icon:"🔒", note: user?.email ? "Email yourself a reset link" : "Coming soon — requires account backend", action: changePassword },
-    { label:"Update Payment", icon:"💳", note:"Coming soon — requires payment backend", action: ()=>alert("Coming soon.") },
-    { label:"Change Subscription", icon:"📋", note:"Coaching · App Only — coming soon", action: ()=>alert("Coming soon.") },
+    { label:"Update Payment", icon:"💳", note: billingEnabled ? "Manage your card in the billing portal" : "Coming soon — requires payment backend", action: openBillingPortal },
+    { label:"Change Subscription", icon:"📋", note: billingEnabled ? (subStatus ? `Status: ${subStatus} — manage plan` : "Manage your plan") : "Coaching · App Only — coming soon", action: openBillingPortal },
     { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
   ];
   return (
@@ -7535,6 +7541,49 @@ function AuthScreen({ onSkip }) {
   );
 }
 
+// ── SUBSCRIBE SCREEN ──────────────────────────────────────────────────────────
+// Shown when a signed-in user has no active subscription (and billing is on).
+// Hosted Stripe Checkout: the button redirects to Stripe, so on success we come
+// back to the app and the subscription gate opens. Never a dead end — sign out is
+// always available, and "Refresh" re-checks status in case the webhook lagged.
+function SubscribeScreen({ onSignOut, onRefresh }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const go = async () => {
+    setError(""); setBusy(true);
+    try { await startCheckout(); }          // redirects away on success
+    catch (e) { setError(e.message); setBusy(false); }
+  };
+  return (
+    <div style={S.center}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div className="fade-in" style={{ width:"100%", maxWidth:360, display:"flex", flexDirection:"column", alignItems:"center", gap:20 }}>
+        <Logo small />
+        <div style={S.stepLabel}>YOUR MEMBERSHIP</div>
+
+        <div style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:"20px 18px", textAlign:"center" }}>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:46, lineHeight:1, color:"#e8ff00" }}>$25<span style={{ fontSize:18, color:C.muted }}> / month</span></div>
+          <div style={{ fontSize:13.5, color:C.muted, marginTop:10, lineHeight:1.6 }}>
+            Your full coaching program — training, nutrition, the AI voice coach, and progress tracking, synced across your devices.
+          </div>
+        </div>
+
+        {error && <div style={{ color:C.red, fontSize:13, lineHeight:1.5 }}>{error}</div>}
+
+        <button onClick={go} disabled={busy} style={{ ...S.btnPri, width:"100%", borderColor:"#e8ff00", color:"#e8ff00", opacity: busy?0.6:1, cursor: busy?"default":"pointer" }}>
+          {busy ? "Opening secure checkout…" : "Subscribe"}
+        </button>
+
+        <button onClick={onRefresh} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer", textDecoration:"underline" }}>
+          Already subscribed? Refresh
+        </button>
+        <button onClick={onSignOut} style={{ ...S.btnSec, width:"100%" }}>Sign out</button>
+      </div>
+    </div>
+  );
+}
+
 export default function BodyMorph() {
   const [phase, setPhase]     = useState("init");   // init | wizard | loading | home | session | progress | nutrition
   const [profile, setProfile] = useState(null);
@@ -7567,6 +7616,7 @@ export default function BodyMorph() {
   const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
   const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
+  const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
 
   // Load all saved data from storage, then route to home (has profile) or wizard.
   // Extracted so it can run on first mount AND after a sign-in.
@@ -7604,10 +7654,11 @@ export default function BodyMorph() {
         const todayStr = new Date().toISOString().slice(0,10);
         const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
         const pull = (name, local) => uid ? pullMergeDomain(name, uid, local, fresh) : Promise.resolve(local);
-        const [mProfile, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
+        const [mProfile, mSub, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
                mGoals, mPlan, mCardioPlan, mStretchPlan, mRoutines, mVideo, mTodo, mVoice, mHyd, mDiet] =
           await Promise.all([
             uid ? pullMergeProfile(uid, sp) : Promise.resolve(sp),
+            uid ? fetchSubscription(uid) : Promise.resolve(null),
             pull("logs", sl), pull("rewards", sm), pull("body", sb), pull("cardio", sc),
             pull("steps", sst || []), pull("sleep", sslp || []), pull("supplements", ssup),
             pull("peptides", spep), pull("meals", smeals), pull("foodLog", sfoodlog),
@@ -7618,6 +7669,7 @@ export default function BodyMorph() {
             pull("dietPref", sdietpref),
           ]);
 
+        setSubscription(mSub || null);
         if (mLogs) setLogs(mLogs);
         if (mRewards) setRewards(mRewards);
         if (mBody) setBodyEntries(mBody);
@@ -7640,7 +7692,11 @@ export default function BodyMorph() {
         else if (mProfile && mProfile.gender === "Male") setCoachVoice(ELEVEN_VOICES.find(v => v.name.startsWith("Adam")) || DEFAULT_COACH_VOICE);
         else setCoachVoice(DEFAULT_COACH_VOICE); // Rachel — default for women
         setHydration(mHyd || localHyd);
-        if (mProfile && Object.keys(mProfile).length) {
+        // Paywall gate: signed-in users without an active subscription must
+        // subscribe before reaching the app. Offline/guest or billing-off = no gate.
+        const subscribed = !billingEnabled || !uid || isActive(mSub);
+        const hasProfile = mProfile && Object.keys(mProfile).length;
+        if (hasProfile) {
           // Migrate profile to fill in any fields added since the user signed up
           const migrated = migrateProfile(mProfile);
           // Save migrated profile back so future loads are clean (also persists a
@@ -7657,9 +7713,9 @@ export default function BodyMorph() {
             // Build a minimal safe program so the user lands on Home, not the wizard
             setProgram({ weeklySchedule:[], overview:"Tap TRAINING to rebuild your program.", stretching:"full", nutrition:macrosFor(migrated), progressMilestones:[] });
           }
-          setPhase("home");
+          setPhase(subscribed ? "home" : "subscribe");
         } else {
-          setPhase("wizard");
+          setPhase(subscribed ? "wizard" : "subscribe");
         }
       } catch(loadErr) {
         console.warn("Profile load error:", loadErr);
@@ -7699,6 +7755,43 @@ export default function BodyMorph() {
       if (userRef.current) pushProfileDebounced(userRef.current.id, profile);
     }
   }, [profile, loaded]);
+
+  // Re-check subscription status (e.g. after returning from Stripe Checkout, or the
+  // "Refresh" button on the paywall). The gate effect below reacts to the result.
+  const refreshSubscription = useCallback(async () => {
+    const uid = userRef.current?.id;
+    if (!uid) return null;
+    const sub = await fetchSubscription(uid);
+    setSubscription(sub);
+    return sub;
+  }, []);
+
+  // Open the paywall gate once a subscription becomes active (or billing is off).
+  useEffect(() => {
+    if (loaded && phase === "subscribe" && (!billingEnabled || isActive(subscription))) {
+      setPhase(profile ? "home" : "wizard");
+    }
+  }, [subscription, phase, loaded, profile]);
+
+  // Returning from Stripe Checkout: the webhook may lag a beat, so poll status a
+  // few times until it's active, then clean the ?checkout=success param from the URL.
+  useEffect(() => {
+    if (!loaded || !userRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") !== "success") return;
+    let tries = 0, stop = false;
+    const poll = async () => {
+      if (stop) return;
+      const sub = await refreshSubscription();
+      if (isActive(sub) || ++tries > 5) {
+        window.history.replaceState({}, "", window.location.pathname);
+        return;
+      }
+      setTimeout(poll, 1500);
+    };
+    poll();
+    return () => { stop = true; };
+  }, [loaded, refreshSubscription]);
 
   // Save locally + push to the cloud (debounced, no-op when signed out / no backend).
   const cloudPush = useCallback((name, val) => {
@@ -7824,7 +7917,7 @@ export default function BodyMorph() {
   // The onAuth listener flips us to the auth screen once the session clears.
   const handleSignOut = async () => {
     await signOut();
-    userRef.current = null; setUser(null);
+    userRef.current = null; setUser(null); setSubscription(null);
     setProfile(null); setProgram(null);
     setPhase("auth");
   };
@@ -8119,6 +8212,7 @@ export default function BodyMorph() {
   const screen = (() => {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
+  if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
@@ -8159,7 +8253,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
