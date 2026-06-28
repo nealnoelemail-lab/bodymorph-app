@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
-import { pullMergeDomain, pushDomainDebounced } from "./sync";
+import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -7580,11 +7580,8 @@ export default function BodyMorph() {
         const sc = await Store.get(CARDIO_KEY);
         const sst = await Store.get(STEPS_KEY);
         const sslp = await Store.get(SLEEP_KEY);
-        if (sslp) setSleepEntries(sslp);
         const smp = await Store.get(MEALPLAN_KEY);
-        if (smp) setMealPlan(smp);
         const svid = await Store.get(VIDEO_KEY);
-        if (svid) setVideoOverrides(svid);
         const ssup = await Store.get(SUPP_KEY);
         const spep = await Store.get(PEPTIDE_KEY);
         const smeals = await Store.get(MEALS_KEY);
@@ -7596,40 +7593,59 @@ export default function BodyMorph() {
         const sdietpref = await Store.get(DIETPREF_KEY);
         const shyd = await Store.get(HYDRATION_KEY);
         const stodo = await Store.get(TODO_CHECKED_KEY);
-        if (stodo && typeof stodo === "object") setTodoChecked(stodo);
         const svoice = await Store.get(COACH_VOICE_KEY);
-        if (svoice && svoice.id) setCoachVoice(svoice);
-        else if (sp && sp.gender === "Male") setCoachVoice(ELEVEN_VOICES.find(v => v.name.startsWith("Adam")) || DEFAULT_COACH_VOICE);
+
+        // Cloud sync: if signed in, pull each domain and smart-merge with local.
+        // `fresh` (no local profile) = a new device, so prefer the cloud copy.
+        // All pulls run in parallel (one round-trip of latency). The save-effects
+        // below then persist the merged results locally + push them back up.
+        const uid = userRef.current?.id;
+        const fresh = !sp;
+        const todayStr = new Date().toISOString().slice(0,10);
+        const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
+        const pull = (name, local) => uid ? pullMergeDomain(name, uid, local, fresh) : Promise.resolve(local);
+        const [mProfile, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
+               mGoals, mPlan, mCardioPlan, mStretchPlan, mRoutines, mVideo, mTodo, mVoice, mHyd, mDiet] =
+          await Promise.all([
+            uid ? pullMergeProfile(uid, sp) : Promise.resolve(sp),
+            pull("logs", sl), pull("rewards", sm), pull("body", sb), pull("cardio", sc),
+            pull("steps", sst || []), pull("sleep", sslp || []), pull("supplements", ssup),
+            pull("peptides", spep), pull("meals", smeals), pull("foodLog", sfoodlog),
+            pull("nutritionGoals", snutrgoals), pull("mealPlan", smp), pull("cardioPlan", splan),
+            pull("stretchPlan", sstretch), pull("stretchRoutines", sroutines),
+            pull("videoOverrides", svid), pull("todoChecked", stodo),
+            pull("coachVoice", (svoice && svoice.id) ? svoice : null), pull("hydration", localHyd),
+            pull("dietPref", sdietpref),
+          ]);
+
+        if (mLogs) setLogs(mLogs);
+        if (mRewards) setRewards(mRewards);
+        if (mBody) setBodyEntries(mBody);
+        if (mCardio) setCardioSessions(mCardio);
+        if (mSteps) setStepEntries(mSteps);
+        if (mSleep) setSleepEntries(mSleep);
+        if (mSupp) setSupplements(mSupp);
+        if (mPep) setPeptides(mPep);
+        if (mMeals) setMeals(mMeals);
+        if (mFood) setFoodLog(mFood);
+        if (mGoals) setNutritionGoals(mGoals);
+        if (mPlan) setMealPlan(mPlan);
+        if (mCardioPlan) setCardioPlan(mCardioPlan);
+        if (mStretchPlan) setStretchPlan(mStretchPlan);
+        if (mRoutines) setStretchRoutines(mRoutines);
+        if (mVideo) setVideoOverrides(mVideo);
+        if (mTodo && typeof mTodo === "object") setTodoChecked(mTodo);
+        if (mDiet) setDietPref(mDiet);
+        if (mVoice && mVoice.id) setCoachVoice(mVoice);
+        else if (mProfile && mProfile.gender === "Male") setCoachVoice(ELEVEN_VOICES.find(v => v.name.startsWith("Adam")) || DEFAULT_COACH_VOICE);
         else setCoachVoice(DEFAULT_COACH_VOICE); // Rachel — default for women
-        if (sl) setLogs(sl);
-        if (sm) setRewards(sm);
-        if (sb) setBodyEntries(sb);
-        if (sc) setCardioSessions(sc);
-        // Steps: if signed in, pull the cloud copy and smart-merge with local.
-        // The save-effect below then persists the merged result locally + pushes it up.
-        const mergedSteps = userRef.current
-          ? await pullMergeDomain("steps", userRef.current.id, sst || [])
-          : sst;
-        if (mergedSteps) setStepEntries(mergedSteps);
-        if (ssup) setSupplements(ssup);
-        if (spep) setPeptides(spep);
-        if (smeals) setMeals(smeals);
-        if (splan) setCardioPlan(splan);
-        if (sstretch) setStretchPlan(sstretch);
-        if (sroutines) setStretchRoutines(sroutines);
-        if (sfoodlog) setFoodLog(sfoodlog);
-        if (snutrgoals) setNutritionGoals(snutrgoals);
-        if (sdietpref) setDietPref(sdietpref);
-        if (shyd) {
-          const todayStr = new Date().toISOString().slice(0,10);
-          // Daily reset: if the saved record is from an earlier day, zero the cups (keep the goal).
-          setHydration(shyd.date === todayStr ? shyd : { date: todayStr, cups: 0, goal: shyd.goal || 8 });
-        }
-        if (sp) {
+        setHydration(mHyd || localHyd);
+        if (mProfile && Object.keys(mProfile).length) {
           // Migrate profile to fill in any fields added since the user signed up
-          const migrated = migrateProfile(sp);
-          // Save migrated profile back so future loads are clean
-          if (JSON.stringify(migrated) !== JSON.stringify(sp)) {
+          const migrated = migrateProfile(mProfile);
+          // Save migrated profile back so future loads are clean (also persists a
+          // cloud-pulled profile to this device).
+          if (JSON.stringify(migrated) !== JSON.stringify(mProfile)) {
             await Store.set(PROFILE_KEY, migrated);
           }
           setProfile(migrated);
@@ -7680,29 +7696,35 @@ export default function BodyMorph() {
   useEffect(() => {
     if (loaded && profile) {
       try { setProgram(buildProgram(profile)); } catch(e) { console.warn("program rebuild:", e); }
+      if (userRef.current) pushProfileDebounced(userRef.current.id, profile);
     }
   }, [profile, loaded]);
 
-  useEffect(() => { if (loaded) Store.set(LOG_KEY, logs); }, [logs, loaded]);
-  useEffect(() => { if (loaded) Store.set(MEDAL_KEY, rewards); }, [rewards, loaded]);
-  useEffect(() => { if (loaded) Store.set(BODY_KEY, bodyEntries); }, [bodyEntries, loaded]);
-  useEffect(() => { if (loaded) Store.set(CARDIO_KEY, cardioSessions); }, [cardioSessions, loaded]);
-  useEffect(() => { if (loaded) { Store.set(STEPS_KEY, stepEntries); if (userRef.current) pushDomainDebounced("steps", userRef.current.id, stepEntries); } }, [stepEntries, loaded]);
-  useEffect(() => { if (loaded) Store.set(SLEEP_KEY, sleepEntries); }, [sleepEntries, loaded]);
-  useEffect(() => { if (loaded) Store.set(MEALPLAN_KEY, mealPlan); }, [mealPlan, loaded]);
-  useEffect(() => { if (loaded) Store.set(SUPP_KEY, supplements); }, [supplements, loaded]);
-  useEffect(() => { if (loaded) Store.set(PEPTIDE_KEY, peptides); }, [peptides, loaded]);
-  useEffect(() => { if (loaded) Store.set(MEALS_KEY, meals); }, [meals, loaded]);
-  useEffect(() => { if (loaded) Store.set(FOODLOG_KEY, foodLog); }, [foodLog, loaded]);
-  useEffect(() => { if (loaded) Store.set("bodymorph_nutrgoals_v2", nutritionGoals); }, [nutritionGoals, loaded]);
-  useEffect(() => { if (loaded) Store.set(DIETPREF_KEY, dietPref); }, [dietPref, loaded]);
-  useEffect(() => { if (loaded) Store.set(CARDIOPLAN_KEY, cardioPlan); }, [cardioPlan, loaded]);
-  useEffect(() => { if (loaded) Store.set(STRETCHPLAN_KEY, stretchPlan); }, [stretchPlan, loaded]);
-  useEffect(() => { if (loaded) Store.set(ROUTINES_KEY, stretchRoutines); }, [stretchRoutines, loaded]);
-  useEffect(() => { if (loaded) Store.set(VIDEO_KEY, videoOverrides); }, [videoOverrides, loaded]);
-  useEffect(() => { if (loaded) Store.set(HYDRATION_KEY, hydration); }, [hydration, loaded]);
-  useEffect(() => { if (loaded) Store.set(TODO_CHECKED_KEY, todoChecked); }, [todoChecked, loaded]);
-  useEffect(() => { if (loaded) Store.set(COACH_VOICE_KEY, coachVoice); }, [coachVoice, loaded]);
+  // Save locally + push to the cloud (debounced, no-op when signed out / no backend).
+  const cloudPush = useCallback((name, val) => {
+    if (userRef.current) pushDomainDebounced(name, userRef.current.id, val);
+  }, []);
+
+  useEffect(() => { if (loaded) { Store.set(LOG_KEY, logs); cloudPush("logs", logs); } }, [logs, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(MEDAL_KEY, rewards); cloudPush("rewards", rewards); } }, [rewards, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(BODY_KEY, bodyEntries); cloudPush("body", bodyEntries); } }, [bodyEntries, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(CARDIO_KEY, cardioSessions); cloudPush("cardio", cardioSessions); } }, [cardioSessions, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(STEPS_KEY, stepEntries); cloudPush("steps", stepEntries); } }, [stepEntries, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(SLEEP_KEY, sleepEntries); cloudPush("sleep", sleepEntries); } }, [sleepEntries, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(MEALPLAN_KEY, mealPlan); cloudPush("mealPlan", mealPlan); } }, [mealPlan, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(SUPP_KEY, supplements); cloudPush("supplements", supplements); } }, [supplements, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(PEPTIDE_KEY, peptides); cloudPush("peptides", peptides); } }, [peptides, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(MEALS_KEY, meals); cloudPush("meals", meals); } }, [meals, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(FOODLOG_KEY, foodLog); cloudPush("foodLog", foodLog); } }, [foodLog, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set("bodymorph_nutrgoals_v2", nutritionGoals); cloudPush("nutritionGoals", nutritionGoals); } }, [nutritionGoals, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(DIETPREF_KEY, dietPref); cloudPush("dietPref", dietPref); } }, [dietPref, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(CARDIOPLAN_KEY, cardioPlan); cloudPush("cardioPlan", cardioPlan); } }, [cardioPlan, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(STRETCHPLAN_KEY, stretchPlan); cloudPush("stretchPlan", stretchPlan); } }, [stretchPlan, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(ROUTINES_KEY, stretchRoutines); cloudPush("stretchRoutines", stretchRoutines); } }, [stretchRoutines, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(VIDEO_KEY, videoOverrides); cloudPush("videoOverrides", videoOverrides); } }, [videoOverrides, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(HYDRATION_KEY, hydration); cloudPush("hydration", hydration); } }, [hydration, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(TODO_CHECKED_KEY, todoChecked); cloudPush("todoChecked", todoChecked); } }, [todoChecked, loaded, cloudPush]);
+  useEffect(() => { if (loaded) { Store.set(COACH_VOICE_KEY, coachVoice); cloudPush("coachVoice", coachVoice); } }, [coachVoice, loaded, cloudPush]);
 
   // Quiet startup check so it's obvious whether the ElevenLabs voice is wired up.
   // Console only — no UI. Falls back to the phone voice if the key is missing/invalid.
