@@ -366,6 +366,43 @@ function calorieTargets(profile, deficitId) {
 // commit to the true finish line up front — not an arbitrary 4-week block.
 const MS_PER_WEEK = 7 * 24 * 3600 * 1000;
 
+// Daily step target that scales with the goal and chosen pace — walking (NEAT) is
+// a deliberate fat-loss lever, not a flat number for everyone. Fat-loss goals get
+// a higher target that rises with the pace; muscle-gain keeps a lighter baseline.
+function stepTargetFor(profile) {
+  const goal = (profile && profile.goal) || "";
+  const def = (profile && profile.deficit) || "moderate";
+  let base;
+  if (goal.includes("Cut")) base = 10000;
+  else if (goal.includes("Reshape")) base = 9000;
+  else if (goal.includes("Bulk")) base = 7000;
+  else base = 8000;                                   // athletic / general / maintain
+  if (goal.includes("Cut") || goal.includes("Reshape")) {
+    if (def === "aggressive") base += 2000;
+    else if (def === "mild") base -= 1000;
+  }
+  return Math.round(base / 500) * 500;
+}
+
+// Net calories burned per step, scaled by bodyweight (heavier = more per step).
+// Conservative net-of-resting estimate (~0.036 kcal/step at 200 lb).
+function kcalPerStep(weightLb) {
+  return (parseFloat(weightLb) || 170) * 0.00018;
+}
+
+// Rolling average of daily steps over the last `days` LOGGED days. Returns null
+// until there's enough signal (≥3 logged days) so projections don't swing wildly.
+function avgDailySteps(stepEntries, days = 14) {
+  if (!Array.isArray(stepEntries) || !stepEntries.length) return null;
+  const cut = new Date(); cut.setDate(cut.getDate() - (days - 1));
+  const cutStr = cut.toISOString().slice(0, 10);
+  const recent = stepEntries
+    .filter(e => e && e.date >= cutStr && (parseInt(e.steps) || 0) > 0)
+    .map(e => parseInt(e.steps) || 0);
+  if (recent.length < 3) return null;
+  return Math.round(recent.reduce((s, n) => s + n, 0) / recent.length);
+}
+
 // Effective target weight from whichever goals are set. If a goal body-fat % is
 // given (and current BF is known), derive the weight at that BF assuming lean mass
 // is preserved; otherwise fall back to the explicit goal weight.
@@ -396,7 +433,10 @@ function weeksToHuman(weeks) {
 
 // Realistic timeline for one deficit option, or null if no weight/BF goal is set
 // (e.g. "maintain" / general fitness). `now` (ms) is injectable for testing.
-function goalTimeline(profile, deficitId, now) {
+// `avgSteps` (optional): the client's actual rolling daily steps — walking above
+// (or below) their step target shifts real NEAT burn, tightening or loosening the
+// timeline vs. the at-signup baseline (which assumes they hit the target).
+function goalTimeline(profile, deficitId, now, avgSteps) {
   const w = parseFloat(profile.weight);
   const target = effectiveTargetWeight(profile);
   if (!w || !target) return null;
@@ -420,14 +460,24 @@ function goalTimeline(profile, deficitId, now) {
   const lbsToLose = Math.max(w - target, 0);
   if (lbsToLose < 1) return null;
   const t = calorieTargets(profile, deficitId);
-  const dailyDeficit = Math.max(t.tdee - t.target, 0);
+  let dailyDeficit = Math.max(t.tdee - t.target, 0);
+  // NEAT adjustment: steps above/below the plan's target shift real daily burn.
+  // Relative to the target (not absolute) so we don't double-count the walking the
+  // signup activity level already assumes. No data → no shift (baseline timeline).
+  let neatKcal = 0;
+  if (avgSteps != null && isFinite(avgSteps)) {
+    neatKcal = (avgSteps - stepTargetFor(profile)) * kcalPerStep(w);
+    dailyDeficit = Math.max(dailyDeficit + neatKcal, 0);
+  }
   let weeklyRate = (dailyDeficit * 7) / 3500;
   weeklyRate = Math.min(weeklyRate, w * 0.01);   // ~1% of bodyweight/week ceiling
   if (weeklyRate < 0.1) weeklyRate = 0.1;
   const weeks = Math.ceil(lbsToLose / weeklyRate);
   const eta = new Date(today.getTime() + weeks * MS_PER_WEEK);
   return { mode:"loss", lbs: Math.round(lbsToLose), weeklyRate:+weeklyRate.toFixed(2),
-           weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks) };
+           weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks),
+           stepTarget: stepTargetFor(profile), avgSteps: (avgSteps != null && isFinite(avgSteps)) ? avgSteps : null,
+           neatKcal: Math.round(neatKcal) };
 }
 
 // All three deficit options with their timelines. Gain goals collapse to the same
@@ -2507,6 +2557,11 @@ function FatLossResults({ profile, onContinue }) {
             <div style={{ color:"#9898b8", fontSize:12, marginTop:6 }}>
               about {tl.weeks} weeks of consistency at ~{tl.weeklyRate} lb {isGain ? "of lean gain" : "lost"} per week
             </div>
+            {!isGain && (
+              <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #2a2a3d", color:"#3ddc84", fontSize:12.5 }}>
+                🚶 Daily steps target <b>{stepTargetFor(profile).toLocaleString()}</b> — walking is part of the plan. Beat it consistently and you'll reach your goal sooner.
+              </div>
+            )}
           </div>
         )}
 
@@ -2742,13 +2797,20 @@ function EditTime({ profile, onSave, onBack }) {
   );
 }
 
-function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, onEditDays, onEditTime, onChangeProgram, onBack, aiGenerating, onRegenerateAI }) {
+function TrainingWeek({ profile, program, cardioPlan, stretchPlan, stepEntries, onPickDay, onEditDays, onEditTime, onChangeProgram, onBack, aiGenerating, onRegenerateAI }) {
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
   const todayIdx = sched.findIndex(d => d.day === todayName);
   const trainAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const aiEligible = isAIProgramEligible(profile);
   const aiOn = !!(program && program.aiGenerated);
+  // Live timeline: factor the client's actual walking into the projection so it
+  // tightens (or slips) vs. the at-signup baseline as they log steps.
+  const liveSteps = avgDailySteps(stepEntries);
+  const baseTl = program.timeline || goalTimeline(profile, profile.deficit || "moderate");
+  const liveTl = baseTl ? goalTimeline(profile, profile.deficit || "moderate", undefined, liveSteps) : null;
+  const stepTarget = stepTargetFor(profile);
+  const aheadDays = (liveTl && baseTl) ? (baseTl.weeks - liveTl.weeks) * 7 : 0;
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
@@ -2780,16 +2842,28 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, onPickDay, on
         </div>
       )}
 
-      {program.timeline && (
-        <div style={{ margin:"2px 5% 8px", background:"#16161f", border:"1px solid #2a2a3d", borderRadius:12, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
-          <div style={{ minWidth:0 }}>
-            <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1 }}>YOUR COMMITMENT</div>
-            <div style={{ color:"#f0f0f8", fontSize:14, marginTop:2 }}>
-              <b style={{ color:trainAccent }}>{program.timeline.human}</b> to your goal &middot; target {program.timeline.etaDate}
+      {liveTl && (
+        <div style={{ margin:"2px 5% 8px", background:"#16161f", border:"1px solid #2a2a3d", borderRadius:12, padding:"12px 14px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
+            <div style={{ minWidth:0 }}>
+              <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1 }}>YOUR COMMITMENT</div>
+              <div style={{ color:"#f0f0f8", fontSize:14, marginTop:2 }}>
+                <b style={{ color:trainAccent }}>{liveTl.human}</b> to your goal &middot; target {liveTl.etaDate}
+              </div>
+            </div>
+            <div style={{ color:"#9898b8", fontSize:11.5, textAlign:"right" }}>
+              ~{liveTl.weeklyRate} lb/wk &middot; {liveTl.weeks} wks
             </div>
           </div>
-          <div style={{ color:"#9898b8", fontSize:11.5, textAlign:"right" }}>
-            ~{program.timeline.weeklyRate} lb/wk &middot; {program.totalWeeks} wks
+          <div style={{ marginTop:8, paddingTop:8, borderTop:"1px solid #2a2a3d", color:"#9898b8", fontSize:11.5, lineHeight:1.5 }}>
+            <span style={{ color:"#3ddc84" }}>🚶 Daily steps target {stepTarget.toLocaleString()}</span>
+            {liveSteps == null
+              ? " — log your steps; walking more shortens this timeline."
+              : aheadDays >= 4
+                ? ` — averaging ${liveSteps.toLocaleString()}/day, that's ~${Math.round(aheadDays)} days ahead of pace. Keep it up.`
+                : aheadDays <= -4
+                  ? ` — averaging ${liveSteps.toLocaleString()}/day, below target; more walking will pull your date in.`
+                  : ` — averaging ${liveSteps.toLocaleString()}/day, right on pace.`}
           </div>
         </div>
       )}
@@ -3198,7 +3272,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
   const todayStepsEntry = (stepEntries||[]).find(e=>e.date===today);
   const todaySteps = todayStepsEntry ? parseInt(todayStepsEntry.steps)||0 : 0;
   const [stepInput, setStepInput] = useState(String(todaySteps||""));
-  const STEP_GOAL = 12000;
+  const STEP_GOAL = stepTargetFor(profile);   // goal- & pace-aware daily step target
   const stepPct = Math.min(100, Math.round((todaySteps/STEP_GOAL)*100));
   const saveSteps = () => {
     const val = parseInt(stepInput)||0;
@@ -8692,7 +8766,8 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
       {(() => {
         const cp = detail.profile || {};
         if (!cp || !Object.keys(cp).length) return null;
-        const ctl = goalTimeline(cp, cp.deficit || "moderate");
+        const cAvgSteps = avgDailySteps(detail.stepEntries);
+        const ctl = goalTimeline(cp, cp.deficit || "moderate", undefined, cAvgSteps);
         const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "—";
         const prog = (cp.aiProgram && cp.aiProgramSig === programSignature(cp)) ? cp.aiProgram : null;
         const Row = ({ label, value }) => (
@@ -8713,8 +8788,9 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
               <Row label="Body fat" value={`${cp.bodyFat ? cp.bodyFat+"%" : "—"} → ${cp.goalBodyFat ? cp.goalBodyFat+"%" : "—"}`} />
             )}
             {ctl && <Row label="Chosen pace" value={cap(cp.deficit || "moderate")} />}
+            <Row label="Daily steps target" value={`${stepTargetFor(cp).toLocaleString()}${cAvgSteps != null ? ` · avg ${cAvgSteps.toLocaleString()}` : ""}`} />
             {ctl
-              ? <Row label="Committed timeline" value={`${ctl.human} · by ${ctl.etaDate}`} />
+              ? <Row label={cAvgSteps != null ? "Projected timeline" : "Committed timeline"} value={`${ctl.human} · by ${ctl.etaDate}`} />
               : <Row label="Timeline" value="General fitness — no target date" />}
             {prog?.overview && (
               <div style={{ fontSize:12.5, color:C.muted, lineHeight:1.55, marginTop:10 }}>
@@ -9482,7 +9558,7 @@ export default function BodyMorph() {
       carbs: { total: Math.round(cTotal), goal: parseFloat(cMacros.carbs)||0 },
       fats: { total: Math.round(fTotal), goal: parseFloat(cMacros.fats)||0 },
       steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
-      stepGoal: 12000,
+      stepGoal: stepTargetFor(profile),
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
@@ -9541,7 +9617,7 @@ export default function BodyMorph() {
 
   if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} /></>);
 
-  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
+  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
 
   if (phase === "editdays") return (<><Toast /><EditDays profile={profile} onSave={saveTrainingDays} onBack={()=>setPhase("home")} /></>);
   if (phase === "edittime") return (<><Toast /><EditTime profile={profile} onSave={saveSessionTime} onBack={()=>setPhase("home")} /></>);
