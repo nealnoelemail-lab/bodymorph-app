@@ -94,6 +94,7 @@ export async function fetchClientDetail(clientId) {
   const foodDays = (food.data || []).map(r => ({ date: r.day, cal: r.cal, protein: r.protein, carbs: r.carbs, fats: r.fats }));
   return {
     name: nameOf(profile.data),
+    profile: (profile.data && profile.data.extra) || {},  // full signup profile: goal, targets, pace, program, timeline
     bodyEntries, stepEntries, sleepEntries, workoutDays, foodDays,
     rewards: rewards.data ? { coins: rewards.data.coins, stats: rewards.data.stats || {} } : null,
     lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0], workoutDays.slice(-1)[0]),

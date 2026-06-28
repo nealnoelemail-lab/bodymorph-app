@@ -8687,6 +8687,44 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
       <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
 
+      {/* What the client selected at signup — goal, targets, chosen pace + the
+          realistic timeline they committed to, plus their generated program. */}
+      {(() => {
+        const cp = detail.profile || {};
+        if (!cp || !Object.keys(cp).length) return null;
+        const ctl = goalTimeline(cp, cp.deficit || "moderate");
+        const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "—";
+        const prog = (cp.aiProgram && cp.aiProgramSig === programSignature(cp)) ? cp.aiProgram : null;
+        const Row = ({ label, value }) => (
+          <div style={{ display:"flex", justifyContent:"space-between", gap:12, padding:"5px 0", borderBottom:`1px solid ${C.border}` }}>
+            <span style={{ fontSize:12.5, color:C.muted }}>{label}</span>
+            <span style={{ fontSize:12.5, color:C.text, textAlign:"right", fontWeight:600 }}>{value}</span>
+          </div>
+        );
+        return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:14 }}>
+            <div style={{ ...S.inputLabel, marginBottom:8 }}>Client's plan (from signup)</div>
+            <Row label="Goal" value={(cp.goal || "—").split("(")[0].trim()} />
+            <Row label="Focus" value={(cp.focus || "—").split("(")[0].trim()} />
+            <Row label="Experience" value={cp.fitnessLevel || "—"} />
+            <Row label="Schedule" value={`${(cp.trainingDays||[]).length || "—"} days/wk · ${cp.sessionTime || "—"} min`} />
+            <Row label="Weight" value={`${cp.weight || "—"} → ${cp.goalWeight || "—"} lbs`} />
+            {(cp.bodyFat || cp.goalBodyFat) && (
+              <Row label="Body fat" value={`${cp.bodyFat ? cp.bodyFat+"%" : "—"} → ${cp.goalBodyFat ? cp.goalBodyFat+"%" : "—"}`} />
+            )}
+            {ctl && <Row label="Chosen pace" value={cap(cp.deficit || "moderate")} />}
+            {ctl
+              ? <Row label="Committed timeline" value={`${ctl.human} · by ${ctl.etaDate}`} />
+              : <Row label="Timeline" value="General fitness — no target date" />}
+            {prog?.overview && (
+              <div style={{ fontSize:12.5, color:C.muted, lineHeight:1.55, marginTop:10 }}>
+                <span style={{ color:C.accent || "#e8ff00", fontWeight:700 }}>✦ AI program</span> — {prog.overview}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Per-client consulting fee (overrides the coach's base fee) */}
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, flexWrap:"wrap" }}>
         <span style={{ fontSize:13, color:C.muted }}>Consulting fee $</span>
