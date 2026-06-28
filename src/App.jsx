@@ -2,7 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary } from "./coach";
+import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
+  listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
+  createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
+  computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 
 const C = {
@@ -1986,10 +1989,12 @@ function GLBInfo({ onClose }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Wizard({ onComplete, onCoachCode }) {
+function Wizard({ onComplete, onCoachCode, seed }) {
   const [step, setStep] = useState(0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
+  // Pre-fill the client's name from a coach invite, when present.
+  const seedName = (seed && seed.name) ? String(seed.name).trim() : "";
   const [coachOpen, setCoachOpen] = useState(false);
   const [coachCode, setCoachCode] = useState("");
   const [coachMsg, setCoachMsg] = useState("");
@@ -2001,7 +2006,7 @@ function Wizard({ onComplete, onCoachCode }) {
     if (!res?.ok) setCoachMsg(res?.error || "Invalid code");
     // On success, the app routes to the dashboard (this screen unmounts).
   };
-  const [p, setP] = useState({ firstName:"", lastName:"", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
+  const [p, setP] = useState({ firstName: seedName.split(" ")[0] || "", lastName: seedName.split(" ").slice(1).join(" ") || "", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
 
@@ -7644,88 +7649,407 @@ function SubscribeScreen({ onSignOut, onRefresh }) {
   );
 }
 
-// ── COACH DASHBOARD ───────────────────────────────────────────────────────────
-// The coach-side keystone: roster of clients + a shareable client-invite code.
-// Tapping a client opens a read-only per-client view. Client data is readable
-// thanks to the is_coach_of() RLS policies.
-function CoachDashboard({ user, onSignOut }) {
-  const [invite, setInvite] = useState(null);
+// ── COACH BUSINESS DASHBOARD (desktop) ────────────────────────────────────────
+const COACH_CSS = `
+  .coach-shell{ display:flex; align-items:flex-start; min-height:100vh; }
+  .coach-side{ width:212px; flex-shrink:0; border-right:1px solid #2a2a3d; min-height:100vh; padding:18px 12px; position:sticky; top:0; }
+  .coach-main{ flex:1; min-width:0; padding:24px 30px 70px; max-width:1080px; }
+  .coach-nav{ display:flex; flex-direction:column; gap:4px; margin-top:16px; }
+  .coach-navitem{ width:100%; text-align:left; background:transparent; border:none; color:#c8c8e0; padding:10px 12px; border-radius:8px; cursor:pointer; font-size:14.5px; font-family:'DM Sans'; }
+  .coach-navitem.on{ background:rgba(232,255,0,0.10); color:#e8ff00; font-weight:600; }
+  .kpi-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .ctable{ width:100%; border-collapse:collapse; }
+  .ctable th{ text-align:left; font-size:11px; letter-spacing:1px; color:#9898b8; text-transform:uppercase; padding:8px 10px; border-bottom:1px solid #2a2a3d; }
+  .ctable td{ padding:11px 10px; border-bottom:1px solid #1f1f2e; font-size:14px; color:#f0f0f8; }
+  .ctable tr.clk{ cursor:pointer; }
+  .ctable tr.clk:hover td{ background:#16161f; }
+  @media(max-width:760px){ .coach-shell{ flex-direction:column; } .coach-side{ width:100%; min-height:0; position:static; border-right:none; border-bottom:1px solid #2a2a3d; } .coach-nav{ flex-direction:row; flex-wrap:wrap; } .coach-main{ padding:18px 16px 50px; } }
+`;
+const KPI = ({ label, value, sub }) => (
+  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 16px" }}>
+    <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:26, color:"#e8ff00" }}>{value}</div>
+    <div style={{ fontSize:12, color:C.muted, marginTop:3, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+    {sub && <div style={{ fontSize:11.5, color:"#74748a", marginTop:4 }}>{sub}</div>}
+  </div>
+);
+const fld = { width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" };
+const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/86400000) : null;
+
+function CoachApp({ user, profile, onSignOut }) {
+  const uid = user?.id;
+  const coachName = (profile && profile.name) || (user?.email ? user.email.split("@")[0] : "Coach");
+  const [section, setSection] = useState("overview");
   const [roster, setRoster] = useState([]);
+  const [prospects, setProspects] = useState([]);
+  const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState("");
+  // Invite modal
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [iForm, setIForm] = useState({ name:"", phone:"", email:"", goal:"", focus:"" });
+  const [iResult, setIResult] = useState(null);     // { code, link }
+  const [iBusy, setIBusy] = useState(false);
+  const [iProspectId, setIProspectId] = useState(null);
+  // Prospect add form
+  const [pForm, setPForm] = useState({ name:"", phone:"", email:"", source:"", notes:"" });
+
+  const load = useCallback(async () => {
+    if (!uid) return;
+    const [ros, pros, inv] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid)]);
+    setRoster(ros); setProspects(pros); setInvites(inv); setLoading(false);
+  }, [uid]);
+  useEffect(() => { load(); }, [load]);
+
+  const openClient = async (id) => { setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
+  const go = (s) => { setSelected(null); setSection(s); };
+
+  const openInvite = (prefill, prospectId) => {
+    setIForm({ name:prefill?.name||"", phone:prefill?.phone||"", email:prefill?.email||"", goal:"", focus:"" });
+    setIResult(null); setIProspectId(prospectId||null); setInviteOpen(true);
+  };
+  const createInvite = async () => {
+    setIBusy(true);
+    const r = await createClientInvite(uid, { name:iForm.name, phone:iForm.phone, email:iForm.email, intake:{ name:iForm.name, goal:iForm.goal, focus:iForm.focus } });
+    setIBusy(false);
+    if (r.error) { alert("Couldn't create invite: " + r.error); return; }
+    setIResult(r);
+    if (iProspectId) { await setProspectStage(iProspectId, "invited"); }
+    load();
+  };
+  const inviteMsg = (link) => `${iForm.name ? iForm.name + ", " : ""}your coach set you up on BodyMorph. Tap to get started: ${link}`;
+
+  const addProspect = async () => {
+    if (!pForm.name && !pForm.email && !pForm.phone) return;
+    await upsertProspect(uid, pForm);
+    setPForm({ name:"", phone:"", email:"", source:"", notes:"" });
+    setProspects(await listProspects(uid));
+  };
+  const moveProspect = async (id, stage) => { await setProspectStage(id, stage); setProspects(await listProspects(uid)); };
+  const removeProspect = async (id) => { await deleteProspect(id); setProspects(await listProspects(uid)); };
+
+  const pendingInvites = invites.filter(i => i.status === "pending");
+  const fin = computeFinancials(roster);
+  const filteredRoster = roster.filter(c => !search || (c.name||"").toLowerCase().includes(search.toLowerCase()));
+  const attention = roster.filter(c => { const d = daysSince(c.lastActive); return d == null || d >= 7; });
+
+  const NAV = [["overview","Overview"],["clients","Clients"],["prospects","Prospects"],["financials","Financials"]];
+
+  return (
+    <div style={{ position:"relative" }}>
+      <style>{GLOBAL_CSS + COACH_CSS}</style>
+      <div className="coach-shell">
+        <aside className="coach-side">
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1, padding:"2px 4px" }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
+          <div className="coach-nav">
+            {NAV.map(([k,label]) => (
+              <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
+            ))}
+            <button className="coach-navitem" style={{ marginTop:8, background:"#e8ff00", color:"#000", fontWeight:700, textAlign:"center" }} onClick={()=>openInvite()}>+ Invite client</button>
+          </div>
+          <div style={{ position:"absolute", bottom:16, left:12, right:12 }}>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Coach · {coachName}</div>
+            <button onClick={onSignOut} style={{ ...S.btnSec, width:"100%", padding:"8px" }}>Sign out</button>
+          </div>
+        </aside>
+
+        <main className="coach-main">
+          {/* OVERVIEW */}
+          {section==="overview" && (
+            <>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>OVERVIEW</div>
+              <div className="kpi-grid">
+                <KPI label="Active clients" value={loading?"—":roster.length} />
+                <KPI label="Prospects" value={loading?"—":prospects.length} />
+                <KPI label="Pending invites" value={loading?"—":pendingInvites.length} />
+                <KPI label="MRR estimate" value={`$${fin.mrrEstimate}`} sub={`${fin.activeClients} × $${fin.monthlyPrice}/mo`} />
+              </div>
+              <div style={{ ...S.sectionTitle, marginTop:24 }}>NEEDS ATTENTION</div>
+              {attention.length === 0 ? (
+                <div style={{ color:C.muted, fontSize:13 }}>Everyone's been active in the last week. 💪</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {attention.map(c => (
+                    <button key={c.id} onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 14px", cursor:"pointer", textAlign:"left" }}>
+                      <span style={{ color:C.text, fontWeight:600, fontSize:14 }}>{c.name}</span>
+                      <span style={{ color:C.red, fontSize:12.5 }}>{c.lastActive ? `${daysSince(c.lastActive)}d inactive` : "never active"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* CLIENTS */}
+          {section==="clients" && !selected && (
+            <>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:12, flexWrap:"wrap" }}>
+                <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>CLIENTS ({roster.length})</div>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients…" style={{ ...fld, width:220 }} />
+              </div>
+              {loading ? <div style={{ color:C.muted, fontSize:13 }}>Loading…</div>
+              : roster.length === 0 ? <div style={{ color:C.muted, fontSize:13, lineHeight:1.6 }}>No clients yet. Use <b>+ Invite client</b> to onboard your first one.</div>
+              : (
+                <table className="ctable">
+                  <thead><tr><th>Name</th><th>Last active</th><th>Weight</th><th>Trend</th></tr></thead>
+                  <tbody>
+                    {filteredRoster.map(c => (
+                      <tr key={c.id} className="clk" onClick={()=>openClient(c.id)}>
+                        <td style={{ fontWeight:600 }}>{c.name}</td>
+                        <td style={{ color:C.muted }}>{c.lastActive || "—"}</td>
+                        <td>{c.weight != null ? `${c.weight} lb` : "—"}</td>
+                        <td style={{ color: c.weightTrend==null?C.muted : c.weightTrend<0?C.green:C.blue }}>{c.weightTrend==null?"—":`${c.weightTrend<0?"▼":"▲"} ${Math.abs(c.weightTrend)} lb`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+          {section==="clients" && selected && (
+            <CoachClientView coachId={uid} clientId={selected} detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />
+          )}
+
+          {/* PROSPECTS */}
+          {section==="prospects" && (
+            <>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>PROSPECTS ({prospects.length})</div>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:18 }}>
+                <div style={{ ...S.inputLabel, marginBottom:8 }}>Add a prospect</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8 }}>
+                  <input value={pForm.name} onChange={e=>setPForm({...pForm,name:e.target.value})} placeholder="Name" style={fld} />
+                  <input value={pForm.phone} onChange={e=>setPForm({...pForm,phone:e.target.value})} placeholder="Phone" style={fld} />
+                  <input value={pForm.email} onChange={e=>setPForm({...pForm,email:e.target.value})} placeholder="Email" style={fld} />
+                  <input value={pForm.source} onChange={e=>setPForm({...pForm,source:e.target.value})} placeholder="Source (referral, IG…)" style={fld} />
+                </div>
+                <input value={pForm.notes} onChange={e=>setPForm({...pForm,notes:e.target.value})} placeholder="Notes" style={{ ...fld, marginTop:8 }} />
+                <button onClick={addProspect} style={{ ...S.btnPri, marginTop:10, borderColor:"#e8ff00", color:"#e8ff00" }}>Add prospect</button>
+              </div>
+              {prospects.length === 0 ? <div style={{ color:C.muted, fontSize:13 }}>No prospects yet.</div> : (
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {prospects.map(p => (
+                    <div key={p.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                      <div style={{ flex:1, minWidth:150 }}>
+                        <div style={{ fontWeight:600, color:C.text, fontSize:14 }}>{p.name || p.email || p.phone || "Prospect"}</div>
+                        <div style={{ fontSize:12, color:C.muted }}>{[p.phone, p.email, p.source].filter(Boolean).join(" · ")}{p.notes ? ` — ${p.notes}` : ""}</div>
+                      </div>
+                      <select value={p.stage} onChange={e=>moveProspect(p.id, e.target.value)} style={{ ...fld, width:"auto", padding:"7px 10px" }}>
+                        {PROSPECT_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <button onClick={()=>openInvite(p, p.id)} style={{ ...S.btnSec, padding:"7px 12px" }}>Invite</button>
+                      <button onClick={()=>removeProspect(p.id)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:18 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* FINANCIALS */}
+          {section==="financials" && (
+            <>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>FINANCIALS</div>
+              <div className="kpi-grid">
+                <KPI label="MRR estimate" value={`$${fin.mrrEstimate}`} sub={`${fin.activeClients} active × $${fin.monthlyPrice}`} />
+                <KPI label="Active clients" value={fin.activeClients} />
+                <KPI label="New this month" value={fin.newThisMonth} />
+              </div>
+              <div style={{ background:C.card, border:`1px dashed ${C.border}`, borderRadius:12, padding:"18px 16px", marginTop:18 }}>
+                <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.muted }}>LIVE REVENUE & PAYOUTS</div>
+                <div style={{ fontSize:13, color:C.muted, marginTop:8, lineHeight:1.6 }}>Connect Stripe to see real billed revenue, your payout schedule, and per-client transactions. Until then, figures above are estimates from active clients × plan price.</div>
+                <button disabled style={{ ...S.btnSec, marginTop:12, opacity:0.55, cursor:"default" }}>Connect Stripe (coming soon)</button>
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+
+      {/* INVITE MODAL */}
+      {inviteOpen && (
+        <div onClick={()=>setInviteOpen(false)} style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"center", justifyContent:"center", padding:18 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ width:"100%", maxWidth:440, background:C.surface, border:`1px solid ${C.border}`, borderRadius:14, padding:"20px 20px" }}>
+            <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1, marginBottom:12 }}>INVITE CLIENT</div>
+            {!iResult ? (
+              <>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <input value={iForm.name} onChange={e=>setIForm({...iForm,name:e.target.value})} placeholder="Client name" style={fld} />
+                  <input value={iForm.phone} onChange={e=>setIForm({...iForm,phone:e.target.value})} placeholder="Phone (for text invite)" style={fld} />
+                  <input value={iForm.email} onChange={e=>setIForm({...iForm,email:e.target.value})} placeholder="Email (optional)" style={fld} />
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input value={iForm.goal} onChange={e=>setIForm({...iForm,goal:e.target.value})} placeholder="Goal (optional)" style={fld} />
+                    <input value={iForm.focus} onChange={e=>setIForm({...iForm,focus:e.target.value})} placeholder="Focus (optional)" style={fld} />
+                  </div>
+                </div>
+                <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                  <button onClick={()=>setInviteOpen(false)} style={{ ...S.btnSec, flex:1 }}>Cancel</button>
+                  <button onClick={createInvite} disabled={iBusy} style={{ ...S.btnPri, flex:2, background:"#e8ff00", color:"#000", border:"none", opacity:iBusy?0.6:1 }}>{iBusy?"Creating…":"Create invite"}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize:13, color:C.muted, marginBottom:6 }}>Invite ready — send it to your client:</div>
+                <div style={{ background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, padding:"10px 12px", fontSize:12.5, color:C.text, wordBreak:"break-all", marginBottom:12 }}>{iResult.link}</div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <a href={`sms:${iForm.phone || ""}?&body=${encodeURIComponent(inviteMsg(iResult.link))}`} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", textDecoration:"none", flex:1, textAlign:"center" }}>Text invite</a>
+                  <a href={`mailto:${iForm.email || ""}?subject=${encodeURIComponent("Your BodyMorph invite")}&body=${encodeURIComponent(inviteMsg(iResult.link))}`} style={{ ...S.btnSec, textDecoration:"none", flex:1, textAlign:"center" }}>Email</a>
+                  <button onClick={()=>{ navigator.clipboard?.writeText(iResult.link); }} style={{ ...S.btnSec, flex:1 }}>Copy link</button>
+                </div>
+                <button onClick={()=>setInviteOpen(false)} style={{ ...S.btnSec, width:"100%", marginTop:12 }}>Done</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Plain-text version of an approved plan (for emailing the client).
+function planText(name, ev) {
+  const t = ev.timeline || {};
+  const ms = (t.milestones || []).map(m => `- ${m.at}: ${m.expect}`).join("\n");
+  return [
+    `Your BodyMorph Plan${name ? ` — ${name}` : ""}`, "",
+    "ASSESSMENT", ev.assessment || "", "",
+    "DIET", ev.diet || "", "",
+    "EXERCISE", ev.exercise || "", "",
+    "TIMELINE", `Recommended: ${t.recommended || "—"}`, t.desiredVerdict || "", ms, "",
+    "This plan is fitness guidance from your coach, not medical advice.", "— Your BodyMorph coach",
+  ].filter(x => x !== undefined).join("\n");
+}
+// Open a clean printable document; the browser print dialog offers "Save as PDF".
+function openPlanPrint(name, ev) {
+  const t = ev.timeline || {};
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  const ms = (t.milestones || []).map(m => `<li><b>${esc(m.at)}:</b> ${esc(m.expect)}</li>`).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Plan${name ? " — " + esc(name) : ""}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.55}
+h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:24px}
+h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#888;margin:22px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px}
+p{margin:0}ul{margin:6px 0 0;padding-left:18px}@media print{body{margin:0}}</style></head><body>
+<h1>Your BodyMorph Plan${name ? ` — ${esc(name)}` : ""}</h1>
+<div class="sub">Prepared by your coach · ${new Date().toLocaleDateString()}</div>
+<h2>Assessment</h2><p>${esc(ev.assessment)}</p>
+<h2>Diet</h2><p>${esc(ev.diet)}</p>
+<h2>Exercise</h2><p>${esc(ev.exercise)}</p>
+<h2>Timeline</h2><p>Recommended: <b>${esc(t.recommended)}</b></p>${t.desiredVerdict ? `<p>${esc(t.desiredVerdict)}</p>` : ""}<ul>${ms}</ul>
+<p style="margin-top:28px;color:#888;font-size:12px">This plan is fitness guidance from your coach, not medical advice. Consult a physician about any medical conditions or injuries before starting.</p>
+<script>window.onload=function(){window.print()}</script></body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Coach-facing AI intake evaluation + recommendation (decision-support draft).
+function ClientEvaluation({ coachId, clientId, clientName }) {
+  const TF = ["6 weeks", "8 weeks", "3 months", "6 months", "9 months", "1 year"];
+  const ACT = ["sedentary", "lightly active", "moderately active", "very active"];
+  const [intake, setIntake] = useState({ goal:"", desiredTimeframe:"3 months", currentWeight:"", goalWeight:"", activity:"moderately active", health:"", nutrition:"", allergies:"", injuries:"" });
+  const [evaluation, setEvaluation] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let on = true;
     (async () => {
-      const [inv, ros] = await Promise.all([fetchMyInvite(user?.id), fetchRoster(user?.id)]);
-      if (!on) return;
-      setInvite(inv); setRoster(ros); setLoading(false);
+      const e = await fetchEvaluation(coachId, clientId);
+      if (!on || !e) return;
+      if (e.intake && Object.keys(e.intake).length) setIntake(prev => ({ ...prev, ...e.intake }));
+      if (e.evaluation && Object.keys(e.evaluation).length) setEvaluation(e.evaluation);
+      setUpdatedAt(e.updated_at || null);
     })();
     return () => { on = false; };
-  }, [user?.id]);
+  }, [coachId, clientId]);
 
-  const openClient = async (id) => {
-    setSelected(id); setDetail(null); setDetailLoading(true);
-    setDetail(await fetchClientDetail(id)); setDetailLoading(false);
+  const set = (k, v) => setIntake(p => ({ ...p, [k]: v }));
+  const run = async () => {
+    setErr(""); setBusy(true);
+    const r = await generateEvaluation(intake);
+    setBusy(false);
+    if (r.error) { setErr(r.error); return; }
+    setEvaluation(r.evaluation); setUpdatedAt(new Date().toISOString());
+    saveEvaluation(coachId, clientId, intake, r.evaluation);
   };
-  const gen = async () => { const c = await generateInvite(); if (c) setInvite(c); };
-  const copy = () => { if (invite) { navigator.clipboard?.writeText(invite); setCopied(true); setTimeout(()=>setCopied(false), 1500); } };
+  const approve = () => {
+    const next = { ...evaluation, approved: true };
+    setEvaluation(next);
+    saveEvaluation(coachId, clientId, intake, next);
+  };
 
-  if (selected) return <CoachClientView coachId={user?.id} clientId={selected} detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />;
+  const Block = ({ title, children }) => (
+    <div style={{ marginTop:12 }}>
+      <div style={{ ...S.inputLabel, marginBottom:4 }}>{title}</div>
+      <div style={{ fontSize:13.5, color:C.text, lineHeight:1.6 }}>{children}</div>
+    </div>
+  );
+  const ev = evaluation;
 
   return (
-    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
-      <style>{GLOBAL_CSS}</style>
-      <WatermarkPlain />
-      <div style={{ padding:"16px 0 10px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <Logo small align="left" />
-        <button onClick={onSignOut} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:13 }}>Sign out</button>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ ...S.inputLabel, marginBottom:0 }}>Intake & AI evaluation</div>
+        <button onClick={()=>setOpen(o=>!o)} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5 }}>{open ? "Hide intake" : (ev ? "Edit intake" : "Start intake")}</button>
       </div>
-      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:4 }}>COACH DASHBOARD</div>
 
-      {/* Client-invite code */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:10 }}>
-        <div style={{ fontSize:12.5, color:C.muted, marginBottom:8 }}>Your client invite code — share it so clients can link to you.</div>
-        {invite ? (
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ fontFamily:"'Bebas Neue'", fontSize:28, letterSpacing:3, color:"#e8ff00" }}>{invite}</div>
-            <button onClick={copy} style={{ ...S.btnSec, padding:"7px 12px" }}>{copied ? "Copied ✓" : "Copy"}</button>
+      {open && (
+        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+          <input value={intake.goal} onChange={e=>set("goal",e.target.value)} placeholder="Goal (e.g. lose 20 lb, build muscle)" style={fld} />
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <input value={intake.currentWeight} onChange={e=>set("currentWeight",e.target.value)} placeholder="Current weight" style={{ ...fld, flex:1, minWidth:110 }} />
+            <input value={intake.goalWeight} onChange={e=>set("goalWeight",e.target.value)} placeholder="Goal weight" style={{ ...fld, flex:1, minWidth:110 }} />
           </div>
-        ) : (
-          <button onClick={gen} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>Generate invite code</button>
-        )}
-      </div>
-
-      {/* Roster */}
-      <div style={{ ...S.sectionTitle, marginTop:18 }}>CLIENTS ({roster.length})</div>
-      {loading ? (
-        <div style={{ color:C.muted, fontSize:13 }}>Loading roster…</div>
-      ) : roster.length === 0 ? (
-        <div style={{ color:C.muted, fontSize:13, lineHeight:1.6 }}>No clients yet. Share your invite code above — once a client redeems it, they'll appear here.</div>
-      ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {roster.map(c => (
-            <button key={c.id} onClick={()=>openClient(c.id)} style={{ display:"flex", alignItems:"center", gap:12, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 15px", cursor:"pointer", textAlign:"left", width:"100%" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:C.text }}>{c.name}</div>
-                <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{c.lastActive ? `Last active ${c.lastActive}` : "No activity yet"}</div>
-              </div>
-              {c.weight != null && (
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:C.text }}>{c.weight} lb</div>
-                  {c.weightTrend != null && c.weightTrend !== 0 && (
-                    <div style={{ fontSize:12, color: c.weightTrend < 0 ? C.green : C.blue }}>{c.weightTrend < 0 ? "▼" : "▲"} {Math.abs(c.weightTrend)} lb</div>
-                  )}
-                </div>
-              )}
-              <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
-            </button>
-          ))}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <select value={intake.desiredTimeframe} onChange={e=>set("desiredTimeframe",e.target.value)} style={{ ...fld, flex:1, minWidth:130 }}>
+              {TF.map(t => <option key={t} value={t}>Desired: {t}</option>)}
+            </select>
+            <select value={intake.activity} onChange={e=>set("activity",e.target.value)} style={{ ...fld, flex:1, minWidth:130 }}>
+              {ACT.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <textarea value={intake.health} onChange={e=>set("health",e.target.value)} placeholder="Basic health — conditions, medications, blood pressure, etc." rows={2} style={{ ...fld, resize:"vertical" }} />
+          <textarea value={intake.nutrition} onChange={e=>set("nutrition",e.target.value)} placeholder="Nutrition — typical diet, meals/day, preferences" rows={2} style={{ ...fld, resize:"vertical" }} />
+          <input value={intake.allergies} onChange={e=>set("allergies",e.target.value)} placeholder="Food allergies / intolerances" style={fld} />
+          <textarea value={intake.injuries} onChange={e=>set("injuries",e.target.value)} placeholder="Past / current injuries or movement limitations" rows={2} style={{ ...fld, resize:"vertical" }} />
+          {err && <div style={{ color:C.red, fontSize:12.5 }}>{err}</div>}
+          <button onClick={run} disabled={busy} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00", opacity:busy?0.6:1 }}>{busy ? "Evaluating…" : (ev ? "Regenerate evaluation" : "Generate evaluation")}</button>
         </div>
       )}
+
+      {ev && (
+        <div style={{ marginTop:6 }}>
+          {ev.assessment && <Block title="Assessment">{ev.assessment}</Block>}
+          {ev.diet && <Block title="Diet recommendation">{ev.diet}</Block>}
+          {ev.exercise && <Block title="Exercise routine">{ev.exercise}</Block>}
+          {ev.timeline && (
+            <Block title="Timeline">
+              <div>Recommended: <b style={{ color:"#e8ff00" }}>{ev.timeline.recommended}</b>{ev.timeline.realistic === false ? " · client's desired timeframe is ambitious" : ""}</div>
+              {ev.timeline.desiredVerdict && <div style={{ marginTop:4, color:C.muted }}>{ev.timeline.desiredVerdict}</div>}
+              {Array.isArray(ev.timeline.milestones) && ev.timeline.milestones.length > 0 && (
+                <div style={{ marginTop:6 }}>{ev.timeline.milestones.map((m,i) => <div key={i}>• <b>{m.at}:</b> {m.expect}</div>)}</div>
+              )}
+            </Block>
+          )}
+          {/* Approve, then share with the client */}
+          <div style={{ marginTop:14, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+            {!ev.approved ? (
+              <button onClick={approve} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none" }}>Approve plan</button>
+            ) : (
+              <>
+                <div style={{ fontSize:12.5, color:C.green, marginBottom:8 }}>✓ Approved — share with your client</div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <a href={`mailto:?subject=${encodeURIComponent("Your BodyMorph Plan")}&body=${encodeURIComponent(planText(clientName, ev))}`} style={{ ...S.btnSec, textDecoration:"none" }}>Email to client</a>
+                  <button onClick={()=>openPlanPrint(clientName, ev)} style={{ ...S.btnSec }}>Print / Save PDF</button>
+                </div>
+              </>
+            )}
+          </div>
+          <div style={{ fontSize:11, color:"#74748a", marginTop:12, lineHeight:1.5 }}>AI draft for coach review — not medical advice. Have clients with medical conditions or injuries get physician clearance.{updatedAt ? ` · ${new Date(updatedAt).toLocaleDateString()}` : ""}</div>
+        </div>
+      )}
+      {!ev && !open && <div style={{ fontSize:13, color:C.muted, marginTop:8 }}>No evaluation yet — tap “Start intake” to assess this client and get diet, training, and timeline recommendations.</div>}
     </div>
   );
 }
@@ -7815,7 +8139,9 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack }) {
         <Stat label="Coins" value={detail.rewards?.coins || 0} />
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px" }}>
+      <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
         <div style={{ ...S.inputLabel, marginBottom:8 }}>Bodyweight trend</div>
         {chart}
         {pts.length > 0 && (
@@ -7886,6 +8212,7 @@ export default function BodyMorph() {
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
   const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
+  const [inviteSeed, setInviteSeed] = useState(null);     // intake from a coach invite, to pre-fill the wizard
 
   // Load all saved data from storage, then route to home (has profile) or wizard.
   // Extracted so it can run on first mount AND after a sign-in.
@@ -7920,6 +8247,13 @@ export default function BodyMorph() {
         // below then persist the merged results locally + push them back up.
         const uid = userRef.current?.id;
         const fresh = !sp;
+        // Coach invite link (?invite=CODE): redeem once to link this client to the
+        // coach, capture intake to seed the wizard, then clean the URL.
+        const inviteCode = (typeof window !== "undefined") ? new URLSearchParams(window.location.search).get("invite") : null;
+        if (uid && inviteCode) {
+          const r = await redeemClientInvite(inviteCode);
+          if (r?.ok) { setInviteSeed(r.intake || null); try { window.history.replaceState({}, "", window.location.pathname); } catch {} }
+        }
         const todayStr = new Date().toISOString().slice(0,10);
         const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
         const pull = (name, local) => uid ? pullMergeDomain(name, uid, local, fresh) : Promise.resolve(local);
@@ -8508,8 +8842,8 @@ export default function BodyMorph() {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
-  if (phase === "dashboard") return <CoachDashboard user={user} onSignOut={handleSignOut} />;
-  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} /></>;
+  if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
+  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 

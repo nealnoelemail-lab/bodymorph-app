@@ -20,6 +20,12 @@ html {
   margin: 0 auto;
 }
 
+/* The coach business dashboard is a desktop layout — lift the phone-width cap
+   only when it's on screen. The client app stays capped at 480px. */
+#root:has(.coach-shell) {
+  max-width: none;
+}
+
 * {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;

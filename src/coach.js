@@ -152,3 +152,119 @@ export async function saveClientSummary(coachId, clientId, summary) {
     { coach_id: coachId, client_id: clientId, summary, generated_at: new Date().toISOString() },
     { onConflict: "coach_id,client_id" });
 }
+
+// ── PROSPECTS (CRM-lite) ─────────────────────────────────────────────────────────
+export const PROSPECT_STAGES = ["lead", "contacted", "trial", "invited", "won", "lost"];
+
+export async function listProspects(coachId) {
+  if (!supabase || !coachId) return [];
+  const { data, error } = await supabase.from("prospects").select("*").eq("coach_id", coachId).order("created_at", { ascending: false });
+  if (error) { console.warn("listProspects:", error.message); return []; }
+  return data || [];
+}
+// Insert or update a prospect (RLS scopes to the coach). Returns the row or null.
+export async function upsertProspect(coachId, p) {
+  if (!supabase || !coachId) return null;
+  const row = { coach_id: coachId, name: p.name || null, email: p.email || null, phone: p.phone || null,
+    stage: p.stage || "lead", source: p.source || null, notes: p.notes || null, updated_at: new Date().toISOString() };
+  if (p.id) row.id = p.id;
+  const { data, error } = await supabase.from("prospects").upsert(row).select().maybeSingle();
+  if (error) { console.warn("upsertProspect:", error.message); return null; }
+  return data;
+}
+export async function deleteProspect(id) {
+  if (!supabase || !id) return;
+  await supabase.from("prospects").delete().eq("id", id);
+}
+export async function setProspectStage(id, stage) {
+  if (!supabase || !id) return;
+  await supabase.from("prospects").update({ stage, updated_at: new Date().toISOString() }).eq("id", id);
+}
+
+// ── CLIENT INVITES (onboarding) ──────────────────────────────────────────────────
+function newCode() {
+  try { return crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(); }
+  catch { return Math.random().toString(36).slice(2, 10).toUpperCase(); }
+}
+export const inviteLink = (code) =>
+  (typeof window !== "undefined" ? window.location.origin : "") + "/?invite=" + code;
+
+// Create a per-client invite; returns { code, link } or { error }.
+export async function createClientInvite(coachId, { name, phone, email, intake } = {}) {
+  if (!supabase || !coachId) return { error: "No backend." };
+  const code = newCode();
+  const { error } = await supabase.from("client_invites").insert({
+    code, coach_id: coachId, name: name || null, phone: phone || null, email: email || null,
+    intake: intake || {},
+  });
+  if (error) { console.warn("createClientInvite:", error.message); return { error: error.message }; }
+  return { code, link: inviteLink(code) };
+}
+export async function listClientInvites(coachId) {
+  if (!supabase || !coachId) return [];
+  const { data, error } = await supabase.from("client_invites").select("*").eq("coach_id", coachId).order("created_at", { ascending: false });
+  if (error) { console.warn("listClientInvites:", error.message); return []; }
+  return data || [];
+}
+// Client side: redeem a per-client invite -> { ok, intake } | { ok:false, error }.
+export async function redeemClientInvite(code) {
+  if (!supabase) return { ok: false, error: "No backend." };
+  const { data, error } = await supabase.rpc("redeem_client_invite", { p_code: (code || "").trim() });
+  if (error) return { ok: false, error: error.message };
+  return data || { ok: false, error: "Unknown error" };
+}
+
+// ── FINANCIALS (derived; live revenue arrives with Stripe Connect) ───────────────
+export function computeFinancials(roster, monthlyPrice = 25) {
+  const active = (roster || []).length;
+  const month = new Date().toISOString().slice(0, 7);
+  const newThisMonth = (roster || []).filter(c => (c.lastActive || "").startsWith(month)).length;
+  return {
+    activeClients: active,
+    mrrEstimate: active * monthlyPrice,
+    monthlyPrice,
+    newThisMonth,
+  };
+}
+
+// ── AI INTAKE EVALUATION (coach decision-support) ────────────────────────────────
+export async function fetchEvaluation(coachId, clientId) {
+  if (!supabase || !coachId || !clientId) return null;
+  const { data } = await supabase.from("client_evaluations")
+    .select("intake, evaluation, updated_at").eq("coach_id", coachId).eq("client_id", clientId).maybeSingle();
+  return data || null;
+}
+export async function saveEvaluation(coachId, clientId, intake, evaluation) {
+  if (!supabase || !coachId || !clientId) return;
+  await supabase.from("client_evaluations").upsert(
+    { coach_id: coachId, client_id: clientId, intake, evaluation, updated_at: new Date().toISOString() },
+    { onConflict: "coach_id,client_id" });
+}
+
+// Generate a structured fitness evaluation + recommendation from intake. Claude
+// Sonnet for the reasoning. Returns { evaluation } or { error }.
+// Guardrail: fitness-coaching scope only; respects allergies + injuries; flags
+// medical red flags for physician clearance; it's a coach-reviewed DRAFT.
+export async function generateEvaluation(intake) {
+  if (!ANTHROPIC_KEY) return { error: "No AI key configured." };
+  const prompt =
+    "You are an experienced fitness coach's assistant producing a DRAFT evaluation for the COACH to review (not shown to the client, not medical advice). " +
+    "Stay strictly within fitness-coaching scope. Respect the client's food allergies and dietary preferences in any diet guidance. Accommodate past/current injuries in the exercise plan. " +
+    "If anything is a medical red flag (e.g. chest pain, uncontrolled conditions, recent surgery, pregnancy concerns), do NOT advise on it — instead flag it and recommend the client get physician clearance.\n\n" +
+    "Reply with ONLY a JSON object (no markdown) in exactly this shape:\n" +
+    "{\"assessment\":\"2-3 sentence read on where the client is + any flags\",\"diet\":\"concise diet recommendation respecting allergies/preferences\",\"exercise\":\"concise exercise routine accommodating injuries\",\"timeline\":{\"recommended\":\"e.g. 3 months\",\"realistic\":true,\"desiredVerdict\":\"is the client's desired timeframe realistic? brief why\",\"milestones\":[{\"at\":\"6 weeks\",\"expect\":\"...\"},{\"at\":\"3 months\",\"expect\":\"...\"}]}}\n\n" +
+    "Client intake:\n" + JSON.stringify(intake);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1100, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) return { error: `AI error (${res.status})` };
+    const data = await res.json();
+    let text = (data.content?.[0]?.text || "").trim();
+    text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");   // strip code fences if any
+    const evaluation = JSON.parse(text);
+    return { evaluation };
+  } catch (e) { return { error: "Couldn't parse evaluation: " + e.message }; }
+}
