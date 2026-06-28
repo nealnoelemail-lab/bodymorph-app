@@ -1793,7 +1793,7 @@ const YTButton = ({ query, gender }) => {
 };
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
-const STEPS = ["firstname","lastname","gender","goal","focus","days","time","stats","activity"];
+const STEPS = ["firstname","lastname","gender","goal","focus","days","time","stats","goals","activity"];
 
 // ── HIGH FREQUENCY TRAINING — INFO PAGE ──────────────────────────────────────
 // Full-screen description shown when the user taps the info icon on the HFT option.
@@ -2008,7 +2008,7 @@ function Wizard({ onComplete, onCoachCode, seed }) {
     if (!res?.ok) setCoachMsg(res?.error || "Invalid code");
     // On success, the app routes to the dashboard (this screen unmounts).
   };
-  const [p, setP] = useState({ firstName: seedName.split(" ")[0] || "", lastName: seedName.split(" ").slice(1).join(" ") || "", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
+  const [p, setP] = useState({ firstName: seedName.split(" ")[0] || "", lastName: seedName.split(" ").slice(1).join(" ") || "", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate", bodyFat:"", goalWeight:"", goalBodyFat:"" });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
 
@@ -2021,6 +2021,7 @@ function Wizard({ onComplete, onCoachCode, seed }) {
     () => p.trainingDays.length > 0,
     () => !!p.sessionTime,
     () => p.age && p.weight && p.heightFt && p.fitnessLevel,
+    () => !!p.goalWeight,   // goal weight required; body-fat fields optional
     () => !!p.activityLevel,
   ];
 
@@ -2150,6 +2151,27 @@ function Wizard({ onComplete, onCoachCode, seed }) {
             {["Beginner","Intermediate","Advanced","Pro"].map(l => (
               <button key={l} onClick={() => set("fitnessLevel",l)} style={{ background: p.fitnessLevel===l ? "#e8ff00" : "#1a1a26", border:"1px solid " + (p.fitnessLevel===l ? "#e8ff00" : "#2a2a3d"), color: p.fitnessLevel===l ? "#000" : "#f0f0f8", fontWeight: p.fitnessLevel===l ? 600 : 400, borderRadius:8, padding:"9px 4px", cursor:"pointer", fontSize:20.4, fontFamily:"'DM Sans'", transition:"all 0.18s", textAlign:"center" }}>{l}</button>
             ))}
+          </div>
+        </div>
+      </div>
+    </div>,
+
+    <div key="goals" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, width:"100%" }}>
+      <div style={S.stepLabel}>YOUR GOAL</div>
+      <div style={{ color:"#c8c8e0", fontSize:13, textAlign:"center", maxWidth:330, lineHeight:1.4 }}>Where do you want to be? Your plan is built around this.</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:9, width:"92%", maxWidth:340 }}>
+        <div>
+          <div style={S.inputLabel}>Goal Weight (lbs)</div>
+          <input style={S.input} placeholder="e.g. 165" value={p.goalWeight} onChange={e => set("goalWeight",e.target.value)} type="number" inputMode="decimal" />
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <div style={{ flex:1 }}>
+            <div style={S.inputLabel}>Current Body Fat %</div>
+            <input style={S.input} placeholder="optional" value={p.bodyFat} onChange={e => set("bodyFat",e.target.value)} type="number" inputMode="decimal" />
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={S.inputLabel}>Goal Body Fat %</div>
+            <input style={S.input} placeholder="optional" value={p.goalBodyFat} onChange={e => set("goalBodyFat",e.target.value)} type="number" inputMode="decimal" />
           </div>
         </div>
       </div>
@@ -7484,6 +7506,9 @@ function migrateProfile(p) {
     height:       "70",
     fitnessLevel: "Intermediate",
     activityLevel:"moderate",
+    bodyFat:       "",
+    goalWeight:    "",
+    goalBodyFat:   "",
     hftStartDate: null,
     glbStartDate: null,
   };
@@ -8759,6 +8784,8 @@ export default function BodyMorph() {
     setProfile(prof);
     setPhase("loading");
     await Store.set(PROFILE_KEY, prof);
+    // Seed nutrition goal weight from signup so tracking targets the same goal.
+    if (prof.goalWeight) setNutritionGoals(g => ({ ...g, goalWeight: String(prof.goalWeight) }));
     await new Promise(r => setTimeout(r, 1400));
     setProgram(buildProgram(prof));
     // For fat-loss goals, show the calorie deficit + macro target screen first.
