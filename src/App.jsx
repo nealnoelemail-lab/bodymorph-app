@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
+import { pullMergeDomain, pushDomainDebounced } from "./sync";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -7604,7 +7605,12 @@ export default function BodyMorph() {
         if (sm) setRewards(sm);
         if (sb) setBodyEntries(sb);
         if (sc) setCardioSessions(sc);
-        if (sst) setStepEntries(sst);
+        // Steps: if signed in, pull the cloud copy and smart-merge with local.
+        // The save-effect below then persists the merged result locally + pushes it up.
+        const mergedSteps = userRef.current
+          ? await pullMergeDomain("steps", userRef.current.id, sst || [])
+          : sst;
+        if (mergedSteps) setStepEntries(mergedSteps);
         if (ssup) setSupplements(ssup);
         if (spep) setPeptides(spep);
         if (smeals) setMeals(smeals);
@@ -7681,7 +7687,7 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) Store.set(MEDAL_KEY, rewards); }, [rewards, loaded]);
   useEffect(() => { if (loaded) Store.set(BODY_KEY, bodyEntries); }, [bodyEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(CARDIO_KEY, cardioSessions); }, [cardioSessions, loaded]);
-  useEffect(() => { if (loaded) Store.set(STEPS_KEY, stepEntries); }, [stepEntries, loaded]);
+  useEffect(() => { if (loaded) { Store.set(STEPS_KEY, stepEntries); if (userRef.current) pushDomainDebounced("steps", userRef.current.id, stepEntries); } }, [stepEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(SLEEP_KEY, sleepEntries); }, [sleepEntries, loaded]);
   useEffect(() => { if (loaded) Store.set(MEALPLAN_KEY, mealPlan); }, [mealPlan, loaded]);
   useEffect(() => { if (loaded) Store.set(SUPP_KEY, supplements); }, [supplements, loaded]);
