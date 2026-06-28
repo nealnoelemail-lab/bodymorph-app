@@ -7675,6 +7675,77 @@ const KPI = ({ label, value, sub }) => (
 const fld = { width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" };
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/86400000) : null;
 
+// Financials: the coach's four income streams + a next-month forecasting tool.
+// Estimates/planning until Stripe Connect provides live billed revenue.
+function FinancialsSection({ activeClients }) {
+  const [v, setV] = useState({
+    inperson:   { label:"In-person training", unit:"sessions / mo", count:0, rate:75, add:0 },
+    consulting: { label:"Consulting (app coaching)", unit:"clients", count:activeClients || 0, rate:105, add:0 },
+    apponly:    { label:"App access only", unit:"clients", count:0, rate:10, add:0 },
+    referral:   { label:"Referral income", unit:"referred clients", count:0, rate:20, add:0 },
+  });
+  const KEYS = ["inperson", "consulting", "apponly", "referral"];
+  const num = (x) => parseFloat(x) || 0;
+  const setK = (k, f, val) => setV(p => ({ ...p, [k]: { ...p[k], [f]: val } }));
+  const sub = (k) => num(v[k].count) * num(v[k].rate);
+  const subProj = (k) => (num(v[k].count) + num(v[k].add)) * num(v[k].rate);
+  const total = KEYS.reduce((s, k) => s + sub(k), 0);
+  const projected = KEYS.reduce((s, k) => s + subProj(k), 0);
+  const delta = projected - total;
+  const miniInput = { width:64, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 8px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+
+  return (
+    <>
+      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:6 }}>FINANCIALS</div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>Planning estimates across your income streams. Live billed revenue + payouts light up when Stripe is connected.</div>
+
+      {/* Four income streams */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {KEYS.map(k => (
+          <div key={k} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 16px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+            <div style={{ flex:1, minWidth:160, fontWeight:600, fontSize:14.5, color:C.text }}>{v[k].label}</div>
+            <input type="number" value={v[k].count} onChange={e=>setK(k,"count",e.target.value)} style={miniInput} />
+            <span style={{ fontSize:12.5, color:C.muted }}>{v[k].unit} @ $</span>
+            <input type="number" value={v[k].rate} onChange={e=>setK(k,"rate",e.target.value)} style={miniInput} />
+            <div style={{ width:90, textAlign:"right", fontFamily:"'Oswald'", fontWeight:600, fontSize:16, color:"#e8ff00" }}>${Math.round(sub(k))}/mo</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Total */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px", marginTop:14 }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.muted }}>TOTAL MONTHLY (EST.)</div>
+        <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:26, color:"#e8ff00" }}>${Math.round(total).toLocaleString()}/mo</div>
+      </div>
+
+      {/* Forecast */}
+      <div style={{ ...S.sectionTitle, marginTop:24 }}>FORECAST — GROW NEXT MONTH</div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:10 }}>Add to any stream to see next month's potential income.</div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 16px", display:"flex", flexDirection:"column", gap:9 }}>
+        {KEYS.map(k => (
+          <div key={k} style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <div style={{ flex:1, minWidth:150, fontSize:13.5, color:C.text }}>+ add {v[k].label.toLowerCase()}</div>
+            <input type="number" value={v[k].add} onChange={e=>setK(k,"add",e.target.value)} style={miniInput} />
+            <div style={{ width:90, textAlign:"right", fontSize:13, color: num(v[k].add)>0 ? C.green : C.muted }}>{num(v[k].add)>0 ? `+$${Math.round(num(v[k].add)*num(v[k].rate))}` : "—"}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"rgba(61,220,132,0.08)", border:"1px solid rgba(61,220,132,0.3)", borderRadius:12, padding:"16px 18px", marginTop:12 }}>
+        <div>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.green }}>PROJECTED NEXT MONTH</div>
+          {delta > 0 && <div style={{ fontSize:12.5, color:C.muted, marginTop:2 }}>+${Math.round(delta).toLocaleString()} over this month</div>}
+        </div>
+        <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:26, color:C.green }}>${Math.round(projected).toLocaleString()}/mo</div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px dashed ${C.border}`, borderRadius:12, padding:"16px", marginTop:18 }}>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>Connect Stripe to replace these estimates with real billed revenue, payouts, and per-client transactions.</div>
+        <button disabled style={{ ...S.btnSec, marginTop:12, opacity:0.55, cursor:"default" }}>Connect Stripe (coming soon)</button>
+      </div>
+    </>
+  );
+}
+
 function CoachApp({ user, profile, onSignOut }) {
   const uid = user?.id;
   const coachName = (profile && profile.name) || (user?.email ? user.email.split("@")[0] : "Coach");
@@ -7759,7 +7830,7 @@ function CoachApp({ user, profile, onSignOut }) {
           {/* OVERVIEW */}
           {section==="overview" && (
             <>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>OVERVIEW</div>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>WELCOME BACK, COACH</div>
               <div className="kpi-grid">
                 <KPI label="Active clients" value={loading?"—":roster.length} />
                 <KPI label="Prospects" value={loading?"—":prospects.length} />
@@ -7848,21 +7919,7 @@ function CoachApp({ user, profile, onSignOut }) {
           )}
 
           {/* FINANCIALS */}
-          {section==="financials" && (
-            <>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>FINANCIALS</div>
-              <div className="kpi-grid">
-                <KPI label="MRR estimate" value={`$${fin.mrrEstimate}`} sub={`${fin.activeClients} active × $${fin.monthlyPrice}`} />
-                <KPI label="Active clients" value={fin.activeClients} />
-                <KPI label="New this month" value={fin.newThisMonth} />
-              </div>
-              <div style={{ background:C.card, border:`1px dashed ${C.border}`, borderRadius:12, padding:"18px 16px", marginTop:18 }}>
-                <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.muted }}>LIVE REVENUE & PAYOUTS</div>
-                <div style={{ fontSize:13, color:C.muted, marginTop:8, lineHeight:1.6 }}>Connect Stripe to see real billed revenue, your payout schedule, and per-client transactions. Until then, figures above are estimates from active clients × plan price.</div>
-                <button disabled style={{ ...S.btnSec, marginTop:12, opacity:0.55, cursor:"default" }}>Connect Stripe (coming soon)</button>
-              </div>
-            </>
-          )}
+          {section==="financials" && <FinancialsSection activeClients={roster.length} />}
         </main>
       </div>
 

@@ -215,7 +215,7 @@ export async function redeemClientInvite(code) {
 }
 
 // ── FINANCIALS (derived; live revenue arrives with Stripe Connect) ───────────────
-export function computeFinancials(roster, monthlyPrice = 25) {
+export function computeFinancials(roster, monthlyPrice = 105) {  // coach net per consulting client (light); see revised economics
   const active = (roster || []).length;
   const month = new Date().toISOString().slice(0, 7);
   const newThisMonth = (roster || []).filter(c => (c.lastActive || "").startsWith(month)).length;
