@@ -7675,71 +7675,77 @@ const KPI = ({ label, value, sub }) => (
 const fld = { width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" };
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/86400000) : null;
 
-// Financials: the coach's four income streams + a next-month forecasting tool.
-// Estimates/planning until Stripe Connect provides live billed revenue.
+// Financials: side-by-side THIS MONTH (actual) vs NEXT MONTH (forecast).
+// "Actual" reflects only what's really tracked today (active coaching clients);
+// the other streams populate once Stripe / session tracking is connected.
 function FinancialsSection({ activeClients }) {
-  const [v, setV] = useState({
-    inperson:   { label:"In-person training", unit:"sessions / mo", count:0, rate:75, add:0 },
-    consulting: { label:"Consulting (app coaching)", unit:"clients", count:activeClients || 0, rate:105, add:0 },
-    apponly:    { label:"App access only", unit:"clients", count:0, rate:10, add:0 },
-    referral:   { label:"Referral income", unit:"referred clients", count:0, rate:20, add:0 },
-  });
-  const KEYS = ["inperson", "consulting", "apponly", "referral"];
+  const STREAMS = [
+    { k:"inperson",   label:"In-person training", rate:75 },
+    { k:"consulting", label:"Consulting (coaching)", rate:105 },
+    { k:"apponly",    label:"App access only", rate:10 },
+    { k:"referral",   label:"Referral income", rate:20 },
+  ];
   const num = (x) => parseFloat(x) || 0;
-  const setK = (k, f, val) => setV(p => ({ ...p, [k]: { ...p[k], [f]: val } }));
-  const sub = (k) => num(v[k].count) * num(v[k].rate);
-  const subProj = (k) => (num(v[k].count) + num(v[k].add)) * num(v[k].rate);
-  const total = KEYS.reduce((s, k) => s + sub(k), 0);
-  const projected = KEYS.reduce((s, k) => s + subProj(k), 0);
-  const delta = projected - total;
-  const miniInput = { width:64, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 8px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+  // ACTUAL — only consulting is attributable today (real active client count).
+  const actual = { inperson:0, consulting:(activeClients || 0) * 105, apponly:0, referral:0 };
+  const actualTotal = Object.values(actual).reduce((s, x) => s + x, 0);
+  // FORECAST — editable next-month plan, seeded from what we know.
+  const [f, setF] = useState({
+    inperson:{ count:0, rate:75 }, consulting:{ count:activeClients || 0, rate:105 },
+    apponly:{ count:0, rate:10 }, referral:{ count:0, rate:20 },
+  });
+  const setK = (k, field, val) => setF(p => ({ ...p, [k]: { ...p[k], [field]: val } }));
+  const fSub = (k) => num(f[k].count) * num(f[k].rate);
+  const fTotal = STREAMS.reduce((s, st) => s + fSub(st.k), 0);
+  const delta = fTotal - actualTotal;
+  const mini = { width:54, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 7px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+  const colHead = { fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1, marginBottom:10 };
+  const rowBase = { display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid #1f1f2e` };
 
   return (
     <>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:6 }}>FINANCIALS</div>
-      <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>Planning estimates across your income streams. Live billed revenue + payouts light up when Stripe is connected.</div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>This month reflects what's actually tracked today; next month is your editable forecast. Live billed revenue + the other streams light up when Stripe / session tracking is connected.</div>
 
-      {/* Four income streams */}
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {KEYS.map(k => (
-          <div key={k} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 16px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-            <div style={{ flex:1, minWidth:160, fontWeight:600, fontSize:14.5, color:C.text }}>{v[k].label}</div>
-            <input type="number" value={v[k].count} onChange={e=>setK(k,"count",e.target.value)} style={miniInput} />
-            <span style={{ fontSize:12.5, color:C.muted }}>{v[k].unit} @ $</span>
-            <input type="number" value={v[k].rate} onChange={e=>setK(k,"rate",e.target.value)} style={miniInput} />
-            <div style={{ width:90, textAlign:"right", fontFamily:"'Oswald'", fontWeight:600, fontSize:16, color:"#e8ff00" }}>${Math.round(sub(k))}/mo</div>
+      <div style={{ display:"flex", gap:16, flexWrap:"wrap", alignItems:"stretch" }}>
+        {/* THIS MONTH — actual */}
+        <div style={{ flex:1, minWidth:280, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px" }}>
+          <div style={colHead}>THIS MONTH · ACTUAL</div>
+          {STREAMS.map(st => (
+            <div key={st.k} style={rowBase}>
+              <div style={{ flex:1, fontSize:14, color:C.text }}>{st.label}</div>
+              {st.k === "consulting"
+                ? <div style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:C.text }}>${Math.round(actual.consulting).toLocaleString()}</div>
+                : <div style={{ fontSize:12.5, color:"#74748a" }}>not tracked yet</div>}
+            </div>
+          ))}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
+            <div style={{ fontSize:12, color:C.muted, textTransform:"uppercase", letterSpacing:1 }}>Total</div>
+            <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:24, color:C.text }}>${Math.round(actualTotal).toLocaleString()}/mo</div>
           </div>
-        ))}
-      </div>
-
-      {/* Total */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px", marginTop:14 }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.muted }}>TOTAL MONTHLY (EST.)</div>
-        <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:26, color:"#e8ff00" }}>${Math.round(total).toLocaleString()}/mo</div>
-      </div>
-
-      {/* Forecast */}
-      <div style={{ ...S.sectionTitle, marginTop:24 }}>FORECAST — GROW NEXT MONTH</div>
-      <div style={{ fontSize:12.5, color:C.muted, marginBottom:10 }}>Add to any stream to see next month's potential income.</div>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 16px", display:"flex", flexDirection:"column", gap:9 }}>
-        {KEYS.map(k => (
-          <div key={k} style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-            <div style={{ flex:1, minWidth:150, fontSize:13.5, color:C.text }}>+ add {v[k].label.toLowerCase()}</div>
-            <input type="number" value={v[k].add} onChange={e=>setK(k,"add",e.target.value)} style={miniInput} />
-            <div style={{ width:90, textAlign:"right", fontSize:13, color: num(v[k].add)>0 ? C.green : C.muted }}>{num(v[k].add)>0 ? `+$${Math.round(num(v[k].add)*num(v[k].rate))}` : "—"}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"rgba(61,220,132,0.08)", border:"1px solid rgba(61,220,132,0.3)", borderRadius:12, padding:"16px 18px", marginTop:12 }}>
-        <div>
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:C.green }}>PROJECTED NEXT MONTH</div>
-          {delta > 0 && <div style={{ fontSize:12.5, color:C.muted, marginTop:2 }}>+${Math.round(delta).toLocaleString()} over this month</div>}
         </div>
-        <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:26, color:C.green }}>${Math.round(projected).toLocaleString()}/mo</div>
+
+        {/* NEXT MONTH — forecast */}
+        <div style={{ flex:1, minWidth:280, background:C.card, border:"1px solid rgba(232,255,0,0.3)", borderRadius:12, padding:"16px 18px" }}>
+          <div style={{ ...colHead, color:"#e8ff00" }}>NEXT MONTH · FORECAST</div>
+          {STREAMS.map(st => (
+            <div key={st.k} style={rowBase}>
+              <div style={{ flex:1, fontSize:14, color:C.text }}>{st.label}</div>
+              <input type="number" value={f[st.k].count} onChange={e=>setK(st.k,"count",e.target.value)} style={mini} title="count" />
+              <span style={{ fontSize:12, color:C.muted }}>@$</span>
+              <input type="number" value={f[st.k].rate} onChange={e=>setK(st.k,"rate",e.target.value)} style={mini} title="rate" />
+              <div style={{ width:74, textAlign:"right", fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:"#e8ff00" }}>${Math.round(fSub(st.k)).toLocaleString()}</div>
+            </div>
+          ))}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
+            <div style={{ fontSize:12, color:C.muted, textTransform:"uppercase", letterSpacing:1 }}>Total{delta !== 0 ? ` · ${delta>0?"+":""}$${Math.round(delta).toLocaleString()}` : ""}</div>
+            <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:24, color:"#e8ff00" }}>${Math.round(fTotal).toLocaleString()}/mo</div>
+          </div>
+        </div>
       </div>
 
       <div style={{ background:C.card, border:`1px dashed ${C.border}`, borderRadius:12, padding:"16px", marginTop:18 }}>
-        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>Connect Stripe to replace these estimates with real billed revenue, payouts, and per-client transactions.</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>Connect Stripe to replace these estimates with real billed revenue, payouts, and per-client transactions across all four streams.</div>
         <button disabled style={{ ...S.btnSec, marginTop:12, opacity:0.55, cursor:"default" }}>Connect Stripe (coming soon)</button>
       </div>
     </>
