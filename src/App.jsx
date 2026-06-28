@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
+import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail } from "./coach";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -1984,10 +1985,21 @@ function GLBInfo({ onClose }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Wizard({ onComplete }) {
+function Wizard({ onComplete, onCoachCode }) {
   const [step, setStep] = useState(0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachCode, setCoachCode] = useState("");
+  const [coachMsg, setCoachMsg] = useState("");
+  const [coachBusy, setCoachBusy] = useState(false);
+  const submitCoach = async () => {
+    setCoachMsg(""); setCoachBusy(true);
+    const res = await onCoachCode(coachCode);
+    setCoachBusy(false);
+    if (!res?.ok) setCoachMsg(res?.error || "Invalid code");
+    // On success, the app routes to the dashboard (this screen unmounts).
+  };
   const [p, setP] = useState({ firstName:"", lastName:"", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate" });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
@@ -2175,6 +2187,25 @@ function Wizard({ onComplete }) {
           <button onClick={() => { if(!ok) return; const totalIn = (parseInt(p.heightFt)||0)*12 + (parseInt(p.heightIn)||0); onComplete({ ...p, firstName: p.firstName.trim(), lastName: p.lastName.trim(), name: p.firstName.trim(), height: String(totalIn) }); }} disabled={!ok} style={{ ...S.btnPri, flex:"0 0 73%", opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", background:"#e8ff00", color:"#000", padding:"10px 6px", fontSize:15.6 }}>BUILD MY PROGRAM</button>
         )}
       </div>
+
+      {/* Coaches don't onboard as clients — they redeem an access code here. */}
+      {step === 0 && onCoachCode && (
+        <div style={{ width:"92%", maxWidth:340, marginTop:4, textAlign:"center" }}>
+          {!coachOpen ? (
+            <button onClick={()=>setCoachOpen(true)} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer", textDecoration:"underline" }}>
+              I'm a coach — enter access code
+            </button>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <div style={{ display:"flex", gap:7 }}>
+                <input value={coachCode} onChange={e=>setCoachCode(e.target.value)} placeholder="Coach access code" style={{ ...S.input, flex:1 }} />
+                <button onClick={submitCoach} disabled={coachBusy || !coachCode.trim()} style={{ ...S.btnPri, padding:"10px 16px", opacity:(coachBusy||!coachCode.trim())?0.5:1 }}>{coachBusy ? "…" : "Go"}</button>
+              </div>
+              {coachMsg && <div style={{ color:C.red, fontSize:12.5 }}>{coachMsg}</div>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2695,7 +2726,7 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut, subscription }) {
+function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut, subscription, onBecomeCoach, onLinkCoach }) {
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -2728,6 +2759,12 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
     { label:"Change Password", icon:"🔒", note: user?.email ? "Email yourself a reset link" : "Coming soon — requires account backend", action: changePassword },
     { label:"Update Payment", icon:"💳", note: billingEnabled ? "Manage your card in the billing portal" : "Coming soon — requires payment backend", action: openBillingPortal },
     { label:"Change Subscription", icon:"📋", note: billingEnabled ? (subStatus ? `Status: ${subStatus} — manage plan` : "Manage your plan") : "Coaching · App Only — coming soon", action: openBillingPortal },
+    { label:"Link to my coach", icon:"🔗", note:"Enter your coach's invite code", action: async ()=>{
+        const c = prompt("Enter your coach's invite code:"); if (!c) return;
+        const r = await onLinkCoach(c); alert(r?.ok ? "Linked to your coach!" : "Error: " + (r?.error || "failed")); } },
+    { label:"Become a coach", icon:"🧑‍🏫", note:"Enter your coach access code", action: async ()=>{
+        const c = prompt("Enter your coach access code:"); if (!c) return;
+        const r = await onBecomeCoach(c); if (!r?.ok) alert("Error: " + (r?.error || "failed")); } },
     { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
   ];
   return (
@@ -7584,6 +7621,159 @@ function SubscribeScreen({ onSignOut, onRefresh }) {
   );
 }
 
+// ── COACH DASHBOARD ───────────────────────────────────────────────────────────
+// The coach-side keystone: roster of clients + a shareable client-invite code.
+// Tapping a client opens a read-only per-client view. Client data is readable
+// thanks to the is_coach_of() RLS policies.
+function CoachDashboard({ user, onSignOut }) {
+  const [invite, setInvite] = useState(null);
+  const [roster, setRoster] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      const [inv, ros] = await Promise.all([fetchMyInvite(user?.id), fetchRoster(user?.id)]);
+      if (!on) return;
+      setInvite(inv); setRoster(ros); setLoading(false);
+    })();
+    return () => { on = false; };
+  }, [user?.id]);
+
+  const openClient = async (id) => {
+    setSelected(id); setDetail(null); setDetailLoading(true);
+    setDetail(await fetchClientDetail(id)); setDetailLoading(false);
+  };
+  const gen = async () => { const c = await generateInvite(); if (c) setInvite(c); };
+  const copy = () => { if (invite) { navigator.clipboard?.writeText(invite); setCopied(true); setTimeout(()=>setCopied(false), 1500); } };
+
+  if (selected) return <CoachClientView detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />;
+
+  return (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div style={{ padding:"16px 0 10px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <Logo small align="left" />
+        <button onClick={onSignOut} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:13 }}>Sign out</button>
+      </div>
+      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:4 }}>COACH DASHBOARD</div>
+
+      {/* Client-invite code */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:10 }}>
+        <div style={{ fontSize:12.5, color:C.muted, marginBottom:8 }}>Your client invite code — share it so clients can link to you.</div>
+        {invite ? (
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontFamily:"'Bebas Neue'", fontSize:28, letterSpacing:3, color:"#e8ff00" }}>{invite}</div>
+            <button onClick={copy} style={{ ...S.btnSec, padding:"7px 12px" }}>{copied ? "Copied ✓" : "Copy"}</button>
+          </div>
+        ) : (
+          <button onClick={gen} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>Generate invite code</button>
+        )}
+      </div>
+
+      {/* Roster */}
+      <div style={{ ...S.sectionTitle, marginTop:18 }}>CLIENTS ({roster.length})</div>
+      {loading ? (
+        <div style={{ color:C.muted, fontSize:13 }}>Loading roster…</div>
+      ) : roster.length === 0 ? (
+        <div style={{ color:C.muted, fontSize:13, lineHeight:1.6 }}>No clients yet. Share your invite code above — once a client redeems it, they'll appear here.</div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {roster.map(c => (
+            <button key={c.id} onClick={()=>openClient(c.id)} style={{ display:"flex", alignItems:"center", gap:12, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"13px 15px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontFamily:"'DM Sans'", fontWeight:600, fontSize:15.5, color:C.text }}>{c.name}</div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{c.lastActive ? `Last active ${c.lastActive}` : "No activity yet"}</div>
+              </div>
+              {c.weight != null && (
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:C.text }}>{c.weight} lb</div>
+                  {c.weightTrend != null && c.weightTrend !== 0 && (
+                    <div style={{ fontSize:12, color: c.weightTrend < 0 ? C.green : C.blue }}>{c.weightTrend < 0 ? "▼" : "▲"} {Math.abs(c.weightTrend)} lb</div>
+                  )}
+                </div>
+              )}
+              <span style={{ color:"#4a4a6a", fontSize:18 }}>&#8250;</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Read-only per-client view for a coach.
+function CoachClientView({ detail, loading, onBack }) {
+  const Back = () => (
+    <button onClick={onBack} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+  );
+  const wrap = (children) => (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
+      <style>{GLOBAL_CSS}</style><WatermarkPlain />
+      <div style={{ padding:"16px 0 10px" }}><Back /></div>
+      {children}
+    </div>
+  );
+  if (loading || !detail) return wrap(<div style={{ color:C.muted, fontSize:13 }}>Loading client…</div>);
+
+  const pts = (detail.bodyEntries || []).filter(e => e.weight != null).map(e => ({ d: e.date, v: Number(e.weight) }));
+  const stats = detail.rewards?.stats || {};
+  const Stat = ({ label, value }) => (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 10px", textAlign:"center", flex:1 }}>
+      <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:22, color:"#e8ff00" }}>{value}</div>
+      <div style={{ fontSize:11, color:C.muted, marginTop:3, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+    </div>
+  );
+
+  // Compact inline weight trend (LineChart is nested elsewhere and not reusable).
+  let chart = <div style={{ color:C.muted, fontSize:13 }}>Not enough weight data yet.</div>;
+  if (pts.length >= 2) {
+    const vs = pts.map(p => p.v), min = Math.min(...vs), max = Math.max(...vs), range = (max - min) || 1;
+    const W = 300, H = 90, pad = 8;
+    const xy = pts.map((p, i) => [pad + i * (W - 2*pad) / (pts.length - 1), H - pad - ((p.v - min) / range) * (H - 2*pad)]);
+    const down = pts[pts.length-1].v <= pts[0].v;
+    chart = (
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto" }}>
+        <polyline points={xy.map(c => c.join(",")).join(" ")} fill="none" stroke={down ? C.green : C.blue} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  return wrap(
+    <>
+      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
+      <div style={{ fontSize:12, color:C.muted, marginBottom:14 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        <Stat label="Day streak" value={stats.currentStreak || 0} />
+        <Stat label="Workouts" value={stats.workoutsCompleted || detail.workoutCount || 0} />
+        <Stat label="PRs" value={stats.totalPRs || 0} />
+        <Stat label="Coins" value={detail.rewards?.coins || 0} />
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px" }}>
+        <div style={{ ...S.inputLabel, marginBottom:8 }}>Bodyweight trend</div>
+        {chart}
+        {pts.length > 0 && (
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted, marginTop:6 }}>
+            <span>{pts[0].d}: {pts[0].v} lb</span>
+            <span>{pts[pts.length-1].d}: {pts[pts.length-1].v} lb</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize:12.5, color:C.muted, marginTop:14, lineHeight:1.6 }}>
+        {detail.foodDays} day(s) of food logged · {(detail.bodyEntries||[]).length} weigh-in(s).
+      </div>
+    </>
+  );
+}
+
 export default function BodyMorph() {
   const [phase, setPhase]     = useState("init");   // init | wizard | loading | home | session | progress | nutrition
   const [profile, setProfile] = useState(null);
@@ -7617,6 +7807,7 @@ export default function BodyMorph() {
   const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
+  const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
 
   // Load all saved data from storage, then route to home (has profile) or wizard.
   // Extracted so it can run on first mount AND after a sign-in.
@@ -7654,11 +7845,12 @@ export default function BodyMorph() {
         const todayStr = new Date().toISOString().slice(0,10);
         const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
         const pull = (name, local) => uid ? pullMergeDomain(name, uid, local, fresh) : Promise.resolve(local);
-        const [mProfile, mSub, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
+        const [mProfile, mSub, mRole, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
                mGoals, mPlan, mCardioPlan, mStretchPlan, mRoutines, mVideo, mTodo, mVoice, mHyd, mDiet] =
           await Promise.all([
             uid ? pullMergeProfile(uid, sp) : Promise.resolve(sp),
             uid ? fetchSubscription(uid) : Promise.resolve(null),
+            uid ? fetchRole(uid) : Promise.resolve(null),
             pull("logs", sl), pull("rewards", sm), pull("body", sb), pull("cardio", sc),
             pull("steps", sst || []), pull("sleep", sslp || []), pull("supplements", ssup),
             pull("peptides", spep), pull("meals", smeals), pull("foodLog", sfoodlog),
@@ -7670,6 +7862,7 @@ export default function BodyMorph() {
           ]);
 
         setSubscription(mSub || null);
+        setRole(mRole || null);
         if (mLogs) setLogs(mLogs);
         if (mRewards) setRewards(mRewards);
         if (mBody) setBodyEntries(mBody);
@@ -7713,10 +7906,12 @@ export default function BodyMorph() {
             // Build a minimal safe program so the user lands on Home, not the wizard
             setProgram({ weeklySchedule:[], overview:"Tap TRAINING to rebuild your program.", stretching:"full", nutrition:macrosFor(migrated), progressMilestones:[] });
           }
-          setPhase(subscribed ? "home" : "subscribe");
-        } else {
-          setPhase(subscribed ? "wizard" : "subscribe");
         }
+        // Routing: a coach goes to the dashboard (skips client wizard + paywall);
+        // otherwise the normal client flow (gated by profile + subscription).
+        if (mRole === "coach") setPhase("dashboard");
+        else if (hasProfile) setPhase(subscribed ? "home" : "subscribe");
+        else setPhase(subscribed ? "wizard" : "subscribe");
       } catch(loadErr) {
         console.warn("Profile load error:", loadErr);
         // Something went wrong reading storage — go to wizard but don't crash
@@ -7743,7 +7938,7 @@ export default function BodyMorph() {
         if (prevId === nextId) return;          // ignore the listener's initial echo
         userRef.current = nextUser; setUser(nextUser);
         if (nextUser) { setLoaded(false); setPhase("init"); await hydrate(); }
-        else { setProfile(null); setProgram(null); setPhase("auth"); }
+        else { setProfile(null); setProgram(null); setRole(null); setSubscription(null); setPhase("auth"); }
       });
     })();
     return () => unsub();
@@ -7917,10 +8112,24 @@ export default function BodyMorph() {
   // The onAuth listener flips us to the auth screen once the session clears.
   const handleSignOut = async () => {
     await signOut();
-    userRef.current = null; setUser(null); setSubscription(null);
+    userRef.current = null; setUser(null); setSubscription(null); setRole(null);
     setProfile(null); setProgram(null);
     setPhase("auth");
   };
+
+  // Redeem a platform coach-access code -> become a coach -> route to the dashboard.
+  const becomeCoach = useCallback(async (code) => {
+    const res = await redeemCoachAccess(code);
+    if (res.ok) {
+      const r = await fetchRole(userRef.current?.id);
+      setRole(r);
+      if (r === "coach") setPhase("dashboard");
+    }
+    return res;
+  }, []);
+
+  // Client links to their coach via the coach's invite code.
+  const linkToCoach = useCallback(async (code) => redeemCoachInvite(code), []);
 
   const saveTrainingDays = async (days) => {
     const updated = { ...profile, trainingDays: days };
@@ -8213,7 +8422,8 @@ export default function BodyMorph() {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
-  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} /></>;
+  if (phase === "dashboard") return <CoachDashboard user={user} onSignOut={handleSignOut} />;
+  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={()=>setPhase("home")} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 
@@ -8253,7 +8463,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
