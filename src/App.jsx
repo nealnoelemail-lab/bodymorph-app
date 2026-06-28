@@ -7676,31 +7676,45 @@ const fld = { width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/86400000) : null;
 
 // Financials: side-by-side THIS MONTH (actual) vs NEXT MONTH (forecast).
-// "Actual" reflects only what's really tracked today (active coaching clients);
-// the other streams populate once Stripe / session tracking is connected.
+// Each stream carries its own variables; "actual" is read-only real data
+// (only consulting is attributable today), "forecast" is editable.
 function FinancialsSection({ activeClients }) {
-  const STREAMS = [
-    { k:"inperson",   label:"In-person training", rate:75 },
-    { k:"consulting", label:"Consulting (coaching)", rate:105 },
-    { k:"apponly",    label:"App access only", rate:10 },
-    { k:"referral",   label:"Referral income", rate:20 },
-  ];
   const num = (x) => parseFloat(x) || 0;
-  // ACTUAL — only consulting is attributable today (real active client count).
-  const actual = { inperson:0, consulting:(activeClients || 0) * 105, apponly:0, referral:0 };
-  const actualTotal = Object.values(actual).reduce((s, x) => s + x, 0);
-  // FORECAST — editable next-month plan, seeded from what we know.
+  // Per-stream variable schema. Referral is multiplicative: coaches × clients/coach × rate.
+  const STREAMS = [
+    { k:"inperson",   label:"In-person training",    inputs:[{ k:"sessions", unit:"sessions/mo" }], rate:75 },
+    { k:"consulting", label:"Consulting (coaching)", inputs:[{ k:"clients", unit:"clients" }],       rate:105 },
+    { k:"apponly",    label:"App access only",        inputs:[{ k:"clients", unit:"clients" }],       rate:15 },
+    { k:"referral",   label:"Referral income",        inputs:[{ k:"coaches", unit:"coaches" }, { k:"clientsPerCoach", unit:"clients/coach" }], rate:20 },
+  ];
+  const calc = (s) => s.inputs ? s : null;
+  const value = (st, s) => st.inputs.reduce((prod, inp) => prod * num(s[inp.k]), 1) * num(s.rate);
+
+  // ACTUAL — real today: only consulting (active client count). Others not tracked yet.
+  const actual = {
+    inperson:   { sessions:0, rate:75 },
+    consulting: { clients:activeClients || 0, rate:105 },
+    apponly:    { clients:0, rate:15 },
+    referral:   { coaches:0, clientsPerCoach:0, rate:20 },   // referral actual = coaches' combined clients × $20
+  };
+  const TRACKED = { consulting:true };
+  const actualTotal = STREAMS.reduce((s, st) => s + value(st, actual[st.k]), 0);
+
+  // FORECAST — editable, seeded from what we know.
   const [f, setF] = useState({
-    inperson:{ count:0, rate:75 }, consulting:{ count:activeClients || 0, rate:105 },
-    apponly:{ count:0, rate:10 }, referral:{ count:0, rate:20 },
+    inperson:   { sessions:0, rate:75 },
+    consulting: { clients:activeClients || 0, rate:105 },
+    apponly:    { clients:0, rate:15 },
+    referral:   { coaches:0, clientsPerCoach:0, rate:20 },
   });
   const setK = (k, field, val) => setF(p => ({ ...p, [k]: { ...p[k], [field]: val } }));
-  const fSub = (k) => num(f[k].count) * num(f[k].rate);
-  const fTotal = STREAMS.reduce((s, st) => s + fSub(st.k), 0);
+  const fTotal = STREAMS.reduce((s, st) => s + value(st, f[st.k]), 0);
   const delta = fTotal - actualTotal;
-  const mini = { width:54, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 7px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+
+  const mini = { width:48, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 6px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
   const colHead = { fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1, marginBottom:10 };
-  const rowBase = { display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid #1f1f2e` };
+  const rowBase = { padding:"10px 0", borderBottom:`1px solid #1f1f2e` };
+  const lblStyle = { fontSize:14, color:C.text, marginBottom:4 };
 
   return (
     <>
@@ -7708,33 +7722,49 @@ function FinancialsSection({ activeClients }) {
       <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>This month reflects what's actually tracked today; next month is your editable forecast. Live billed revenue + the other streams light up when Stripe / session tracking is connected.</div>
 
       <div style={{ display:"flex", gap:16, flexWrap:"wrap", alignItems:"stretch" }}>
-        {/* THIS MONTH — actual */}
-        <div style={{ flex:1, minWidth:280, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px" }}>
+        {/* THIS MONTH — actual (read-only) */}
+        <div style={{ flex:1, minWidth:300, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px" }}>
           <div style={colHead}>THIS MONTH · ACTUAL</div>
-          {STREAMS.map(st => (
-            <div key={st.k} style={rowBase}>
-              <div style={{ flex:1, fontSize:14, color:C.text }}>{st.label}</div>
-              {st.k === "consulting"
-                ? <div style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:C.text }}>${Math.round(actual.consulting).toLocaleString()}</div>
-                : <div style={{ fontSize:12.5, color:"#74748a" }}>not tracked yet</div>}
-            </div>
-          ))}
+          {STREAMS.map(st => {
+            const s = actual[st.k]; const v = value(st, s);
+            return (
+              <div key={st.k} style={rowBase}>
+                <div style={{ display:"flex", justifyContent:"space-between" }}>
+                  <span style={lblStyle}>{st.label}</span>
+                  <span style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color: v>0?C.text:"#74748a" }}>${Math.round(v).toLocaleString()}</span>
+                </div>
+                <div style={{ fontSize:12, color:"#74748a" }}>
+                  {st.inputs.map(inp => `${num(s[inp.k])} ${inp.unit}`).join(" × ") + ` × $${num(s.rate)}`}{TRACKED[st.k] ? "" : " · not tracked yet"}
+                </div>
+              </div>
+            );
+          })}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
             <div style={{ fontSize:12, color:C.muted, textTransform:"uppercase", letterSpacing:1 }}>Total</div>
             <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:24, color:C.text }}>${Math.round(actualTotal).toLocaleString()}/mo</div>
           </div>
         </div>
 
-        {/* NEXT MONTH — forecast */}
-        <div style={{ flex:1, minWidth:280, background:C.card, border:"1px solid rgba(232,255,0,0.3)", borderRadius:12, padding:"16px 18px" }}>
+        {/* NEXT MONTH — forecast (editable) */}
+        <div style={{ flex:1, minWidth:300, background:C.card, border:"1px solid rgba(232,255,0,0.3)", borderRadius:12, padding:"16px 18px" }}>
           <div style={{ ...colHead, color:"#e8ff00" }}>NEXT MONTH · FORECAST</div>
           {STREAMS.map(st => (
             <div key={st.k} style={rowBase}>
-              <div style={{ flex:1, fontSize:14, color:C.text }}>{st.label}</div>
-              <input type="number" value={f[st.k].count} onChange={e=>setK(st.k,"count",e.target.value)} style={mini} title="count" />
-              <span style={{ fontSize:12, color:C.muted }}>@$</span>
-              <input type="number" value={f[st.k].rate} onChange={e=>setK(st.k,"rate",e.target.value)} style={mini} title="rate" />
-              <div style={{ width:74, textAlign:"right", fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:"#e8ff00" }}>${Math.round(fSub(st.k)).toLocaleString()}</div>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                <span style={lblStyle}>{st.label}</span>
+                <span style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:"#e8ff00" }}>${Math.round(value(st, f[st.k])).toLocaleString()}</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                {st.inputs.map((inp, i) => (
+                  <span key={inp.k} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                    {i>0 && <span style={{ color:C.muted, fontSize:12 }}>×</span>}
+                    <input type="number" value={f[st.k][inp.k]} onChange={e=>setK(st.k, inp.k, e.target.value)} style={mini} />
+                    <span style={{ fontSize:11.5, color:C.muted }}>{inp.unit}</span>
+                  </span>
+                ))}
+                <span style={{ color:C.muted, fontSize:12 }}>× $</span>
+                <input type="number" value={f[st.k].rate} onChange={e=>setK(st.k,"rate",e.target.value)} style={mini} />
+              </div>
             </div>
           ))}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
