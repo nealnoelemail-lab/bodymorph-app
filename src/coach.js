@@ -44,10 +44,11 @@ export async function fetchMyInvite(coachId) {
 export async function fetchRoster(coachId) {
   if (!supabase || !coachId) return [];
   const { data: rels, error } = await supabase
-    .from("relationships").select("client_id").eq("coach_id", coachId).eq("status", "active");
+    .from("relationships").select("client_id, consulting_fee").eq("coach_id", coachId).eq("status", "active");
   if (error) { console.warn("coach fetchRoster:", error.message); return []; }
   const ids = (rels || []).map(r => r.client_id);
   if (!ids.length) return [];
+  const feeOf = (id) => (rels.find(r => r.client_id === id) || {}).consulting_fee;
 
   const [profiles, body, steps] = await Promise.all([
     supabase.from("profiles").select("id, first_name, extra").in("id", ids),
@@ -66,6 +67,7 @@ export async function fetchRoster(coachId) {
       weight: bw.length ? bw[bw.length - 1].weight : null,
       weightTrend: bw.length >= 2 ? +(bw[bw.length - 1].weight - bw[0].weight).toFixed(1) : null,
       lastActive,
+      consultingFee: feeOf(id),   // per-client override (null = use coach base fee)
     };
   });
 }
@@ -225,6 +227,46 @@ export function computeFinancials(roster, monthlyPrice = 105) {  // coach net pe
     monthlyPrice,
     newThisMonth,
   };
+}
+
+// ── COACH SETTINGS / SESSIONS / PER-CLIENT FEES ──────────────────────────────────
+const DEFAULT_SETTINGS = { inperson_rate: 75, consulting_fee: 105 };
+
+export async function fetchSettings(coachId) {
+  if (!supabase || !coachId) return { ...DEFAULT_SETTINGS };
+  const { data } = await supabase.from("coach_settings").select("inperson_rate, consulting_fee").eq("coach_id", coachId).maybeSingle();
+  return { ...DEFAULT_SETTINGS, ...(data || {}) };
+}
+export async function saveSettings(coachId, patch) {
+  if (!supabase || !coachId) return;
+  await supabase.from("coach_settings").upsert(
+    { coach_id: coachId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "coach_id" });
+}
+
+// Log an in-person training session.
+export async function logSession(coachId, { client_id, day, amount, note } = {}) {
+  if (!supabase || !coachId) return { error: "No backend." };
+  const { error } = await supabase.from("coach_sessions").insert(
+    { coach_id: coachId, client_id: client_id || null, day, amount: Number(amount) || 0, note: note || null });
+  return { error: error?.message || null };
+}
+// Sessions logged in the current calendar month (for "actual" in-person revenue).
+export async function listSessionsThisMonth(coachId) {
+  if (!supabase || !coachId) return [];
+  const monthStart = new Date(); monthStart.setDate(1);
+  const from = monthStart.toISOString().slice(0, 10);
+  const { data, error } = await supabase.from("coach_sessions")
+    .select("id, client_id, day, amount, note").eq("coach_id", coachId).gte("day", from).order("day", { ascending: false });
+  if (error) { console.warn("listSessionsThisMonth:", error.message); return []; }
+  return data || [];
+}
+
+// Set a per-client consulting fee override (null clears it -> uses base fee).
+export async function setClientFee(coachId, clientId, fee) {
+  if (!supabase || !coachId || !clientId) return;
+  await supabase.from("relationships")
+    .update({ consulting_fee: (fee === "" || fee == null) ? null : Number(fee) })
+    .eq("coach_id", coachId).eq("client_id", clientId);
 }
 
 // ── AI INTAKE EVALUATION (coach decision-support) ────────────────────────────────

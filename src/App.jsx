@@ -5,7 +5,8 @@ import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal 
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
-  computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation } from "./coach";
+  computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
+  fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 
 const C = {
@@ -7676,97 +7677,125 @@ const fld = { width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/86400000) : null;
 
 // Financials: side-by-side THIS MONTH (actual) vs NEXT MONTH (forecast).
-// Each stream carries its own variables; "actual" is read-only real data
-// (only consulting is attributable today), "forecast" is editable.
-function FinancialsSection({ activeClients }) {
+// Actuals are real: in-person = this month's logged sessions; consulting = sum of
+// each client's fee (per-client override or the coach's base). App access ($15) and
+// referral ($20) are platform-fixed rates (not coach-editable).
+const APP_RATE = 15;        // app-access compensation per client (fixed)
+const REFERRAL_RATE = 20;   // referral payout per referred client (fixed, platform-set)
+function FinancialsSection({ coachId, roster }) {
   const num = (x) => parseFloat(x) || 0;
-  // Per-stream variable schema. Referral is multiplicative: coaches × clients/coach × rate.
-  const STREAMS = [
-    { k:"inperson",   label:"In-person training",    inputs:[{ k:"sessions", unit:"sessions/mo" }], rate:75 },
-    { k:"consulting", label:"Consulting (coaching)", inputs:[{ k:"clients", unit:"clients" }],       rate:105 },
-    { k:"apponly",    label:"App access only",        inputs:[{ k:"clients", unit:"clients" }],       rate:15 },
-    { k:"referral",   label:"Referral income",        inputs:[{ k:"coaches", unit:"coaches" }, { k:"clientsPerCoach", unit:"clients/coach" }], rate:20 },
-  ];
-  const calc = (s) => s.inputs ? s : null;
-  const value = (st, s) => st.inputs.reduce((prod, inp) => prod * num(s[inp.k]), 1) * num(s.rate);
+  const [settings, setSettings] = useState({ inperson_rate:75, consulting_fee:105 });
+  const [sessions, setSessions] = useState([]);      // this month's in-person sessions
+  const [fc, setFc] = useState({ inperson:0, consulting:(roster?.length || 0), apponly:0, refCoaches:0, refPer:0 });
+  const [logOpen, setLogOpen] = useState(false);
+  const [log, setLog] = useState({ client_id:"", day:new Date().toISOString().slice(0,10), amount:"", note:"" });
 
-  // ACTUAL — real today: only consulting (active client count). Others not tracked yet.
-  const actual = {
-    inperson:   { sessions:0, rate:75 },
-    consulting: { clients:activeClients || 0, rate:105 },
-    apponly:    { clients:0, rate:15 },
-    referral:   { coaches:0, clientsPerCoach:0, rate:20 },   // referral actual = coaches' combined clients × $20
-  };
-  const TRACKED = { consulting:true };
-  const actualTotal = STREAMS.reduce((s, st) => s + value(st, actual[st.k]), 0);
+  const reloadSessions = async () => setSessions(await listSessionsThisMonth(coachId));
+  useEffect(() => { let on=true; (async()=>{ const s=await fetchSettings(coachId); if(on){ setSettings(s); setLog(l=>({...l, amount:String(s.inperson_rate)})); } await reloadSessions(); })(); return ()=>{on=false;}; }, [coachId]);
 
-  // FORECAST — editable, seeded from what we know.
-  const [f, setF] = useState({
-    inperson:   { sessions:0, rate:75 },
-    consulting: { clients:activeClients || 0, rate:105 },
-    apponly:    { clients:0, rate:15 },
-    referral:   { coaches:0, clientsPerCoach:0, rate:20 },
-  });
-  const setK = (k, field, val) => setF(p => ({ ...p, [k]: { ...p[k], [field]: val } }));
-  const fTotal = STREAMS.reduce((s, st) => s + value(st, f[st.k]), 0);
+  // Edit a coach rate setting (in-person $/session or consulting base fee) — persists.
+  const setRate = (field, val) => { setSettings(s => ({ ...s, [field]: val })); saveSettings(coachId, { [field]: num(val) }); };
+  const setF = (k, val) => setFc(p => ({ ...p, [k]: val }));
+
+  // ── ACTUAL (real this month) ──
+  const inpersonActual = sessions.reduce((s, x) => s + num(x.amount), 0);
+  const consultingActual = (roster || []).reduce((s, c) => s + (c.consultingFee != null ? num(c.consultingFee) : num(settings.consulting_fee)), 0);
+  const actualTotal = inpersonActual + consultingActual; // app + referral not tracked yet
+  // ── FORECAST ──
+  const inpersonF = num(fc.inperson) * num(settings.inperson_rate);
+  const consultingF = num(fc.consulting) * num(settings.consulting_fee);
+  const appF = num(fc.apponly) * APP_RATE;
+  const referralF = num(fc.refCoaches) * num(fc.refPer) * REFERRAL_RATE;
+  const fTotal = inpersonF + consultingF + appF + referralF;
   const delta = fTotal - actualTotal;
 
-  const mini = { width:48, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 6px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
+  const mini = { width:54, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 7px", fontSize:13, fontFamily:"'DM Sans'", outline:"none" };
   const colHead = { fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1, marginBottom:10 };
   const rowBase = { padding:"10px 0", borderBottom:`1px solid #1f1f2e` };
-  const lblStyle = { fontSize:14, color:C.text, marginBottom:4 };
+  const lbl = { fontSize:14, color:C.text };
+  const amt = (v, on) => <span style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color: on ? "#e8ff00" : (v>0?C.text:"#74748a") }}>${Math.round(v).toLocaleString()}</span>;
+  const note = (t) => <div style={{ fontSize:12, color:"#74748a", marginTop:2 }}>{t}</div>;
 
   return (
     <>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:6 }}>FINANCIALS</div>
-      <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>This month reflects what's actually tracked today; next month is your editable forecast. Live billed revenue + the other streams light up when Stripe / session tracking is connected.</div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:16, lineHeight:1.5 }}>This month is real: in-person from your logged sessions, consulting from each client's fee. App access ($15) and referral ($20) are platform-set rates; they populate when Stripe / referrals are connected.</div>
 
       <div style={{ display:"flex", gap:16, flexWrap:"wrap", alignItems:"stretch" }}>
-        {/* THIS MONTH — actual (read-only) */}
+        {/* THIS MONTH — actual */}
         <div style={{ flex:1, minWidth:300, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px" }}>
           <div style={colHead}>THIS MONTH · ACTUAL</div>
-          {STREAMS.map(st => {
-            const s = actual[st.k]; const v = value(st, s);
-            return (
-              <div key={st.k} style={rowBase}>
-                <div style={{ display:"flex", justifyContent:"space-between" }}>
-                  <span style={lblStyle}>{st.label}</span>
-                  <span style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color: v>0?C.text:"#74748a" }}>${Math.round(v).toLocaleString()}</span>
-                </div>
-                <div style={{ fontSize:12, color:"#74748a" }}>
-                  {st.inputs.map(inp => `${num(s[inp.k])} ${inp.unit}`).join(" × ") + ` × $${num(s.rate)}`}{TRACKED[st.k] ? "" : " · not tracked yet"}
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>In-person training</span>{amt(inpersonActual)}</div>
+            {note(`${sessions.length} session${sessions.length===1?"":"s"} logged this month`)}
+            <button onClick={()=>setLogOpen(o=>!o)} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5, marginTop:6 }}>{logOpen ? "Cancel" : "+ Log session"}</button>
+            {logOpen && (
+              <div style={{ marginTop:8, display:"flex", flexDirection:"column", gap:7 }}>
+                <input type="date" value={log.day} onChange={e=>setLog({...log,day:e.target.value})} style={{ ...mini, width:"100%" }} />
+                <select value={log.client_id} onChange={e=>setLog({...log,client_id:e.target.value})} style={{ ...mini, width:"100%" }}>
+                  <option value="">Client (optional)</option>
+                  {(roster||[]).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <div style={{ display:"flex", gap:7, alignItems:"center" }}>
+                  <span style={{ fontSize:13, color:C.muted }}>$</span>
+                  <input type="number" value={log.amount} onChange={e=>setLog({...log,amount:e.target.value})} placeholder="amount" style={{ ...mini, width:90 }} />
+                  <button onClick={async()=>{ await logSession(coachId,{ client_id:log.client_id, day:log.day, amount:log.amount, note:log.note }); setLog(l=>({...l, amount:String(settings.inperson_rate), client_id:"" })); setLogOpen(false); reloadSessions(); }} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", padding:"7px 14px" }}>Log</button>
                 </div>
               </div>
-            );
-          })}
+            )}
+          </div>
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>Consulting (coaching)</span>{amt(consultingActual)}</div>
+            {note(`${(roster||[]).length} client${(roster||[]).length===1?"":"s"} · base $${num(settings.consulting_fee)}${(roster||[]).some(c=>c.consultingFee!=null)?" (+ per-client fees)":""}`)}
+          </div>
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>App access only</span>{amt(0)}</div>
+            {note(`not tracked yet · $${APP_RATE}/client`)}
+          </div>
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>Referral income</span>{amt(0)}</div>
+            {note(`not tracked yet · $${REFERRAL_RATE}/referred client`)}
+          </div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
             <div style={{ fontSize:12, color:C.muted, textTransform:"uppercase", letterSpacing:1 }}>Total</div>
             <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:24, color:C.text }}>${Math.round(actualTotal).toLocaleString()}/mo</div>
           </div>
         </div>
 
-        {/* NEXT MONTH — forecast (editable) */}
+        {/* NEXT MONTH — forecast */}
         <div style={{ flex:1, minWidth:300, background:C.card, border:"1px solid rgba(232,255,0,0.3)", borderRadius:12, padding:"16px 18px" }}>
           <div style={{ ...colHead, color:"#e8ff00" }}>NEXT MONTH · FORECAST</div>
-          {STREAMS.map(st => (
-            <div key={st.k} style={rowBase}>
-              <div style={{ display:"flex", justifyContent:"space-between" }}>
-                <span style={lblStyle}>{st.label}</span>
-                <span style={{ fontFamily:"'Oswald'", fontWeight:600, fontSize:15, color:"#e8ff00" }}>${Math.round(value(st, f[st.k])).toLocaleString()}</span>
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-                {st.inputs.map((inp, i) => (
-                  <span key={inp.k} style={{ display:"flex", alignItems:"center", gap:5 }}>
-                    {i>0 && <span style={{ color:C.muted, fontSize:12 }}>×</span>}
-                    <input type="number" value={f[st.k][inp.k]} onChange={e=>setK(st.k, inp.k, e.target.value)} style={mini} />
-                    <span style={{ fontSize:11.5, color:C.muted }}>{inp.unit}</span>
-                  </span>
-                ))}
-                <span style={{ color:C.muted, fontSize:12 }}>× $</span>
-                <input type="number" value={f[st.k].rate} onChange={e=>setK(st.k,"rate",e.target.value)} style={mini} />
-              </div>
+          {/* in-person: sessions × coach's $/session (editable, saved) */}
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>In-person training</span>{amt(inpersonF, true)}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4, flexWrap:"wrap" }}>
+              <input type="number" value={fc.inperson} onChange={e=>setF("inperson",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>sessions × $</span>
+              <input type="number" value={settings.inperson_rate} onChange={e=>setRate("inperson_rate",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>/session</span>
             </div>
-          ))}
+          </div>
+          {/* consulting: clients × base fee (editable, saved) */}
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>Consulting (coaching)</span>{amt(consultingF, true)}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4, flexWrap:"wrap" }}>
+              <input type="number" value={fc.consulting} onChange={e=>setF("consulting",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>clients × $</span>
+              <input type="number" value={settings.consulting_fee} onChange={e=>setRate("consulting_fee",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>base/mo</span>
+            </div>
+          </div>
+          {/* app access: clients × FIXED $15 */}
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>App access only</span>{amt(appF, true)}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
+              <input type="number" value={fc.apponly} onChange={e=>setF("apponly",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>clients × ${APP_RATE} (fixed)</span>
+            </div>
+          </div>
+          {/* referral: coaches × clients/coach × FIXED $20 */}
+          <div style={rowBase}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span style={lbl}>Referral income</span>{amt(referralF, true)}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4, flexWrap:"wrap" }}>
+              <input type="number" value={fc.refCoaches} onChange={e=>setF("refCoaches",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>coaches ×</span>
+              <input type="number" value={fc.refPer} onChange={e=>setF("refPer",e.target.value)} style={mini} /><span style={{ fontSize:11.5, color:C.muted }}>clients/coach × ${REFERRAL_RATE}</span>
+            </div>
+          </div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12 }}>
             <div style={{ fontSize:12, color:C.muted, textTransform:"uppercase", letterSpacing:1 }}>Total{delta !== 0 ? ` · ${delta>0?"+":""}$${Math.round(delta).toLocaleString()}` : ""}</div>
             <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:24, color:"#e8ff00" }}>${Math.round(fTotal).toLocaleString()}/mo</div>
@@ -7775,7 +7804,7 @@ function FinancialsSection({ activeClients }) {
       </div>
 
       <div style={{ background:C.card, border:`1px dashed ${C.border}`, borderRadius:12, padding:"16px", marginTop:18 }}>
-        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>Connect Stripe to replace these estimates with real billed revenue, payouts, and per-client transactions across all four streams.</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>Connect Stripe to bring app-access subscriptions and referral payouts into the actual column automatically.</div>
         <button disabled style={{ ...S.btnSec, marginTop:12, opacity:0.55, cursor:"default" }}>Connect Stripe (coming soon)</button>
       </div>
     </>
@@ -7916,7 +7945,9 @@ function CoachApp({ user, profile, onSignOut }) {
             </>
           )}
           {section==="clients" && selected && (
-            <CoachClientView coachId={uid} clientId={selected} detail={detail} loading={detailLoading} onBack={()=>{ setSelected(null); setDetail(null); }} />
+            <CoachClientView coachId={uid} clientId={selected} detail={detail} loading={detailLoading}
+              clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load}
+              onBack={()=>{ setSelected(null); setDetail(null); }} />
           )}
 
           {/* PROSPECTS */}
@@ -7955,7 +7986,7 @@ function CoachApp({ user, profile, onSignOut }) {
           )}
 
           {/* FINANCIALS */}
-          {section==="financials" && <FinancialsSection activeClients={roster.length} />}
+          {section==="financials" && <FinancialsSection coachId={uid} roster={roster} />}
         </main>
       </div>
 
@@ -8148,7 +8179,11 @@ function ClientEvaluation({ coachId, clientId, clientName }) {
 }
 
 // Read-only per-client view for a coach.
-function CoachClientView({ coachId, clientId, detail, loading, onBack }) {
+function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved }) {
+  const [fee, setFee] = useState(clientFee == null ? "" : String(clientFee));
+  const [feeSaved, setFeeSaved] = useState(false);
+  useEffect(() => { setFee(clientFee == null ? "" : String(clientFee)); }, [clientFee, clientId]);
+  const saveFee = async () => { await setClientFee(coachId, clientId, fee); setFeeSaved(true); onFeeSaved && onFeeSaved(); setTimeout(()=>setFeeSaved(false), 1500); };
   const [summary, setSummary] = useState(null);   // { summary, generated_at }
   const [genBusy, setGenBusy] = useState(false);
   const [genErr, setGenErr] = useState("");
@@ -8204,7 +8239,15 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack }) {
   return wrap(
     <>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
-      <div style={{ fontSize:12, color:C.muted, marginBottom:14 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
+      <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
+
+      {/* Per-client consulting fee (overrides the coach's base fee) */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        <span style={{ fontSize:13, color:C.muted }}>Consulting fee $</span>
+        <input type="number" value={fee} onChange={e=>setFee(e.target.value)} placeholder="base" style={{ width:80, background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:6, color:C.text, padding:"6px 8px", fontSize:13, outline:"none" }} />
+        <span style={{ fontSize:11.5, color:"#74748a" }}>/mo · blank = base fee</span>
+        <button onClick={saveFee} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5 }}>{feeSaved ? "Saved ✓" : "Save"}</button>
+      </div>
 
       {/* AI weekly briefing */}
       <div style={{ background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.25)", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
