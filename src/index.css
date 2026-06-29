@@ -18,6 +18,11 @@ html {
 #root {
   max-width: 480px;
   margin: 0 auto;
+  box-sizing: border-box;
+  /* Push the whole app below the iOS status bar / Dynamic Island and above the
+     home indicator (native shell). Zero on devices/desktop without insets. */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* The coach business dashboard is a desktop layout — lift the phone-width cap
