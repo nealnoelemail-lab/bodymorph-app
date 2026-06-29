@@ -1,6 +1,7 @@
 import Foundation
 import Capacitor
 import AVFoundation
+import UIKit
 
 // Native microphone capture for the voice coach. The WebView's getUserMedia is
 // unreliable/silent on iOS, so we capture audio natively with AVAudioRecorder,
@@ -51,6 +52,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
             do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
             self.startKeepAlive()
+            // Keep the screen awake while the coach is active so iOS doesn't auto-lock
+            // mid-workout (which suspends the web layer and stops the conversation). A
+            // deliberate lock by the user still stops it, as expected.
+            UIApplication.shared.isIdleTimerDisabled = true
             call.resolve()
         }
         if #available(iOS 17.0, *) {
@@ -87,6 +92,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         DispatchQueue.main.async {
             self.endRecording(emit: false)
             self.stopKeepAlive()
+            UIApplication.shared.isIdleTimerDisabled = false   // restore normal auto-lock
             call.resolve()
         }
     }
