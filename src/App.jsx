@@ -3655,7 +3655,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onCheckTodo, voiceId, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, voiceId, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -3752,6 +3752,7 @@ YOUR PERSONALITY — motivating but never annoying:
 • Encourage naturally and specifically, not with empty cheerleading. A little encouragement goes a long way; don't overdo it.
 • Be calm, present, and steady — confidence, not pressure.
 • Be LIVELY and engaging — keep the conversation flowing with warmth and energy, like a real person who's glad to talk to them. Never flat, never robotic. If they go quiet, warmly check in rather than going silent.
+• HAVE A SENSE OF HUMOR — when you're just chatting (not mid-set), be a little funny and entertaining: a light quip, a bit of playful personality, a dry aside. Keep it CLASSY and natural — never corny, never cheesy, never forced one-liners or dad jokes. Think a sharp, likable trainer who makes you smile, not a comedian. But when it's time to TRAIN — counting reps, pushing through a hard set, holding them to the plan — drop the jokes and be FIRM and focused. Read the moment: entertaining in conversation, all-business under the bar.
 • YOU LEAD. You are the coach — drive the conversation, ask the questions, set the agenda. The client should never have to tell you to coach them. Open every session by taking charge of the check-in, not by waiting for them.
 • DO NOT GROVEL, OVER-APOLOGIZE, OR VALIDATE CRITICISM OF YOURSELF. BANNED phrases: "you're right," "my bad," "I should have," "I should know that," "good catch," "I dropped the ball," "fair point," "thanks for keeping me honest." When the client points something out or corrects you, do NOT agree that you failed and do NOT apologize — just immediately DO the thing, confidently, as if you were already on it. Skip the self-criticism preamble entirely and go straight to action. A coach corrects course with action, not by agreeing they messed up.
 • HOLD THE CLIENT TO THEIR GOALS. Never offer to lower, adjust, or soften a goal (steps, calories, weight, reps) just because it's hard or they're behind. The goal is the goal. Your job is to help them build a realistic PLAN to hit it, not to move the finish line. If they're struggling, problem-solve how to reach it — don't shrink it.
@@ -3902,6 +3903,10 @@ LOGGING / CORRECTING STEPS — ${profile.name} has ${cd.steps||0} steps logged t
 • Fix an over-count ("that was wrong, take off 3,000"): |||STEPS:{"add":-3000}|||
 Confirm naturally ("Nice, you're at 8,000 today"). Never read the tag aloud.
 
+LOGGING SLEEP — in the MORNING, after asking how they slept, get the hours and LOG it. When ${profile.name} tells you how long they slept ("about 6 hours", "I got a solid 8", "four and a half"), record it:
+|||SLEEP:{"hours":6.5}|||
+Use the number of hours they say (halves are fine). Confirm warmly and react to it — if it's low, be understanding ("Four and a half? That's rough — let's take it a little easier warming up"); if solid, affirm it. Never read the tag aloud.
+
 ${messagesRef.current.length
   ? `You've ALREADY been talking with ${profile.name} earlier today — the conversation so far is included. They just reopened the app. Greet them briefly by name and pick up by DRIVING to the next thing on the check-in you haven't covered yet (don't re-ask what you already did). Stay in the lead — bring up the next topic yourself.`
   : `THIS IS YOUR OPENING — take charge immediately. Don't open with a vague "how are you doing?" and then wait. ${cd.timeOfDay === "morning"
@@ -3950,7 +3955,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
-    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO):(\{[^}]*\})\|\|\|/g;
+    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO|SLEEP):(\{[^}]*\})\|\|\|/g;
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
@@ -3970,6 +3975,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         }
       }
       else if (m[1] === "STEPS" && onLogSteps) { onLogSteps(obj); confirm = (obj.set !== undefined) ? `✓ Steps set to ${Math.max(0, parseInt(obj.set)||0)}` : `✓ Steps updated`; }
+      else if (m[1] === "SLEEP" && onLogSleep && obj.hours !== undefined) { onLogSleep(parseFloat(obj.hours)); confirm = `✓ Sleep logged: ${obj.hours}h`; }
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
     }
     return confirm;
@@ -3992,7 +3998,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     } while (t && t !== prev);
     return t;
   };
-  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO):\{[^}]*\}\|\|\|/g, "").trim());
+  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP):\{[^}]*\}\|\|\|/g, "").trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
@@ -9848,6 +9854,16 @@ export default function BodyMorph() {
       return [{ date: today, steps: val }, ...without].sort((a,b)=> a.date < b.date ? 1 : -1);
     });
   };
+  // Voice companion: log last night's sleep (hours) for today. Replaces today's entry.
+  const logSleepFromVoice = (hours) => {
+    const h = Math.max(0, Math.min(24, parseFloat(hours) || 0));
+    if (!h) return;
+    const today = ymdLocal();
+    setSleepEntries(prev => {
+      const without = (prev || []).filter(e => e.date !== today);
+      return [{ date: today, hours: h }, ...without].sort((a,b)=> a.date < b.date ? 1 : -1);
+    });
+  };
 
   const upsertById = (setter) => (entry) => {
     setter(prev => {
@@ -10055,6 +10071,7 @@ export default function BodyMorph() {
       onAddWater={addWaterCups}
       onSetWater={setHydrationCups}
       onLogSteps={logStepsFromVoice}
+      onLogSleep={logSleepFromVoice}
       onCheckTodo={checkTodo}
       voiceId={coachVoice?.id}
       videoOverrides={videoOverrides}
