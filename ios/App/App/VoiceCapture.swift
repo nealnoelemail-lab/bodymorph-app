@@ -23,6 +23,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var fileURL: URL?
     private var capturing = false
     private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
+    private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
     private var hasSpeech = false
     private var speechFrames = 0
     private var silenceFrames = 0
@@ -49,6 +50,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                 try session.setActive(true)
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
             do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
+            self.startKeepAlive()
             call.resolve()
         }
         if #available(iOS 17.0, *) {
@@ -84,8 +86,40 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     @objc func stop(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             self.endRecording(emit: false)
+            self.stopKeepAlive()
             call.resolve()
         }
+    }
+
+    // Loop silent audio so the app keeps "producing audio" — with the UIBackgroundModes
+    // "audio" entitlement, iOS then keeps the app (and our listen loop) alive when the
+    // screen turns off, instead of suspending it between recording bursts.
+    private func startKeepAlive() {
+        guard keepAlive == nil else { return }
+        if let player = try? AVAudioPlayer(data: makeSilentWav()) {
+            player.numberOfLoops = -1
+            player.volume = 0.0
+            player.play()
+            keepAlive = player
+        }
+    }
+    private func stopKeepAlive() {
+        keepAlive?.stop()
+        keepAlive = nil
+    }
+    private func makeSilentWav(seconds: Double = 2.0, sampleRate: Double = 8000) -> Data {
+        let numSamples = Int(seconds * sampleRate)
+        let dataSize = numSamples * 2   // 16-bit mono
+        var d = Data()
+        func a(_ s: String) { d.append(s.data(using: .ascii)!) }
+        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        a("RIFF"); u32(UInt32(36 + dataSize)); a("WAVE")
+        a("fmt "); u32(16); u16(1); u16(1)
+        u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * 2); u16(2); u16(16)
+        a("data"); u32(UInt32(dataSize))
+        d.append(Data(count: dataSize))   // all zeros = silence
+        return d
     }
 
     private func beginRecording() {
