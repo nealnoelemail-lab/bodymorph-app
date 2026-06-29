@@ -4364,7 +4364,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       }
     } catch {}
     // Wake lock auto-releases when the page is hidden — re-acquire when it returns.
-    const onVis = () => { if (document.visibilityState === "visible") requestWakeLock(); };
+    const onVis = () => { if (document.visibilityState === "visible") { requestWakeLock(); try { audioCtxRef.current?.resume?.(); } catch {} } };
     document.addEventListener("visibilitychange", onVis);
     arm();
     return () => {
