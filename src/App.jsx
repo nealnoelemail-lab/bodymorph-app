@@ -6872,11 +6872,13 @@ function applySolver(plan, target) {
   return plan;
 }
 
-async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands }) {
+async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines }) {
+  const cuisineList = Array.isArray(cuisines) ? cuisines.filter(Boolean) : [];
   // 1. AI proposes the day's foods with simple USDA-friendly search terms + gram portions.
   const prompt = `You are a sports nutritionist building ONE day's meal plan for ${name || "a client"}.
 Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
+${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH them across the day for variety (don't make every meal the same cuisine; ideally give different meals different cuisines): ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
 Build breakfast, lunch, dinner, and one snack. Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
 Reply ONLY with JSON, no markdown, no commentary:
 {"meals":[{"slot":"breakfast","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","items":[...]},{"slot":"dinner","items":[...]},{"slot":"snacks","items":[...]}]}`;
@@ -7255,6 +7257,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const [allergenOpen, setAllergenOpen] = useState(false);
   const toggleAllergen = (a) => setAllergens(list => list.includes(a) ? list.filter(x=>x!==a) : [...list, a]);
   const combinedAllergies = () => [...allergens, allergies.trim()].filter(Boolean).join(", ");
+  // Cuisines — mix & match for variety; the AI rotates them across the day's meals.
+  const [cuisines, setCuisines] = useState((nutritionGoals && nutritionGoals.cuisines) || []);
+  const toggleCuisine = (c) => setCuisines(list => list.includes(c) ? list.filter(x=>x!==c) : [...list, c]);
   const [generating, setGenerating] = useState(false);
   const [genPlan, setGenPlan] = useState(null);
   const [genErr, setGenErr] = useState(null);
@@ -7395,11 +7400,12 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
     setGenerating(true); setGenErr(null); setGenPlan(null);
-    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands }); // remember prefs
+    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands, cuisines }); // remember prefs
     try {
       const plan = await generateMealPlan({
         name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
         allergies: combinedAllergies(), useBranded, preferredBrands: useBranded ? prefBrandList() : [],
+        cuisines,
         targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
       });
       setGenPlan(plan);
@@ -7628,6 +7634,16 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   <div style={{ fontSize:22, color:"#9898b8", marginBottom:16, lineHeight:1.45 }}>
                     A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
                   </div>
+
+                  {/* Cuisines — mix & match for variety so meals don't get boring */}
+                  <div style={{ fontSize:19, color:"#9898b8", marginBottom:4 }}>Cuisines <span style={{color:"#74748a", fontSize:15}}>(optional — mix & match for variety)</span></div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: cuisines.length?8:16 }}>
+                    {["Italian","Mexican","Chinese","Japanese","Thai","Indian","Mediterranean","Middle Eastern","American","Korean","Greek","Caribbean"].map(c => {
+                      const on = cuisines.includes(c);
+                      return <button key={c} onClick={()=>toggleCuisine(c)} style={{ background: on?"rgba(232,255,0,0.15)":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#e8ff00":"#c8c8e0", borderRadius:18, padding:"9px 14px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'" }}>{on?"✓ ":""}{c}</button>;
+                    })}
+                  </div>
+                  {cuisines.length > 0 && <div style={{ fontSize:14, color:"#74748a", marginBottom:16 }}>We'll rotate {cuisines.length===1?"this cuisine":"these cuisines"} across your meals so the day stays interesting.</div>}
 
                   {/* Body-fat % — refines protein (lean mass). Estimate now, update later. */}
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
