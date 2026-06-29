@@ -6,10 +6,23 @@ import AVFoundation
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    private var didRegisterPlugins = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         configureAudioSession()
         return true
+    }
+
+    // Register our LOCAL VoiceCapture plugin on the bridge once the root bridge
+    // controller is up. Done from the AppDelegate (not a storyboard subclass) to
+    // avoid storyboard class-resolution issues. Runs well before the user opens the
+    // voice coach, so the plugin is ready when JS first calls it.
+    private func registerLocalPlugins() {
+        guard !didRegisterPlugins else { return }
+        if let vc = window?.rootViewController as? CAPBridgeViewController, let bridge = vc.bridge {
+            bridge.registerPluginInstance(VoiceCapturePlugin())
+            didRegisterPlugins = true
+        }
     }
 
     // Configure a record+playback audio session so the voice coach can listen and
@@ -45,6 +58,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Re-assert the audio session on return to foreground (it can be deactivated
         // by interruptions or when the screen was off).
         configureAudioSession()
+        registerLocalPlugins()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
