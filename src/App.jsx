@@ -180,16 +180,14 @@ const ELEVEN_VOICES = [
   { id: "ErXwobaYiN019PkySvjV", name: "Antoni — warm male" },
   { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh — young male" },
 ];
-// Grok voice catalog picks — 3 male, 3 female. Labels are best-guess starting
-// points (the catalog has no age/energy metadata); pick by ear via Preview. The
-// two "senior-friendly" ones are the laid-back options for an older audience.
+// Grok voice picks chosen by ear from the xAI console — 3 male, 3 female.
 const GROK_VOICES = [
-  { id: "78a495fdbb39", name: "James — energetic young male (trainer)" },
-  { id: "96819d0bd28d", name: "Daniel — easygoing male" },
-  { id: "leo",          name: "Leo — deep, laid-back male (senior-friendly)" },
-  { id: "eve",          name: "Eve — bright, energetic female" },
-  { id: "f8cf5c2c78d4", name: "Grace — friendly female" },
-  { id: "ara",          name: "Ara — warm, calm female (senior-friendly)" },
+  { id: "78a495fdbb39", name: "James (male)" },
+  { id: "96819d0bd28d", name: "Daniel (male)" },
+  { id: "sal",          name: "Sal (male)" },
+  { id: "ara",          name: "Ara (female)" },
+  { id: "79f3a8b96d43", name: "Claire (female)" },
+  { id: "eve",          name: "Eve (female)" },
 ];
 // The picker shows whichever provider's voices are active.
 const COACH_VOICES = USE_GROK ? GROK_VOICES : ELEVEN_VOICES;
