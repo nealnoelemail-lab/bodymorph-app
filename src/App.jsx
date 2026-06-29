@@ -7574,6 +7574,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
           ))}
         </div>
 
+        {/* AI meal plan — right under the diet style the user picks */}
+        <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19.5 }}>✨ Generate AI Meal Plan</button>
+
         {/* Calorie Goal */}
         <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:10 }}>
           <div style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5, marginBottom:6 }}>CALORIE GOAL</div>
@@ -7611,7 +7614,6 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>MEAL PLAN</div>
           <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
         </div>
-        <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19.5 }}>✨ Generate AI Meal Plan</button>
 
         {genOpen && (
           <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", padding:"20px 16px 40px" }}>
