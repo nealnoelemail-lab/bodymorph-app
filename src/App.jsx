@@ -3690,7 +3690,10 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
         requestWakeLock();
         askRef.current?.(null, true); // greeting
       } catch (e) {
-        setError("Microphone blocked. Enable it in Settings → BodyMorph → Microphone, then reopen the coach.");
+        const msg = (e && (e.message || e.errorMessage)) || String(e);
+        log("configure err: " + msg);
+        if (/permission/i.test(msg)) setError("Microphone permission is off. Settings → BodyMorph → Microphone → On, then reopen the coach.");
+        else setError("Voice setup error: " + msg + " — tap Try Again.");
       }
       return;
     }

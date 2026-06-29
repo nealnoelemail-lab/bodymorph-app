@@ -38,17 +38,33 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // and ask for mic permission. Call once when the coach session starts.
     @objc func configure(_ call: CAPPluginCall) {
         let session = AVAudioSession.sharedInstance()
-        session.requestRecordPermission { granted in
-            DispatchQueue.main.async {
-                if !granted { call.reject("microphone permission denied"); return }
-                do {
-                    try session.setCategory(.playAndRecord, mode: .voiceChat,
-                                            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-                    try session.setActive(true)
-                    try session.overrideOutputAudioPort(.speaker)
-                    call.resolve()
-                } catch {
-                    call.reject("audio session error: \(error.localizedDescription)")
+        // Set up the session BEST-EFFORT: recording works even if a routing call
+        // throws, so we only fail when the mic permission is actually denied.
+        func setupSessionAndResolve() {
+            do {
+                try session.setCategory(.playAndRecord, mode: .default,
+                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                try session.setActive(true)
+            } catch { print("[VoiceCapture] setCategory error: \(error)") }
+            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
+            call.resolve()
+        }
+        if #available(iOS 17.0, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted: setupSessionAndResolve()
+            case .denied: call.reject("permission-denied")
+            default:
+                AVAudioApplication.requestRecordPermission { granted in
+                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
+                }
+            }
+        } else {
+            switch session.recordPermission {
+            case .granted: setupSessionAndResolve()
+            case .denied: call.reject("permission-denied")
+            default:
+                session.requestRecordPermission { granted in
+                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
                 }
             }
         }
