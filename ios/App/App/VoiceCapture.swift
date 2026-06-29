@@ -3,207 +3,181 @@ import Capacitor
 import AVFoundation
 
 // Native microphone capture for the voice coach. The WebView's getUserMedia is
-// unreliable/silent on iOS, so we capture audio natively with AVAudioRecorder,
-// do simple energy-based voice-activity detection, and hand each finished phrase
-// back to JS as a base64 m4a clip (which JS sends to Whisper exactly as before).
-// We also force the audio session to the SPEAKER and pair it with the "audio"
-// background mode so it keeps listening with the screen off.
+// silent on iOS, so we capture natively. Critically, this uses a CONTINUOUS
+// AVAudioEngine input tap that never stops while the coach is active — that keeps
+// live audio input running, so iOS (with the "audio" background mode) keeps the
+// app alive when the screen turns off, instead of suspending it between phrases.
+//
+// Flow: configure() sets up the session + starts the engine. listen() begins
+// detecting a phrase; on end-of-phrase (energy VAD → ~0.6s silence) we transcribe
+// the buffered audio natively (URLSession → OpenAI, no WebView CORS) and emit the
+// TEXT to JS, then stop detecting until JS calls listen() again. pause()/resume()
+// gate detection during the coach's own speech. The engine keeps running throughout.
 @objc(VoiceCapturePlugin)
-public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
+public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "VoiceCapturePlugin"
     public let jsName = "VoiceCapture"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pause", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resume", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
     ]
 
-    private var recorder: AVAudioRecorder?
-    private var meterTimer: Timer?
-    private var fileURL: URL?
-    private var capturing = false
-    private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
-    private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
-    private var hasSpeech = false
-    private var speechFrames = 0
-    private var silenceFrames = 0
-    private var totalFrames = 0
+    private let engine = AVAudioEngine()
+    private var engineRunning = false
+    private var openaiKey = ""
 
-    // Tuning (frames are ~100ms each via the meter timer).
-    private let speechThreshold: Float = -38.0   // dBFS above which we treat sound as speech
-    private let silenceHang = 6                   // ~0.6s of silence ends a phrase
-    private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
-    private let maxFrames = 120                   // ~12s hard cap per phrase
-    private let idleFrames = 50                   // ~5s of no speech → give up, return empty
+    // Detection state (touched on the audio thread; guarded by `lock`).
+    private let lock = NSLock()
+    private var detecting = false
+    private var inSpeech = false
+    private var speechSamples = 0
+    private var silenceSamples = 0
+    private var phrase = Data()           // 16-bit PCM mono for the current phrase
+    private var phraseRate: Double = 16000
+    private var levelThrottle = 0
 
-    // Configure + activate the audio session (record + playback, forced to speaker)
-    // and ask for mic permission. Call once when the coach session starts.
+    // Tuning
+    private let speechDb: Float = -40.0    // dBFS above which we treat audio as speech
+    private let silenceSecs = 0.6          // trailing silence that ends a phrase
+    private let minSpeechSecs = 0.2
+
+    // MARK: - Public API
+
     @objc func configure(_ call: CAPPluginCall) {
         if let k = call.getString("openaiKey"), !k.isEmpty { openaiKey = k }
         let session = AVAudioSession.sharedInstance()
-        // Set up the session BEST-EFFORT: recording works even if a routing call
-        // throws, so we only fail when the mic permission is actually denied.
-        func setupSessionAndResolve() {
+        func setupAndResolve() {
             do {
                 try session.setCategory(.playAndRecord, mode: .default,
                                         options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
                 try session.setActive(true)
-            } catch { print("[VoiceCapture] setCategory error: \(error)") }
-            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
-            self.startKeepAlive()
+            } catch { print("[VoiceCapture] session error: \(error)") }
+            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker error: \(error)") }
+            self.startEngine()
             call.resolve()
         }
         if #available(iOS 17.0, *) {
             switch AVAudioApplication.shared.recordPermission {
-            case .granted: setupSessionAndResolve()
+            case .granted: setupAndResolve()
             case .denied: call.reject("permission-denied")
-            default:
-                AVAudioApplication.requestRecordPermission { granted in
-                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
-                }
+            default: AVAudioApplication.requestRecordPermission { ok in
+                DispatchQueue.main.async { ok ? setupAndResolve() : call.reject("permission-denied") } }
             }
         } else {
             switch session.recordPermission {
-            case .granted: setupSessionAndResolve()
+            case .granted: setupAndResolve()
             case .denied: call.reject("permission-denied")
-            default:
-                session.requestRecordPermission { granted in
-                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
-                }
+            default: session.requestRecordPermission { ok in
+                DispatchQueue.main.async { ok ? setupAndResolve() : call.reject("permission-denied") } }
             }
         }
     }
 
-    // Capture ONE phrase, then emit a `utterance` event with the audio (or an
-    // `empty` event if nothing was said). JS calls this at the start of each turn.
     @objc func listen(_ call: CAPPluginCall) {
-        DispatchQueue.main.async {
-            self.beginRecording()
-            call.resolve()
-        }
+        if !engineRunning { startEngine() }
+        beginPhrase()
+        call.resolve()
+    }
+
+    @objc func pause(_ call: CAPPluginCall) {
+        lock.lock(); detecting = false; lock.unlock()
+        call.resolve()
+    }
+
+    @objc func resume(_ call: CAPPluginCall) {
+        beginPhrase()
+        call.resolve()
     }
 
     @objc func stop(_ call: CAPPluginCall) {
-        DispatchQueue.main.async {
-            self.endRecording(emit: false)
-            self.stopKeepAlive()
-            call.resolve()
+        lock.lock(); detecting = false; lock.unlock()
+        if engineRunning {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engineRunning = false
+        }
+        call.resolve()
+    }
+
+    // MARK: - Engine
+
+    private func beginPhrase() {
+        lock.lock()
+        detecting = true; inSpeech = false; speechSamples = 0; silenceSamples = 0; phrase = Data()
+        lock.unlock()
+    }
+
+    private func startEngine() {
+        guard !engineRunning else { return }
+        let input = engine.inputNode
+        let fmt = input.outputFormat(forBus: 0)
+        phraseRate = fmt.sampleRate
+        let channels = Int(fmt.channelCount)
+        input.installTap(onBus: 0, bufferSize: 2048, format: fmt) { [weak self] buffer, _ in
+            self?.process(buffer, channels: channels)
+        }
+        engine.prepare()
+        do { try engine.start(); engineRunning = true }
+        catch { print("[VoiceCapture] engine start error: \(error)") }
+    }
+
+    private func process(_ buffer: AVAudioPCMBuffer, channels: Int) {
+        guard let chans = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        if frames == 0 { return }
+
+        // Downmix to mono, compute RMS, build 16-bit PCM.
+        var sumSq: Float = 0
+        var pcm = Data(capacity: frames * 2)
+        for i in 0..<frames {
+            var s: Float = 0
+            for c in 0..<channels { s += chans[c][i] }
+            s /= Float(channels)
+            sumSq += s * s
+            let clamped = max(-1.0, min(1.0, s))
+            var le = Int16(clamped * 32767).littleEndian
+            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+        }
+        let rms = sqrt(sumSq / Float(frames))
+        let db = 20 * log10(max(rms, 1e-7))
+
+        // Throttled level for the on-screen meter.
+        levelThrottle += 1
+        if levelThrottle % 3 == 0 {
+            let level = max(0.0, min(100.0, (Double(db) + 60.0) / 60.0 * 100.0))
+            DispatchQueue.main.async { self.notifyListeners("level", data: ["level": level]) }
+        }
+
+        lock.lock()
+        guard detecting else { lock.unlock(); return }
+        let speaking = db > speechDb
+        if speaking {
+            inSpeech = true; speechSamples += frames; silenceSamples = 0
+            phrase.append(pcm)
+        } else if inSpeech {
+            silenceSamples += frames
+            phrase.append(pcm)
+        }
+        let endOfPhrase = inSpeech
+            && silenceSamples >= Int(silenceSecs * phraseRate)
+            && speechSamples >= Int(minSpeechSecs * phraseRate)
+        if endOfPhrase {
+            let wav = wrapWav(phrase, sampleRate: phraseRate)
+            detecting = false; inSpeech = false; phrase = Data()
+            lock.unlock()
+            transcribe(wav)
+        } else {
+            lock.unlock()
         }
     }
 
-    // Loop silent audio so the app keeps "producing audio" — with the UIBackgroundModes
-    // "audio" entitlement, iOS then keeps the app (and our listen loop) alive when the
-    // screen turns off, instead of suspending it between recording bursts.
-    private func startKeepAlive() {
-        guard keepAlive == nil else { return }
-        if let player = try? AVAudioPlayer(data: makeSilentWav()) {
-            player.numberOfLoops = -1
-            player.volume = 0.0
-            player.play()
-            keepAlive = player
-        }
-    }
-    private func stopKeepAlive() {
-        keepAlive?.stop()
-        keepAlive = nil
-    }
-    private func makeSilentWav(seconds: Double = 2.0, sampleRate: Double = 8000) -> Data {
-        let numSamples = Int(seconds * sampleRate)
-        let dataSize = numSamples * 2   // 16-bit mono
-        var d = Data()
-        func a(_ s: String) { d.append(s.data(using: .ascii)!) }
-        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
-        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
-        a("RIFF"); u32(UInt32(36 + dataSize)); a("WAVE")
-        a("fmt "); u32(16); u16(1); u16(1)
-        u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * 2); u16(2); u16(16)
-        a("data"); u32(UInt32(dataSize))
-        d.append(Data(count: dataSize))   // all zeros = silence
-        return d
-    }
+    // MARK: - Native transcription (no WebView / no CORS)
 
-    private func beginRecording() {
-        endRecording(emit: false)   // ensure clean state
-        // Re-assert speaker each turn (WebKit/interruptions can change the route).
-        let session = AVAudioSession.sharedInstance()
-        try? session.setActive(true)
-        try? session.overrideOutputAudioPort(.speaker)
-
-        hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("vc-\(UUID().uuidString).m4a")
-        fileURL = url
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 16000,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
-        ]
-        do {
-            let r = try AVAudioRecorder(url: url, settings: settings)
-            r.isMeteringEnabled = true
-            r.delegate = self
-            r.record()
-            recorder = r
-            capturing = true
-            meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                self?.tick()
-            }
-        } catch {
-            notifyListeners("empty", data: [:])
-        }
-    }
-
-    private func tick() {
-        guard let r = recorder, r.isRecording else { return }
-        r.updateMeters()
-        let power = r.averagePower(forChannel: 0)   // ~ -160 (silent) … 0 (loud)
-        // Surface a 0–100 level for the on-screen meter.
-        let level = max(0.0, min(100.0, (power + 60.0) / 60.0 * 100.0))
-        notifyListeners("level", data: ["level": level])
-
-        totalFrames += 1
-        if power > speechThreshold {
-            hasSpeech = true; speechFrames += 1; silenceFrames = 0
-        } else if hasSpeech {
-            silenceFrames += 1
-        }
-
-        if hasSpeech && silenceFrames >= silenceHang && speechFrames >= minSpeechFrames {
-            endRecording(emit: true)            // natural end of phrase
-        } else if totalFrames >= maxFrames {
-            endRecording(emit: hasSpeech)       // hard cap
-        } else if !hasSpeech && totalFrames >= idleFrames {
-            endRecording(emit: false)           // nobody spoke → empty
-        }
-    }
-
-    private func endRecording(emit: Bool) {
-        meterTimer?.invalidate(); meterTimer = nil
-        let r = recorder; recorder = nil
-        let url = fileURL
-        let didSpeak = hasSpeech
-        capturing = false
-        r?.stop()
-
-        if emit && didSpeak, let url = url,
-           let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1200 {
-            transcribe(url)          // native transcription → emits `utterance` {text} (removes file)
-        } else if emit {
-            if let url = url { try? FileManager.default.removeItem(at: url) }
-            notifyListeners("empty", data: [:])
-        } else if let url = url {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-
-    // Transcribe the recorded clip with OpenAI via native URLSession (no WebView /
-    // no CORS), then emit the resulting TEXT to JS.
-    private func transcribe(_ url: URL) {
-        guard !openaiKey.isEmpty else {
-            try? FileManager.default.removeItem(at: url)
-            notifyListeners("empty", data: ["error": "no key"]); return
-        }
+    private func transcribe(_ wav: Data) {
+        guard !openaiKey.isEmpty else { notifyListeners("empty", data: ["error": "no key"]); return }
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
@@ -218,29 +192,37 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
         field("model", "gpt-4o-mini-transcribe")
         field("language", "en")
-        if let fileData = try? Data(contentsOf: url) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
-            body.append(fileData)
-            body.append("\r\n".data(using: .utf8)!)
-        }
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(wav)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
-        try? FileManager.default.removeItem(at: url)
         URLSession.shared.dataTask(with: req) { data, resp, err in
-            if let err = err {
-                self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return
-            }
+            if let err = err { self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return }
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200, let data = data,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
                 self.notifyListeners("utterance", data: ["text": text])
             } else {
-                let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                self.notifyListeners("empty", data: ["error": "http \(status): \(String(bodyStr.prefix(140)))"])
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                self.notifyListeners("empty", data: ["error": "http \(status): \(String(body.prefix(140)))"])
             }
         }.resume()
+    }
+
+    private func wrapWav(_ pcm: Data, sampleRate: Double) -> Data {
+        let dataSize = pcm.count
+        var d = Data()
+        func a(_ s: String) { d.append(s.data(using: .ascii)!) }
+        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        a("RIFF"); u32(UInt32(36 + dataSize)); a("WAVE")
+        a("fmt "); u32(16); u16(1); u16(1)
+        u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * 2); u16(2); u16(16)
+        a("data"); u32(UInt32(dataSize))
+        d.append(pcm)
+        return d
     }
 }
