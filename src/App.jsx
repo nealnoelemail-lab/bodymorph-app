@@ -151,7 +151,7 @@ const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
 const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
-const GROK_DEFAULT_VOICE = "78a495fdbb39"; // James — energetic young male (fallback only; the picker normally sets the voice)
+const GROK_DEFAULT_VOICE = "btusfwwmofuz"; // the coach's cloned voice (fallback only; the picker normally sets the voice)
 // LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
 // Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
 const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
@@ -180,8 +180,9 @@ const ELEVEN_VOICES = [
   { id: "ErXwobaYiN019PkySvjV", name: "Antoni — warm male" },
   { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh — young male" },
 ];
-// Grok voice picks chosen by ear from the xAI console — 3 male, 3 female.
+// Grok voice picks chosen by ear from the xAI console + the coach's own cloned voice.
 const GROK_VOICES = [
+  { id: "btusfwwmofuz", name: "AI Coach (my voice)" },
   { id: "78a495fdbb39", name: "James (male)" },
   { id: "96819d0bd28d", name: "Daniel (male)" },
   { id: "sal",          name: "Sal (male)" },
