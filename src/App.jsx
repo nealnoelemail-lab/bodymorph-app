@@ -3022,7 +3022,10 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
             </div>
             {mealPlan.meals.map((ml,mi)=>(
               <div key={mi} style={{ marginBottom:10 }}>
-                <div style={{ fontFamily:"'Bebas Neue'", fontSize:14, letterSpacing:0.5, color:accent, textTransform:"uppercase", marginBottom:4 }}>{ml.slot}</div>
+                <div style={{ marginBottom:4 }}>
+                  <div style={{ fontFamily:"'DM Sans'", fontSize:10.5, letterSpacing:1, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
+                  {ml.name && <div style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.5, color:accent }}>{ml.name}</div>}
+                </div>
                 {(ml.items||[]).map((it,ii)=>(
                   <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, color:"#c8c8e0", padding:"2px 0" }}>
                     <span>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span></span>
@@ -6885,9 +6888,10 @@ async function generateMealPlan({ name, goal, dietPref, allergies, targets, useB
 Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
 ${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH them across the day for variety (don't make every meal the same cuisine; ideally give different meals different cuisines): ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
-Build breakfast, lunch, dinner, and one snack. Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
+Build breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME that describes what the ingredients make together (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice", "Greek Chicken Power Bowl"). The items are that dish's components.
+Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
 Reply ONLY with JSON, no markdown, no commentary:
-{"meals":[{"slot":"breakfast","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","items":[...]},{"slot":"dinner","items":[...]},{"slot":"snacks","items":[...]}]}`;
+{"meals":[{"slot":"breakfast","name":"Dish name","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","name":"Dish name","items":[...]},{"slot":"dinner","name":"Dish name","items":[...]},{"slot":"snacks","name":"Dish name","items":[...]}]}`;
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
@@ -7743,7 +7747,10 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                     </div>
                     {genPlan.meals.map((ml,mi)=>(
                       <div key={mi} style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
-                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1, color:"#e8ff00", marginBottom:7, textTransform:"uppercase" }}>{ml.slot}</div>
+                        <div style={{ marginBottom:7 }}>
+                          <div style={{ fontFamily:"'DM Sans'", fontSize:11.5, letterSpacing:1.5, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
+                          {ml.name && <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:0.5, color:"#e8ff00" }}>{ml.name}</div>}
+                        </div>
                         {(ml.items||[]).map((it,ii)=>{ const isSw = swapping===(mi+"-"+ii); return (
                           <div key={ii} style={{ display:"flex", alignItems:"center", gap:9, fontSize:16, color:"#d2d2ec", padding:"5px 0", opacity: isSw?0.5:1 }}>
                             <button onClick={()=>swapFood(mi,ii)} disabled={!!swapping} title="Swap this food" style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, color:"#e8ff00", cursor: swapping?"default":"pointer", fontSize:15, padding:"3px 8px", flexShrink:0 }}>{isSw?"…":"⇄"}</button>
@@ -8662,7 +8669,7 @@ function printMealPlan(plan, { name, dietPref, cuisines } = {}) {
     const rows = (ml.items || []).map(it =>
       `<tr><td>${esc(it.food)}${it.brand ? ` <span class="brand">· ${esc(it.brand)}</span>` : ""}</td><td class="n">${esc(it.grams)} g</td><td class="n">${esc(it.cal)} cal</td><td class="n">${esc(it.protein)}g P</td></tr>`
     ).join("");
-    return `<h2>${esc(ml.slot)}</h2><table>${rows}</table>`;
+    return `<h2>${esc(ml.slot)}${ml.name ? ` — <span class="dish">${esc(ml.name)}</span>` : ""}</h2><table>${rows}</table>`;
   }).join("");
   const cuisineLine = (Array.isArray(cuisines) && cuisines.length) ? ` · ${esc(cuisines.join(", "))}` : "";
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Meal Plan${name ? " — " + esc(name) : ""}</title>
@@ -8671,6 +8678,7 @@ h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:18
 .totals{display:flex;gap:10px;margin-bottom:8px}.totals div{flex:1;text-align:center;background:#f4f4ef;border-radius:8px;padding:8px 4px}
 .totals b{display:block;font-size:20px}.totals span{color:#888;font-size:12px}
 h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#7a8a00;margin:18px 0 4px}
+.dish{text-transform:none;letter-spacing:0;color:#222;font-size:15px}
 table{width:100%;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #eee;font-size:14px}
 td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8a3a}
 @media print{body{margin:0}}</style></head><body>
