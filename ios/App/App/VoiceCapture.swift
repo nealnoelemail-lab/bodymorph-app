@@ -50,7 +50,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                                         options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
                 try session.setActive(true)
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
-            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
+            self.applyOutputRoute()
             self.startKeepAlive()
             // Keep the screen awake while the coach is active so iOS doesn't auto-lock
             // mid-workout (which suspends the web layer and stops the conversation). A
@@ -128,12 +128,25 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         return d
     }
 
+    // Route audio to connected earbuds/Bluetooth/headphones when present (the gym
+    // case: coach in your ear, mic from the earbud). Only force the loud speaker on
+    // a bare phone — never the quiet earpiece.
+    private func applyOutputRoute() {
+        let session = AVAudioSession.sharedInstance()
+        let external: Set<AVAudioSession.Port> = [
+            .headphones, .headsetMic, .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .carAudio, .usbAudio
+        ]
+        let hasExternal = session.currentRoute.outputs.contains { external.contains($0.portType) }
+        do { try session.overrideOutputAudioPort(hasExternal ? .none : .speaker) }
+        catch { print("[VoiceCapture] route error: \(error)") }
+    }
+
     private func beginRecording() {
         endRecording(emit: false)   // ensure clean state
-        // Re-assert speaker each turn (WebKit/interruptions can change the route).
+        // Re-assert the route each turn (WebKit/interruptions can change it).
         let session = AVAudioSession.sharedInstance()
         try? session.setActive(true)
-        try? session.overrideOutputAudioPort(.speaker)
+        applyOutputRoute()
 
         hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0
         let url = FileManager.default.temporaryDirectory
