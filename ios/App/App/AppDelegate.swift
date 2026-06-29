@@ -7,21 +7,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     private var didRegisterPlugins = false
+    private var pluginRegisterAttempts = 0
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         configureAudioSession()
+        registerLocalPlugins()   // start trying immediately; it retries until the bridge is ready
         return true
     }
 
     // Register our LOCAL VoiceCapture plugin on the bridge once the root bridge
     // controller is up. Done from the AppDelegate (not a storyboard subclass) to
-    // avoid storyboard class-resolution issues. Runs well before the user opens the
-    // voice coach, so the plugin is ready when JS first calls it.
+    // avoid storyboard class-resolution issues. The bridge may not exist the instant
+    // we're first called, so RETRY on a short timer until it is — otherwise the
+    // plugin silently never registers and JS sees "not implemented on iOS".
     private func registerLocalPlugins() {
         guard !didRegisterPlugins else { return }
         if let vc = window?.rootViewController as? CAPBridgeViewController, let bridge = vc.bridge {
             bridge.registerPluginInstance(VoiceCapturePlugin())
             didRegisterPlugins = true
+            return
+        }
+        pluginRegisterAttempts += 1
+        if pluginRegisterAttempts < 60 {   // ~15s of 0.25s retries, then give up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.registerLocalPlugins() }
         }
     }
 
