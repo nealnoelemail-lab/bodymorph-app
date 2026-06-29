@@ -1887,6 +1887,11 @@ Respond with ONLY valid minified JSON, no markdown, no commentary, in exactly th
   parsed.weeklySchedule.forEach(d => {
     if (!d || !d.day || !Array.isArray(d.workout) || !d.workout.length) throw new Error("bad-day");
   });
+  // Force the days to EXACTLY the client's selection. If the AI returned the wrong
+  // number of days, fall back to the template (which always honors the days); if the
+  // count is right but labels drifted, overwrite them with the chosen days in order.
+  if (parsed.weeklySchedule.length !== dayNames.length) throw new Error("day-count-mismatch");
+  parsed.weeklySchedule.forEach((d, i) => { d.day = dayNames[i]; });
 
   return {
     overview: parsed.overview || buildProgram(profile).overview,
