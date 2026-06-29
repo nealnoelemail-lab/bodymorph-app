@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,8 +8,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        configureAudioSession()
         return true
+    }
+
+    // Configure a record+playback audio session so the voice coach can listen and
+    // speak at the same time, route to speaker/Bluetooth, and — paired with the
+    // "audio" UIBackgroundMode — keep the mic alive when the screen dims/locks.
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord,
+                                    mode: .spokenAudio,
+                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true, options: [])
+        } catch {
+            print("[BodyMorph] audio session error: \(error)")
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -26,7 +42,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        // Re-assert the audio session on return to foreground (it can be deactivated
+        // by interruptions or when the screen was off).
+        configureAudioSession()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
