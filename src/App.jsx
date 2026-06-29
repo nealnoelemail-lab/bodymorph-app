@@ -16,6 +16,15 @@ const C = {
   green: "#3ddc84", text: "#f0f0f8", muted: "#c8c8e0",
 };
 
+// LOCAL calendar date as YYYY-MM-DD. Use this for every "today"/day-key instead of
+// `ymdLocal()`, which is UTC and rolls over to tomorrow
+// in the evening for western timezones (e.g. after 8pm US Eastern) — corrupting
+// which day logs land on and showing the wrong date.
+const ymdLocal = (d = new Date()) => {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&family=Oswald:wght@500;600;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -395,7 +404,7 @@ function kcalPerStep(weightLb) {
 function avgDailySteps(stepEntries, days = 14) {
   if (!Array.isArray(stepEntries) || !stepEntries.length) return null;
   const cut = new Date(); cut.setDate(cut.getDate() - (days - 1));
-  const cutStr = cut.toISOString().slice(0, 10);
+  const cutStr = ymdLocal(cut);
   const recent = stepEntries
     .filter(e => e && e.date >= cutStr && (parseInt(e.steps) || 0) > 0)
     .map(e => parseInt(e.steps) || 0);
@@ -2375,7 +2384,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
             return (
               <button key={fo} onClick={() => {
                 set("focus", fo);
-                if (!p[startKey]) set(startKey, new Date().toISOString().slice(0,10));
+                if (!p[startKey]) set(startKey, ymdLocal());
               }} style={{ position:"relative", width:"100%", background: active ? "#e8ff00" : "#1a1a26", border:"1px solid " + (active ? "#e8ff00" : "#2a2a3d"), color: active ? "#000" : "#f0f0f8", fontWeight: active ? 600 : 400, borderRadius:8, padding:"10px 34px 10px 13px", cursor:"pointer", fontSize:19.2, fontFamily:"'DM Sans'", textAlign:"left", transition:"all 0.18s" }}>
                 {fo}
                 <span onClick={(e)=>{ e.stopPropagation(); openInfo(); }} title="What is this?" style={{ position:"absolute", top:8, right:8, width:22, height:22, borderRadius:"50%", border:"1.5px solid " + (active ? "#000" : "#e8ff00"), color: active ? "#000" : "#e8ff00", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, fontStyle:"italic", fontFamily:"Georgia, serif", cursor:"pointer", lineHeight:1 }}>i</span>
@@ -3295,7 +3304,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
   const todayIdx = sched.findIndex(d => d.day === todayName);
   const dayCount = sched.length;
   const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
-  const today = new Date().toISOString().slice(0,10);
+  const today = ymdLocal();
 
   // Steps state
   const [editingSteps, setEditingSteps] = useState(false);
@@ -3600,7 +3609,7 @@ function loadCoachSummaries() {
   try {
     const saved = JSON.parse(localStorage.getItem(COACH_SUMMARY_KEY) || "null");
     const entries = (saved && Array.isArray(saved.entries)) ? saved.entries : [];
-    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const cutoff = ymdLocal(new Date(Date.now() - 7 * 86400000));
     return entries.filter(e => e && e.date && e.date >= cutoff).slice(-7);
   } catch { return []; }
 }
@@ -3698,7 +3707,7 @@ ABSOLUTE RULES — NEVER BREAK THESE:
 • Use ${profile.name}'s name occasionally, not in every response.`;
 
   const buildSysPrompt = useCallback(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymdLocal();
 
     if (isStretch) {
       // ── Guided stretch session ──
@@ -4161,7 +4170,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
         setLastAI(cleanSpeak(aiText));
         messagesRef.current = [...msgs, { role: "assistant", content: aiText }];
-        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: new Date().toISOString().slice(0,10), messages: messagesRef.current.slice(-20) })); } catch {} }
+        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: ymdLocal(), messages: messagesRef.current.slice(-20) })); } catch {} }
         log("coach replied → speaking");
         speak(aiText, () => { if (!closedRef.current) startListening(); });
         return;
@@ -4180,7 +4189,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
         setLastAI(cleanSpeak(ft));
         messagesRef.current = [...msgs, { role: "assistant", content: ft }];
-        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: new Date().toISOString().slice(0,10), messages: messagesRef.current.slice(-20) })); } catch {} }
+        if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: ymdLocal(), messages: messagesRef.current.slice(-20) })); } catch {} }
       };
       const endTurn = (barged) => {
         if (done) return; done = true;
@@ -4322,7 +4331,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // (Workout / stretch sessions start fresh — they're self-contained.)
     try {
       if (!companion) throw 0;
-      const today = new Date().toISOString().slice(0,10);
+      const today = ymdLocal();
       const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
       if (saved && saved.date === today && Array.isArray(saved.messages) && saved.messages.length) {
         messagesRef.current = saved.messages; // same day → continue verbatim
@@ -4398,7 +4407,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo }) {
   const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
-  const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0,10));
+  const [dateStr, setDateStr] = useState(ymdLocal());
   const workout = day.workout || [];
   const weekdayIdx = DAY_NAMES.indexOf(day.day);
 
@@ -4930,7 +4939,7 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
   const [photos, setPhotos]   = useState({});      // { front: dataURL, ... }
   const [weight, setWeight]   = useState("");
   const [bodyFat, setBodyFat] = useState("");
-  const [dateStr, setDateStr] = useState(new Date().toISOString().slice(0,10));
+  const [dateStr, setDateStr] = useState(ymdLocal());
   const [busy, setBusy]       = useState(false);
   const [viewer, setViewer]   = useState(null);    // { src } for fullscreen view
 
@@ -5114,7 +5123,7 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
   const weekKey = (d) => {
     const dt = new Date(d+"T00:00:00");
     const sun = new Date(dt); sun.setDate(dt.getDate()-dt.getDay());
-    return sun.toISOString().slice(0,10);
+    return ymdLocal(sun);
   };
 
   // ── SVG Line Chart ──
@@ -6496,7 +6505,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
   const dateKey = (() => {
     const d = new Date(); const diff = sel - d.getDay();
     const t = new Date(d); t.setDate(d.getDate()+diff);
-    return t.toISOString().slice(0,10);
+    return ymdLocal(t);
   })();
 
   const MEAL_SLOTS = [
@@ -7278,7 +7287,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const dateKey = (() => {
     const d = new Date(); const diff = sel - d.getDay();
     const t = new Date(d); t.setDate(d.getDate()+diff);
-    return t.toISOString().slice(0,10);
+    return ymdLocal(t);
   })();
 
   const dayLog = (foodLog && foodLog[dateKey]) || {};
@@ -7773,7 +7782,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                     {confirmDelete === "snacks" && (
                       <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                         <span style={{ color:"#ff7070", fontSize:11 }}>Delete?</span>
-                        <button onClick={()=>{ const updated={...(foodLog||{})}; const dk=new Date().toISOString().slice(0,10); updated[dk]={...(updated[dk]||{}), snacks:[]}; onSaveFoodLog(updated); setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
+                        <button onClick={()=>{ const updated={...(foodLog||{})}; const dk=ymdLocal(); updated[dk]={...(updated[dk]||{}), snacks:[]}; onSaveFoodLog(updated); setConfirmDelete(null); setEditSlot(null); }} style={{ background:"#ff3d3d", border:"none", borderRadius:8, color:"#fff", padding:"4px 8px", cursor:"pointer", fontSize:11, fontWeight:700 }}>Yes</button>
                         <button onClick={()=>setConfirmDelete(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"4px 8px", cursor:"pointer", fontSize:11 }}>No</button>
                       </div>
                     )}
@@ -8123,7 +8132,7 @@ function FinancialsSection({ coachId, roster }) {
   const [sessions, setSessions] = useState([]);      // this month's in-person sessions
   const [fc, setFc] = useState({ inperson:0, consulting:(roster?.length || 0), apponly:0, refCoaches:0, refPer:0 });
   const [logOpen, setLogOpen] = useState(false);
-  const [log, setLog] = useState({ client_id:"", day:new Date().toISOString().slice(0,10), amount:"", note:"" });
+  const [log, setLog] = useState({ client_id:"", day:ymdLocal(), amount:"", note:"" });
 
   const reloadSessions = async () => setSessions(await listSessionsThisMonth(coachId));
   useEffect(() => { let on=true; (async()=>{ const s=await fetchSettings(coachId); if(on){ setSettings(s); setLog(l=>({...l, amount:String(s.inperson_rate)})); } await reloadSessions(); })(); return ()=>{on=false;}; }, [coachId]);
@@ -8253,7 +8262,7 @@ function CalendarSection({ coachId, roster }) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [events, setEvents] = useState([]);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), time:"09:00", title:"", client_id:"", type:"appointment" });
+  const [form, setForm] = useState({ date:ymdLocal(), time:"09:00", title:"", client_id:"", type:"appointment" });
   const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
   const load = async () => setEvents(await listEvents(coachId, weekStart.toISOString(), weekEnd.toISOString()));
   useEffect(() => { load(); }, [coachId, weekStart.getTime()]);
@@ -8932,7 +8941,7 @@ export default function BodyMorph() {
   const [coachVoice, setCoachVoice] = useState(DEFAULT_COACH_VOICE); // ElevenLabs voice for the coach
   const [toast, setToast]     = useState(null);
   const [loaded, setLoaded]   = useState(false);
-  const [hydration, setHydration] = useState({ date: new Date().toISOString().slice(0,10), cups: 0, goal: 8 });
+  const [hydration, setHydration] = useState({ date: ymdLocal(), cups: 0, goal: 8 });
   const [homeVoice, setHomeVoice] = useState(false); // voice coach launched from home
   const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
   const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items})
@@ -8983,7 +8992,7 @@ export default function BodyMorph() {
           const r = await redeemClientInvite(inviteCode);
           if (r?.ok) { setInviteSeed(r.intake || null); try { window.history.replaceState({}, "", window.location.pathname); } catch {} }
         }
-        const todayStr = new Date().toISOString().slice(0,10);
+        const todayStr = ymdLocal();
         const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
         const pull = (name, local) => uid ? pullMergeDomain(name, uid, local, fresh) : Promise.resolve(local);
         const [mProfile, mSub, mRole, mLogs, mRewards, mBody, mCardio, mSteps, mSleep, mSupp, mPep, mMeals, mFood,
@@ -9218,20 +9227,20 @@ export default function BodyMorph() {
 
   // Hydration: set the cup count directly (resets each day on load).
   const setHydrationCups = (val) => setHydration(h => {
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = ymdLocal();
     const goal = h.goal || 8;
     return { date: todayStr, cups: Math.max(0, parseInt(val) || 0), goal };
   });
   // Voice companion: add N cups of water (N may be negative to correct a mistake). Never below 0.
   const addWaterCups = (n) => setHydration(h => {
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = ymdLocal();
     const base = h.date === todayStr ? h : { date: todayStr, cups: 0, goal: h.goal || 8 };
     const delta = parseInt(n); // keep 0 and negatives; only default to +1 when truly absent/NaN
     return { ...base, cups: Math.max(0, base.cups + (Number.isNaN(delta) ? 1 : delta)) };
   });
   // Voice companion: log a food item the client reports eating.
   const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = ymdLocal();
     const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
     const entry = { food: name || "Logged item", cal:String(Math.round(cal||0)), protein:String(Math.round(protein||0)), carbs:String(Math.round(carbs||0)), fats:String(Math.round(fats||0)), logged:true };
     setFoodLog(prev => {
@@ -9247,7 +9256,7 @@ export default function BodyMorph() {
   };
   // Voice companion: undo a logged meal. Main meals clear the slot; snacks drop the last one.
   const removeFoodFromVoice = ({ slot }) => {
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = ymdLocal();
     const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
     setFoodLog(prev => {
       const updated = { ...(prev||{}) };
@@ -9361,11 +9370,11 @@ export default function BodyMorph() {
     const updated = { ...profile, focus };
     // Starting HFT fresh resets the 90-day clock to today
     if (focus.includes("HFT")) {
-      updated.hftStartDate = new Date().toISOString().slice(0,10);
+      updated.hftStartDate = ymdLocal();
     }
     // Starting Glute & Lower Body fresh resets its 90-day clock to today
     if (focus.includes("Booty")) {
-      updated.glbStartDate = new Date().toISOString().slice(0,10);
+      updated.glbStartDate = ymdLocal();
     }
     setProfile(updated);
     try { setProgram(resolveProgram(updated)); }
@@ -9375,7 +9384,7 @@ export default function BodyMorph() {
   };
 
   const addBodyEntry = (entry) => {
-    setBodyEntries(prev => [{ ...entry, date: entry.date || new Date().toISOString().slice(0,10) }, ...prev]);
+    setBodyEntries(prev => [{ ...entry, date: entry.date || ymdLocal() }, ...prev]);
   };
   const deleteBodyEntry = (idx) => {
     setBodyEntries(prev => prev.filter((_, i) => i !== idx));
@@ -9402,7 +9411,7 @@ export default function BodyMorph() {
   };
   // Voice companion: set or adjust today's step count. {set:N} = exact total; {add:N} = add (N may be negative). Never below 0.
   const logStepsFromVoice = ({ set, add }) => {
-    const today = new Date().toISOString().slice(0,10);
+    const today = ymdLocal();
     setStepEntries(prev => {
       const cur = (prev.find(e => e.date === today)?.steps) || 0;
       let val;
@@ -9458,7 +9467,7 @@ export default function BodyMorph() {
 
   // Save one exercise's sets from the session
   const logExercise = (exName, entry) => {
-    const today = entry.date || new Date().toISOString().slice(0,10);
+    const today = entry.date || ymdLocal();
     const prevBest = bestWeight(exName);
     const newTop = parseFloat(entry.weight) || 0;
     const isPR = prevBest > 0 && newTop > prevBest;
@@ -9512,7 +9521,7 @@ export default function BodyMorph() {
     const exercise = sessionDay && sessionDay.workout && sessionDay.workout[ex];
     if (!exercise) return;
     logExercise(exercise.exercise, {
-      date: new Date().toISOString().slice(0,10),
+      date: ymdLocal(),
       sets: [{ weight: String(weight), reps: String(reps) }],
       weight: String(weight), reps: String(reps),
     });
@@ -9521,7 +9530,7 @@ export default function BodyMorph() {
   const handleVoiceSetRemove = ({ ex }) => {
     const exercise = sessionDay && sessionDay.workout && sessionDay.workout[ex];
     if (!exercise) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = ymdLocal();
     setLogs(prev => {
       const arr = prev[exercise.exercise];
       if (!Array.isArray(arr) || !arr.length) return prev;
@@ -9534,7 +9543,7 @@ export default function BodyMorph() {
     });
   };
   const companionData = profile ? (() => {
-    const today = new Date().toISOString().slice(0,10);
+    const today = ymdLocal();
     const tLog = (foodLog && foodLog[today]) || {};
     const slotInfo = (slot) => {
       const e = tLog[slot];

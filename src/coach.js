@@ -9,6 +9,12 @@ const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
 const nameOf = (p) => (p?.extra?.name) || p?.first_name || "Client";
 const maxDay = (...days) => days.filter(Boolean).sort().slice(-1)[0] || null;
+// LOCAL calendar date as YYYY-MM-DD (UTC toISOString rolls over to tomorrow in the
+// evening for western timezones — keep day boundaries on the user's local clock).
+const ymdLocal = (d = new Date()) => {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
 
 // The signed-in user's role ('client' | 'coach' | ...). Read straight from the
 // profiles row — pullMergeProfile short-circuits on a local profile and omits role.
@@ -105,7 +111,7 @@ export async function fetchClientDetail(clientId) {
 // Distill the client's last 7 days into compact metrics for the prompt.
 function summarizeWeek(d) {
   const cut = new Date(); cut.setDate(cut.getDate() - 6);
-  const cutStr = cut.toISOString().slice(0, 10);
+  const cutStr = ymdLocal(cut);
   const wk = (arr, key = "date") => (arr || []).filter(x => x[key] >= cutStr);
   const body = d.bodyEntries || [], body7 = wk(body), steps7 = wk(d.stepEntries), sleep7 = wk(d.sleepEntries), food7 = wk(d.foodDays);
   const avg = (a, f) => a.length ? Math.round(a.reduce((s, x) => s + (+f(x) || 0), 0) / a.length) : null;
@@ -220,7 +226,7 @@ export async function redeemClientInvite(code) {
 // ── FINANCIALS (derived; live revenue arrives with Stripe Connect) ───────────────
 export function computeFinancials(roster, monthlyPrice = 105) {  // coach net per consulting client (light); see revised economics
   const active = (roster || []).length;
-  const month = new Date().toISOString().slice(0, 7);
+  const month = ymdLocal().slice(0, 7);
   const newThisMonth = (roster || []).filter(c => (c.lastActive || "").startsWith(month)).length;
   return {
     activeClients: active,
@@ -255,7 +261,7 @@ export async function logSession(coachId, { client_id, day, amount, note } = {})
 export async function listSessionsThisMonth(coachId) {
   if (!supabase || !coachId) return [];
   const monthStart = new Date(); monthStart.setDate(1);
-  const from = monthStart.toISOString().slice(0, 10);
+  const from = ymdLocal(monthStart);
   const { data, error } = await supabase.from("coach_sessions")
     .select("id, client_id, day, amount, note").eq("coach_id", coachId).gte("day", from).order("day", { ascending: false });
   if (error) { console.warn("listSessionsThisMonth:", error.message); return []; }
@@ -299,7 +305,7 @@ export async function detectFollowups(coachId) {
   const ids = (rels || []).map(r => r.client_id);
   if (!ids.length) return [];
   const cut = new Date(); cut.setDate(cut.getDate() - 6);
-  const from = cut.toISOString().slice(0, 10);
+  const from = ymdLocal(cut);
   const [profiles, workouts, foods, rewards] = await Promise.all([
     supabase.from("profiles").select("id, first_name, extra").in("id", ids),
     supabase.from("workout_logs").select("user_id, day").in("user_id", ids).gte("day", from),
