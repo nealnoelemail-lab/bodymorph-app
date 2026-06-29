@@ -151,7 +151,7 @@ const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
 const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
-const GROK_DEFAULT_VOICE = "rex"; // confident male preset (eve/ara/rex/sal/leo); placeholder until per-coach clones
+const GROK_DEFAULT_VOICE = "78a495fdbb39"; // James — energetic young male (fallback only; the picker normally sets the voice)
 // LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
 // Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
 const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
@@ -180,7 +180,20 @@ const ELEVEN_VOICES = [
   { id: "ErXwobaYiN019PkySvjV", name: "Antoni — warm male" },
   { id: "TxGEqnHWrfWFTfGW9XjX", name: "Josh — young male" },
 ];
-const DEFAULT_COACH_VOICE = ELEVEN_VOICES[0];
+// Grok voice catalog picks — 3 male, 3 female. Labels are best-guess starting
+// points (the catalog has no age/energy metadata); pick by ear via Preview. The
+// two "senior-friendly" ones are the laid-back options for an older audience.
+const GROK_VOICES = [
+  { id: "78a495fdbb39", name: "James — energetic young male (trainer)" },
+  { id: "96819d0bd28d", name: "Daniel — easygoing male" },
+  { id: "leo",          name: "Leo — deep, laid-back male (senior-friendly)" },
+  { id: "eve",          name: "Eve — bright, energetic female" },
+  { id: "f8cf5c2c78d4", name: "Grace — friendly female" },
+  { id: "ara",          name: "Ara — warm, calm female (senior-friendly)" },
+];
+// The picker shows whichever provider's voices are active.
+const COACH_VOICES = USE_GROK ? GROK_VOICES : ELEVEN_VOICES;
+const DEFAULT_COACH_VOICE = COACH_VOICES[0];
 
 // One reusable <audio> element for ElevenLabs playback. iOS only lets audio play after
 // a user gesture, and the unlock is PER-ELEMENT — so we unlock THIS element in the tap
@@ -3217,17 +3230,27 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const isCustom = coachVoice && !ELEVEN_VOICES.some(v => v.id === coachVoice.id);
+  const isCustom = coachVoice && !COACH_VOICES.some(v => v.id === coachVoice.id);
   const currentVoiceName = coachVoice ? (isCustom ? "Coach (cloned voice)" : coachVoice.name) : "Not set";
   const previewVoice = (id) => {
     if (!id || previewing) return;
-    if (!ELEVEN_KEY) { alert("Add your ElevenLabs API key (VITE_ELEVENLABS_KEY) to hear voices."); return; }
+    const sample = `Hey ${profile.name}, it's Coach. Let's have a great session.`;
+    let req;
+    if (USE_GROK) {
+      req = fetch("https://api.x.ai/v1/tts", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${XAI_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sample, voice_id: id, language: "en" }),
+      });
+    } else if (ELEVEN_KEY) {
+      req = fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}`, {
+        method: "POST",
+        headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
+        body: JSON.stringify({ text: sample, model_id: "eleven_turbo_v2_5" }),
+      });
+    } else { alert("Add a voice API key to hear previews."); return; }
     setPreviewing(true);
-    fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}`, {
-      method: "POST",
-      headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
-      body: JSON.stringify({ text: `Hey ${profile.name}, it's Coach. Let's have a great session.`, model_id: "eleven_turbo_v2_5" }),
-    })
+    req
       .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
       .then(b => { const a = new Audio(URL.createObjectURL(b)); a.onended = () => setPreviewing(false); a.onerror = () => setPreviewing(false); return a.play(); })
       .catch(e => { setPreviewing(false); alert("Couldn't play preview: " + e.message); });
@@ -3280,10 +3303,10 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
           {voiceOpen && (
             <div style={{ marginTop:12 }}>
               <div style={{ fontSize:12, color:"#9898b8", marginBottom:10 }}>
-                The voice your coach speaks in.{!ELEVEN_KEY ? " (Add an ElevenLabs API key to enable — using the basic phone voice until then.)" : ""}
+                The voice your coach speaks in.{(!ELEVEN_KEY && !USE_GROK) ? " (Add a voice API key to enable — using the basic phone voice until then.)" : ""}
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
-                {ELEVEN_VOICES.map(v => (
+                {COACH_VOICES.map(v => (
                   <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: coachVoice?.id===v.id ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${coachVoice?.id===v.id ? "#e8ff00" : "#2a2a3d"}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
                     <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{coachVoice?.id===v.id ? "✓" : ""}</span>
                     <span style={{ flex:1, fontSize:14, color:"#f0f0f8" }}>{v.name}</span>
@@ -4141,7 +4164,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           method: "POST",
           signal: AbortSignal.timeout(12000),
           headers: { "Authorization": `Bearer ${XAI_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice_id: grokVoiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }),
+          body: JSON.stringify({ text, voice_id: voiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }),
         });
         if (!res.ok || closedRef.current || done) { if (!res.ok) log("Grok HTTP " + res.status); throw new Error("tts " + res.status); }
         const blob = await res.blob();
@@ -9434,7 +9457,7 @@ export default function BodyMorph() {
             pull("nutritionGoals", snutrgoals), pull("mealPlan", smp), pull("cardioPlan", splan),
             pull("stretchPlan", sstretch), pull("stretchRoutines", sroutines),
             pull("videoOverrides", svid), pull("todoChecked", stodo),
-            pull("coachVoice", (svoice && svoice.id) ? svoice : null), pull("hydration", localHyd),
+            pull("coachVoice", (svoice && svoice.id && (!USE_GROK || GROK_VOICES.some(v => v.id === svoice.id))) ? svoice : null), pull("hydration", localHyd),
             pull("dietPref", sdietpref),
           ]);
 
