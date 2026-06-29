@@ -7757,7 +7757,10 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                       <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontWeight:600, fontSize:17 }}>Regenerate</button>
                       <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17 }}>Use This Plan</button>
                     </div>
-                    <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:16 }}>🖨 Print / Save as PDF</button>
+                    <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                      <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🖨 Print / PDF</button>
+                      <button onClick={()=>printGroceryList(genPlan, { name: profile?.name, days: 7 })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🛒 Grocery List</button>
+                    </div>
                     <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
                   </div>
                 );
@@ -8676,6 +8679,67 @@ td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8
 <div class="totals"><div><b>${esc(tt.cal||0)}</b><span>/ ${esc(tg.cal||0)} cal</span></div><div><b>${esc(tt.protein||0)}</b><span>/ ${esc(tg.protein||0)}g protein</span></div><div><b>${esc(tt.carbs||0)}</b><span>/ ${esc(tg.carbs||0)}g carbs</span></div><div><b>${esc(tt.fats||0)}</b><span>/ ${esc(tg.fats||0)}g fat</span></div></div>
 ${meals}
 <p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
+<script>window.onload=function(){window.print()}</script></body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Aggregate a day's meal plan into a 7-day shopping list: sum grams per unique
+// food across all meals, multiply by `days` (default a week), and group by aisle.
+function buildGroceryList(plan, days = 7) {
+  const cat = (food) => {
+    const f = (food || "").toLowerCase();
+    const has = (...w) => w.some(x => f.includes(x));
+    if (has("oil")) return "Fats & Oils";
+    if (has("almond","walnut","cashew","pecan","peanut","nut butter","seed","tahini")) return "Fats & Oils";
+    if (has("chicken","beef","steak","pork","turkey","bacon","ham","salmon","tuna","fish","shrimp","cod","tilapia","egg","tofu","tempeh","bean","lentil","edamame","chickpea","whey","protein powder")) return "Protein";
+    if (has("milk","yogurt","cheese","cottage","butter","kefir","cream")) return "Dairy";
+    if (has("rice","oat","bread","pasta","noodle","soba","quinoa","potato","tortilla","couscous","barley","cereal","bagel","wrap","flour","cracker")) return "Grains & Starches";
+    if (has("spinach","broccoli","kale","lettuce","tomato","cucumber","pepper","onion","garlic","carrot","avocado","banana","apple","berry","berries","orange","lime","lemon","bok choy","mushroom","zucchini","asparagus","celery","fruit","greens","scallion","grape","mango","pineapple","cabbage","cauliflower","sweet potato","squash","pear","peach")) return "Produce";
+    return "Pantry & Other";
+  };
+  const map = new Map();   // key: lowercased food -> { food, grams, brand, category }
+  (plan.meals || []).forEach(ml => (ml.items || []).forEach(it => {
+    const key = (it.food || it.query || "").toLowerCase().trim();
+    if (!key) return;
+    const g = (parseFloat(it.grams) || 0) * days;
+    const cur = map.get(key) || { food: it.food || it.query, grams: 0, brand: it.brand || null, category: cat(it.food || it.query) };
+    cur.grams += g;
+    map.set(key, cur);
+  }));
+  const items = [...map.values()].map(it => {
+    const g = Math.round(it.grams);
+    const amount = g >= 454 ? `${(g / 453.6).toFixed(1)} lb` : `${Math.max(1, Math.round(g / 28.35))} oz`;
+    return { ...it, grams: g, amount };
+  });
+  const order = ["Protein", "Produce", "Grains & Starches", "Dairy", "Fats & Oils", "Pantry & Other"];
+  const groups = order.map(c => ({ category: c, items: items.filter(i => i.category === c).sort((a, b) => a.food.localeCompare(b.food)) }))
+    .filter(g => g.items.length);
+  return groups;
+}
+
+// Print / Save-as-PDF a weekly grocery list built from the generated meal plan.
+function printGroceryList(plan, { name, days = 7 } = {}) {
+  if (!plan || !Array.isArray(plan.meals)) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  const groups = buildGroceryList(plan, days);
+  const sections = groups.map(g =>
+    `<h2>${esc(g.category)}</h2><table>${g.items.map(it =>
+      `<tr><td class="cb">☐</td><td>${esc(it.food)}${it.brand ? ` <span class="brand">· ${esc(it.brand)}</span>` : ""}</td><td class="n">${esc(it.amount)} <span class="g">(${esc(it.grams)} g)</span></td></tr>`
+    ).join("")}</table>`
+  ).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Grocery List${name ? " — " + esc(name) : ""}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
+h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:18px}
+h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#7a8a00;margin:18px 0 4px}
+table{width:100%;border-collapse:collapse}td{padding:6px 0;border-bottom:1px solid #eee;font-size:15px;vertical-align:top}
+td.cb{width:22px;color:#bbb;font-size:17px}td.n{text-align:right;color:#555;white-space:nowrap;width:120px}
+.g{color:#999;font-size:12px}.brand{color:#3a8a3a;font-size:13px}
+@media print{body{margin:0}}</style></head><body>
+<h1>Weekly Grocery List${name ? ` — ${esc(name)}` : ""}</h1>
+<div class="sub">Based on your meal plan × ${days} day${days === 1 ? "" : "s"} · ${new Date().toLocaleDateString()}</div>
+${sections}
+<p style="margin-top:24px;color:#888;font-size:12px">Quantities are estimates of cooked/edible weight for ${days} days of this plan — buy a little extra for trimming, draining, and prep.</p>
 <script>window.onload=function(){window.print()}</script></body></html>`;
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
