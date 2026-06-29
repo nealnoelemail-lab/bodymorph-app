@@ -24,6 +24,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var fileURL: URL?
     private var capturing = false
     private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
+    private var cartesiaKey = "" // passed from JS; used when provider == "cartesia"
+    private var provider = "legacy"   // "legacy" (OpenAI Whisper) | "cartesia" (Ink-Whisper)
     private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
     private var hasSpeech = false
     private var speechFrames = 0
@@ -41,6 +43,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // and ask for mic permission. Call once when the coach session starts.
     @objc func configure(_ call: CAPPluginCall) {
         if let k = call.getString("openaiKey"), !k.isEmpty { openaiKey = k }
+        if let k = call.getString("cartesiaKey"), !k.isEmpty { cartesiaKey = k }
+        if let p = call.getString("provider"), !p.isEmpty { provider = p.lowercased() }
         let session = AVAudioSession.sharedInstance()
         // Set up the session BEST-EFFORT: recording works even if a routing call
         // throws, so we only fail when the mic permission is actually denied.
@@ -221,17 +225,24 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
     }
 
-    // Transcribe the recorded clip with OpenAI via native URLSession (no WebView /
-    // no CORS), then emit the resulting TEXT to JS.
+    // Transcribe the recorded clip natively via URLSession (no WebView / no CORS),
+    // then emit the resulting TEXT to JS. Routes to Cartesia (Ink-Whisper) or OpenAI
+    // (Whisper) based on the provider passed from JS — both return JSON {"text": ...}.
     private func transcribe(_ url: URL) {
-        guard !openaiKey.isEmpty else {
+        let useCartesia = (provider == "cartesia") && !cartesiaKey.isEmpty
+        let key = useCartesia ? cartesiaKey : openaiKey
+        guard !key.isEmpty else {
             try? FileManager.default.removeItem(at: url)
             notifyListeners("empty", data: ["error": "no key"]); return
         }
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+        let endpoint = useCartesia ? "https://api.cartesia.ai/stt"
+                                   : "https://api.openai.com/v1/audio/transcriptions"
+        let model = useCartesia ? "ink-whisper" : "gpt-4o-mini-transcribe"
+        var req = URLRequest(url: URL(string: endpoint)!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
-        req.setValue("Bearer \(openaiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if useCartesia { req.setValue("2026-03-01", forHTTPHeaderField: "Cartesia-Version") }
         let boundary = "Boundary-\(UUID().uuidString)"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         var body = Data()
@@ -240,7 +251,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        field("model", "gpt-4o-mini-transcribe")
+        field("model", model)
         field("language", "en")
         if let fileData = try? Data(contentsOf: url) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)

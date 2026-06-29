@@ -137,6 +137,17 @@ const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
 const ELEVEN_KEY = import.meta.env.VITE_ELEVENLABS_KEY; // ElevenLabs TTS (natural / cloned coach voices)
+// ── Voice provider abstraction ──────────────────────────────────────────────
+// One switch selects the whole voice stack so we're never vendor-locked:
+//   "legacy"   → OpenAI Whisper (STT) + ElevenLabs (TTS)   [proven fallback]
+//   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)  [single-vendor, cheaper, lower latency]
+const CARTESIA_KEY = import.meta.env.VITE_CARTESIA_KEY;
+const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
+const USE_CARTESIA = VOICE_PROVIDER === "cartesia" && !!CARTESIA_KEY;
+const CARTESIA_VERSION = "2026-03-01";
+const CARTESIA_TTS_MODEL = "sonic-3.5";
+const CARTESIA_STT_MODEL = "ink-whisper";
+const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
 // Native iOS/Android shell (Capacitor). On a real device the WebView mic is dead,
 // so the voice coach captures audio through the native VoiceCapture plugin instead.
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
@@ -3650,6 +3661,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const vsRef        = useRef("idle");
   const voiceIdRef   = useRef(null);
   voiceIdRef.current = voiceId; // current ElevenLabs voice id (null → browser TTS)
+  const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -3684,7 +3696,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
     // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
     if (IS_NATIVE) {
       try {
-        await VoiceCapture.configure({ openaiKey: OPENAI_KEY });
+        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, provider: VOICE_PROVIDER });
         setArmed(true);
         closedRef.current = false;
         requestWakeLock();
@@ -4072,7 +4084,42 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       }
     };
 
-    if (ELEVEN_KEY && voiceIdRef.current) elevenSpeak();
+    // ── Cartesia Sonic (single-vendor stack) — same blob-playback path; browser fallback on error ──
+    const cartesiaSpeak = async () => {
+      try {
+        const res = await fetch("https://api.cartesia.ai/tts/bytes", {
+          method: "POST",
+          signal: AbortSignal.timeout(12000),
+          headers: { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model_id: CARTESIA_TTS_MODEL,
+            transcript: text,
+            voice: { mode: "id", id: cartesiaVoiceIdRef.current || CARTESIA_DEFAULT_VOICE },
+            language: "en",
+            output_format: { container: "mp3", sample_rate: 24000, bit_rate: 128000 },
+          }),
+        });
+        if (!res.ok || closedRef.current || done) { if (!res.ok) log("Cartesia HTTP " + res.status); throw new Error("tts " + res.status); }
+        const blob = await res.blob();
+        if (closedRef.current || done) return;
+        const url = URL.createObjectURL(blob);
+        if (!coachAudio) coachAudio = new Audio();
+        coachAudio.src = url;
+        coachAudio.onended = () => { URL.revokeObjectURL(url); finish(); };
+        coachAudio.onerror = () => { URL.revokeObjectURL(url); if (!done) finish(); };
+        const secs = Math.min(40, Math.max(5, (text.split(/\s+/).length / 2.6) + 3));
+        capId = setTimeout(finish, secs * 1000);
+        await coachAudio.play();
+        startBargeWatch();
+      } catch (e) {
+        log("Cartesia fail → browser voice: " + e.message);
+        if (!done && !closedRef.current) browserSpeak();
+        else if (!done) finish();
+      }
+    };
+
+    if (USE_CARTESIA) cartesiaSpeak();
+    else if (ELEVEN_KEY && voiceIdRef.current) elevenSpeak();
     else browserSpeak();
   }, [log]);
 
@@ -4161,17 +4208,21 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
       const formData = new FormData();
       formData.append("file", blob, `audio.${ext}`);
-      formData.append("model", "gpt-4o-mini-transcribe"); // faster than whisper-1
+      formData.append("model", USE_CARTESIA ? CARTESIA_STT_MODEL : "gpt-4o-mini-transcribe");
       formData.append("language", "en");
       log("sending to transcribe…");
       try {
-        const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-          signal: AbortSignal.timeout(15000),
-          method: "POST",
-          headers: { "Authorization": `Bearer ${OPENAI_KEY}` },
-          body: formData,
-        });
-        if (!res.ok) { log("Whisper HTTP " + res.status); }
+        const res = await fetch(
+          USE_CARTESIA ? "https://api.cartesia.ai/stt" : "https://api.openai.com/v1/audio/transcriptions",
+          {
+            signal: AbortSignal.timeout(15000),
+            method: "POST",
+            headers: USE_CARTESIA
+              ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION }
+              : { "Authorization": `Bearer ${OPENAI_KEY}` },
+            body: formData,
+          });
+        if (!res.ok) { log("STT HTTP " + res.status); }
         const data = await res.json();
         const text = (data.text || "").trim();
         // Reject silence/noise + Whisper's common hallucinations on quiet audio.
@@ -4250,7 +4301,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         : [...prior, { role: "user", content: userText }];
     if (!isInit) messagesRef.current = msgs;
 
-    const useStreaming = !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
+    const useStreaming = !USE_CARTESIA && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
     const ac = new AbortController();
     try {
       // ── Non-streaming path (browser voice already starts instantly) ──
