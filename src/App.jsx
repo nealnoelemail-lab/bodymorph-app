@@ -2863,6 +2863,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, stepEntries, 
         <button onClick={onChangeProgram} style={{ background:"transparent", border:"1px solid "+trainAccent, borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Change Program</button>
         <button onClick={onEditTime} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Time</button>
         <button onClick={onEditDays} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:trainAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>Edit Days</button>
+        <button onClick={()=>printProgram(program, profile)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600 }}>🖨 Print</button>
       </div>
 
       {aiEligible && (
@@ -8670,6 +8671,45 @@ td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8
 <div class="totals"><div><b>${esc(tt.cal||0)}</b><span>/ ${esc(tg.cal||0)} cal</span></div><div><b>${esc(tt.protein||0)}</b><span>/ ${esc(tg.protein||0)}g protein</span></div><div><b>${esc(tt.carbs||0)}</b><span>/ ${esc(tg.carbs||0)}g carbs</span></div><div><b>${esc(tt.fats||0)}</b><span>/ ${esc(tg.fats||0)}g fat</span></div></div>
 ${meals}
 <p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
+<script>window.onload=function(){window.print()}</script></body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Print / Save-as-PDF a workout program: overview, the committed timeline, every
+// training day with its exercises (sets×reps, tempo, rest, coach cue), and the
+// week-by-week progression milestones.
+function printProgram(program, profile) {
+  if (!program || !Array.isArray(program.weeklySchedule)) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  const name = profile?.name;
+  const tl = program.timeline;
+  const days = program.weeklySchedule.map(d => {
+    const rows = (d.workout || []).map(ex =>
+      `<tr><td>${esc(ex.exercise)}${ex.coachCue ? `<div class="cue">${esc(ex.coachCue)}</div>` : ""}</td><td class="n">${esc(ex.sets)} × ${esc(ex.reps)}</td><td class="n">${esc(ex.tempo || "")}</td><td class="n">${esc(ex.rest || "")}</td></tr>`
+    ).join("");
+    return `<h2>${esc(d.day)} — ${esc(d.type)}${d.focus ? ` <span class="focus">· ${esc(d.focus)}</span>` : ""}</h2>
+<table><tr class="hd"><td>Exercise</td><td class="n">Sets×Reps</td><td class="n">Tempo</td><td class="n">Rest</td></tr>${rows}</table>`;
+  }).join("");
+  const ms = (program.progressMilestones || []).map(m => `<li><b>Week ${esc(m.week)}:</b> ${esc(m.goal)}</li>`).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Program${name ? " — " + esc(name) : ""}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
+h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:14px}
+.overview{font-size:14px;color:#333;margin-bottom:12px}
+.commit{background:#f4f4ef;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:14px}
+h2{font-size:13px;letter-spacing:.5px;color:#7a8a00;margin:20px 0 4px}.focus{color:#999;font-weight:400}
+table{width:100%;border-collapse:collapse;page-break-inside:avoid}td{padding:6px 0;border-bottom:1px solid #eee;font-size:14px;vertical-align:top}
+tr.hd td{color:#999;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #ddd}
+td.n{text-align:right;color:#555;white-space:nowrap;width:90px}.cue{color:#777;font-size:12px;margin-top:2px}
+ul{margin:6px 0 0;padding-left:18px}li{font-size:14px;margin-bottom:3px}
+@media print{body{margin:0}h2{page-break-after:avoid}}</style></head><body>
+<h1>Your Training Program${name ? ` — ${esc(name)}` : ""}</h1>
+<div class="sub">${esc((profile?.focus || "").split("(")[0].trim())} · ${esc((profile?.goal || "").split("(")[0].trim())} · ${new Date().toLocaleDateString()}</div>
+${tl ? `<div class="commit"><b>Commitment:</b> ${esc(tl.human)} to your goal · target ${esc(tl.etaDate)} (~${esc(tl.weeklyRate)} lb/week)</div>` : ""}
+${program.overview ? `<div class="overview">${esc(program.overview)}</div>` : ""}
+${days}
+${ms ? `<h2>Progression</h2><ul>${ms}</ul>` : ""}
+<p style="margin-top:24px;color:#888;font-size:12px">Fitness guidance, not medical advice. Warm up, use good form, and stop if anything hurts.</p>
 <script>window.onload=function(){window.print()}</script></body></html>`;
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
