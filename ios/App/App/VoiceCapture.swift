@@ -55,7 +55,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             // Keep the screen awake while the coach is active so iOS doesn't auto-lock
             // mid-workout (which suspends the web layer and stops the conversation). A
             // deliberate lock by the user still stops it, as expected.
-            UIApplication.shared.isIdleTimerDisabled = true
+            // MUST be on the main thread — this is a UIKit call and configure() can run
+            // on a background queue (setting it off-main froze the app).
+            DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = true }
             call.resolve()
         }
         if #available(iOS 17.0, *) {
