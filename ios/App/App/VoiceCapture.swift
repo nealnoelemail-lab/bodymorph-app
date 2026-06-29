@@ -194,13 +194,18 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
         try? FileManager.default.removeItem(at: url)
-        URLSession.shared.dataTask(with: req) { data, _, err in
-            if let data = data,
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            if let err = err {
+                self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return
+            }
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 200, let data = data,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
                 self.notifyListeners("utterance", data: ["text": text])
             } else {
-                self.notifyListeners("empty", data: ["error": err?.localizedDescription ?? "transcribe failed"])
+                let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                self.notifyListeners("empty", data: ["error": "http \(status): \(String(bodyStr.prefix(140)))"])
             }
         }.resume()
     }
