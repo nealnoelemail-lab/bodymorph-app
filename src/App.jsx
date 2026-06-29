@@ -2304,7 +2304,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
     gender: ini.gender || "",
     goal: ini.goal || "",
     focus: ini.focus || "",
-    trainingDays: ini.trainingDays || [1,2,3,4,5],
+    trainingDays: ini.trainingDays || [],   // start empty — the client consciously picks their days
     sessionTime: ini.sessionTime || 60,
     age: ini.age || "",
     weight: ini.weight || "",
