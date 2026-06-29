@@ -3,16 +3,11 @@ import Capacitor
 import AVFoundation
 
 // Native microphone capture for the voice coach. The WebView's getUserMedia is
-// unreliable/silent on iOS, so we capture natively with AVAudioRecorder + energy
-// VAD and transcribe each finished phrase natively (URLSession → OpenAI, no
-// WebView CORS), handing the TEXT back to JS.
-//
-// Screen-off: a recorder is kept running CONTINUOUSLY the whole session — we never
-// leave the mic idle. When a phrase ends we instantly swap to a fresh recorder
-// (sub-ms gap) rather than stopping. Because real audio INPUT is always active,
-// iOS (with the "audio" background mode) keeps the app — and its meter timer —
-// alive when the screen turns off. (A continuously *recording* mic is recognized
-// as active audio; looping silent *playback* is not, which is why that failed.)
+// unreliable/silent on iOS, so we capture audio natively with AVAudioRecorder,
+// do simple energy-based voice-activity detection, and hand each finished phrase
+// back to JS as a base64 m4a clip (which JS sends to Whisper exactly as before).
+// We also force the audio session to the SPEAKER and pair it with the "audio"
+// background mode so it keeps listening with the screen off.
 @objc(VoiceCapturePlugin)
 public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
     public let identifier = "VoiceCapturePlugin"
@@ -26,143 +21,146 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var recorder: AVAudioRecorder?
     private var meterTimer: Timer?
     private var fileURL: URL?
-    private var openaiKey = ""
-    private var active = false       // session running → keep a recorder alive
-    private var detecting = false    // actively looking for a phrase (false during TTS/processing)
-
+    private var capturing = false
+    private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
+    private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
     private var hasSpeech = false
     private var speechFrames = 0
     private var silenceFrames = 0
     private var totalFrames = 0
-    private var idleFramesCount = 0  // frames recorded while NOT detecting (bounds keepalive file)
 
     // Tuning (frames are ~100ms each via the meter timer).
-    private let speechThreshold: Float = -38.0   // dBFS above which sound counts as speech
+    private let speechThreshold: Float = -38.0   // dBFS above which we treat sound as speech
     private let silenceHang = 6                   // ~0.6s of silence ends a phrase
     private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
     private let maxFrames = 120                   // ~12s hard cap per phrase
-    private let idleGiveUp = 80                   // ~8s of no speech while detecting → empty
-    private let keepaliveRestart = 100            // ~10s → recycle the idle keepalive file
+    private let idleFrames = 50                   // ~5s of no speech → give up, return empty
 
-    private let recSettings: [String: Any] = [
-        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-        AVSampleRateKey: 16000,
-        AVNumberOfChannelsKey: 1,
-        AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
-    ]
-
-    // MARK: - Public API
-
+    // Configure + activate the audio session (record + playback, forced to speaker)
+    // and ask for mic permission. Call once when the coach session starts.
     @objc func configure(_ call: CAPPluginCall) {
         if let k = call.getString("openaiKey"), !k.isEmpty { openaiKey = k }
         let session = AVAudioSession.sharedInstance()
-        func setupAndResolve() {
+        // Set up the session BEST-EFFORT: recording works even if a routing call
+        // throws, so we only fail when the mic permission is actually denied.
+        func setupSessionAndResolve() {
             do {
                 try session.setCategory(.playAndRecord, mode: .default,
                                         options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
                 try session.setActive(true)
-            } catch { print("[VoiceCapture] session error: \(error)") }
-            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker error: \(error)") }
-            self.active = true
-            self.detecting = false
-            self.swapRecorder()        // start the continuous (keepalive) recorder
-            self.startTimer()
+            } catch { print("[VoiceCapture] setCategory error: \(error)") }
+            do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker override error: \(error)") }
+            self.startKeepAlive()
             call.resolve()
         }
         if #available(iOS 17.0, *) {
             switch AVAudioApplication.shared.recordPermission {
-            case .granted: setupAndResolve()
+            case .granted: setupSessionAndResolve()
             case .denied: call.reject("permission-denied")
-            default: AVAudioApplication.requestRecordPermission { ok in
-                DispatchQueue.main.async { ok ? setupAndResolve() : call.reject("permission-denied") } }
+            default:
+                AVAudioApplication.requestRecordPermission { granted in
+                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
+                }
             }
         } else {
             switch session.recordPermission {
-            case .granted: setupAndResolve()
+            case .granted: setupSessionAndResolve()
             case .denied: call.reject("permission-denied")
-            default: session.requestRecordPermission { ok in
-                DispatchQueue.main.async { ok ? setupAndResolve() : call.reject("permission-denied") } }
+            default:
+                session.requestRecordPermission { granted in
+                    DispatchQueue.main.async { granted ? setupSessionAndResolve() : call.reject("permission-denied") }
+                }
             }
         }
     }
 
+    // Capture ONE phrase, then emit a `utterance` event with the audio (or an
+    // `empty` event if nothing was said). JS calls this at the start of each turn.
     @objc func listen(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            if !self.active {        // re-arm if a previous stop() tore things down
-                self.active = true
-                self.reassertSession()
-                self.startTimer()
-            }
-            self.reassertSession()
-            self.detecting = true
-            if let old = self.swapRecorder() { try? FileManager.default.removeItem(at: old) } // fresh phrase
+            self.beginRecording()
             call.resolve()
         }
     }
 
     @objc func stop(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            self.active = false
-            self.detecting = false
-            self.meterTimer?.invalidate(); self.meterTimer = nil
-            self.recorder?.stop(); self.recorder = nil
-            if let url = self.fileURL { try? FileManager.default.removeItem(at: url) }
+            self.endRecording(emit: false)
+            self.stopKeepAlive()
             call.resolve()
         }
     }
 
-    // MARK: - Recording
+    // Loop silent audio so the app keeps "producing audio" — with the UIBackgroundModes
+    // "audio" entitlement, iOS then keeps the app (and our listen loop) alive when the
+    // screen turns off, instead of suspending it between recording bursts.
+    private func startKeepAlive() {
+        guard keepAlive == nil else { return }
+        if let player = try? AVAudioPlayer(data: makeSilentWav()) {
+            player.numberOfLoops = -1
+            player.volume = 0.0
+            player.play()
+            keepAlive = player
+        }
+    }
+    private func stopKeepAlive() {
+        keepAlive?.stop()
+        keepAlive = nil
+    }
+    private func makeSilentWav(seconds: Double = 2.0, sampleRate: Double = 8000) -> Data {
+        let numSamples = Int(seconds * sampleRate)
+        let dataSize = numSamples * 2   // 16-bit mono
+        var d = Data()
+        func a(_ s: String) { d.append(s.data(using: .ascii)!) }
+        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        a("RIFF"); u32(UInt32(36 + dataSize)); a("WAVE")
+        a("fmt "); u32(16); u16(1); u16(1)
+        u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * 2); u16(2); u16(16)
+        a("data"); u32(UInt32(dataSize))
+        d.append(Data(count: dataSize))   // all zeros = silence
+        return d
+    }
 
-    private func reassertSession() {
+    private func beginRecording() {
+        endRecording(emit: false)   // ensure clean state
+        // Re-assert speaker each turn (WebKit/interruptions can change the route).
         let session = AVAudioSession.sharedInstance()
         try? session.setActive(true)
         try? session.overrideOutputAudioPort(.speaker)
-    }
 
-    private func startTimer() {
-        meterTimer?.invalidate()
-        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
-    }
-
-    // Stop the current recorder (returning its file, NOT deleted) and immediately
-    // start a fresh one — so the mic input never goes idle. Resets VAD counters.
-    @discardableResult
-    private func swapRecorder() -> URL? {
-        let oldURL = fileURL
-        recorder?.stop()
-        hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0; idleFramesCount = 0
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vc-\(UUID().uuidString).m4a")
+        hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vc-\(UUID().uuidString).m4a")
         fileURL = url
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+        ]
         do {
-            let r = try AVAudioRecorder(url: url, settings: recSettings)
+            let r = try AVAudioRecorder(url: url, settings: settings)
             r.isMeteringEnabled = true
             r.delegate = self
             r.record()
             recorder = r
+            capturing = true
+            meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                self?.tick()
+            }
         } catch {
-            recorder = nil
-            print("[VoiceCapture] recorder error: \(error)")
+            notifyListeners("empty", data: [:])
         }
-        return oldURL
     }
 
     private func tick() {
-        guard active else { return }
-        guard let r = recorder, r.isRecording else {
-            swapRecorder()   // recorder died → restart to keep the mic alive
-            return
-        }
+        guard let r = recorder, r.isRecording else { return }
         r.updateMeters()
         let power = r.averagePower(forChannel: 0)   // ~ -160 (silent) … 0 (loud)
-        let level = max(0.0, min(100.0, (Double(power) + 60.0) / 60.0 * 100.0))
+        // Surface a 0–100 level for the on-screen meter.
+        let level = max(0.0, min(100.0, (power + 60.0) / 60.0 * 100.0))
         notifyListeners("level", data: ["level": level])
-
-        if !detecting {
-            // Keepalive only: keep recording, recycle the file periodically.
-            idleFramesCount += 1
-            if idleFramesCount >= keepaliveRestart { if let u = swapRecorder() { try? FileManager.default.removeItem(at: u) } }
-            return
-        }
 
         totalFrames += 1
         if power > speechThreshold {
@@ -172,32 +170,35 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
 
         if hasSpeech && silenceFrames >= silenceHang && speechFrames >= minSpeechFrames {
-            endPhrase(emit: true)
+            endRecording(emit: true)            // natural end of phrase
         } else if totalFrames >= maxFrames {
-            endPhrase(emit: hasSpeech)
-        } else if !hasSpeech && totalFrames >= idleGiveUp {
-            endPhrase(emit: false)
+            endRecording(emit: hasSpeech)       // hard cap
+        } else if !hasSpeech && totalFrames >= idleFrames {
+            endRecording(emit: false)           // nobody spoke → empty
         }
     }
 
-    // A phrase finished. Swap to a fresh keepalive recorder (mic stays live), then
-    // transcribe the captured phrase file (or emit empty).
-    private func endPhrase(emit: Bool) {
+    private func endRecording(emit: Bool) {
+        meterTimer?.invalidate(); meterTimer = nil
+        let r = recorder; recorder = nil
+        let url = fileURL
         let didSpeak = hasSpeech
-        detecting = false
-        let url = swapRecorder()   // returns the just-finished phrase file; new recorder now running
-        guard let url = url else { if emit { notifyListeners("empty", data: [:]) }; return }
-        if emit && didSpeak,
+        capturing = false
+        r?.stop()
+
+        if emit && didSpeak, let url = url,
            let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1200 {
-            transcribe(url)
-        } else {
+            transcribe(url)          // native transcription → emits `utterance` {text} (removes file)
+        } else if emit {
+            if let url = url { try? FileManager.default.removeItem(at: url) }
+            notifyListeners("empty", data: [:])
+        } else if let url = url {
             try? FileManager.default.removeItem(at: url)
-            if emit { notifyListeners("empty", data: [:]) }
         }
     }
 
-    // MARK: - Native transcription (no WebView / no CORS)
-
+    // Transcribe the recorded clip with OpenAI via native URLSession (no WebView /
+    // no CORS), then emit the resulting TEXT to JS.
     private func transcribe(_ url: URL) {
         guard !openaiKey.isEmpty else {
             try? FileManager.default.removeItem(at: url)
@@ -228,7 +229,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         req.httpBody = body
         try? FileManager.default.removeItem(at: url)
         URLSession.shared.dataTask(with: req) { data, resp, err in
-            if let err = err { self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return }
+            if let err = err {
+                self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return
+            }
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200, let data = data,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
