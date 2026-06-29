@@ -36,6 +36,15 @@ async function rpc(fn, args) {
 
 export const redeemCoachAccess = (code) => rpc("redeem_coach_access", { p_code: (code || "").trim() });
 export const redeemCoachInvite = (code) => rpc("redeem_coach_invite", { p_code: (code || "").trim() });
+
+// Access gate: has this client already redeemed a trainer's code (active link)?
+// Used to require a code from every user before they can use the app.
+export async function clientHasCoach(userId) {
+  if (!supabase || !userId) return false;
+  const { data } = await supabase.from("relationships")
+    .select("coach_id").eq("client_id", userId).eq("status", "active").limit(1);
+  return Array.isArray(data) && data.length > 0;
+}
 export async function generateInvite() {
   const r = await rpc("generate_coach_invite", {});
   return r.value || null;                       // the invite code string

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { fetchRole, redeemCoachAccess, redeemCoachInvite, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
+import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
@@ -8097,6 +8097,60 @@ function AuthScreen({ onSkip }) {
   );
 }
 
+// ── ACCESS GATE ───────────────────────────────────────────────────────────────
+// Invite-only: every user must enter a code before they can use the app. Clients
+// redeem their trainer's invite code (links them to that trainer); trainers redeem
+// a platform access code (become a coach). No valid code → no access.
+function AccessGate({ onLink, onCoach, onLinked, onSignOut }) {
+  const [mode, setMode] = useState("client"); // client | coach
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    setError("");
+    const c = code.trim();
+    if (!c) { setError("Enter your code."); return; }
+    setBusy(true);
+    const res = mode === "coach" ? await onCoach(c) : await onLink(c);
+    setBusy(false);
+    if (!res || !res.ok) { setError((res && res.error) || "That code isn't valid. Check it with your trainer."); return; }
+    if (mode === "client") onLinked?.();   // coach path routes itself to the dashboard
+  };
+
+  return (
+    <div style={S.center}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div className="fade-in" style={{ width:"100%", maxWidth:360, display:"flex", flexDirection:"column", alignItems:"center", gap:18 }}>
+        <Logo small />
+        <div style={S.stepLabel}>{mode === "coach" ? "TRAINER ACCESS" : "ENTER YOUR CODE"}</div>
+        <div style={{ color:"#c8c8e0", fontSize:13.5, lineHeight:1.6, textAlign:"center" }}>
+          {mode === "coach"
+            ? "Enter your BodyMorph trainer access code to set up your coaching account."
+            : "BodyMorph is invite-only. Enter the code your trainer gave you to get started."}
+        </div>
+        <form onSubmit={submit} style={{ width:"100%", display:"flex", flexDirection:"column", gap:12 }}>
+          <input value={code} onChange={e=>setCode(e.target.value)} autoCapitalize="characters" autoComplete="off"
+            placeholder={mode==="coach" ? "Trainer access code" : "Your trainer's code"} style={S.input} />
+          {error && <div style={{ color:C.red, fontSize:13, lineHeight:1.5 }}>{error}</div>}
+          <button type="submit" disabled={busy} style={{ ...S.btnPri, width:"100%", marginTop:4, borderColor:"#e8ff00", color:"#e8ff00", opacity: busy?0.6:1, cursor: busy?"default":"pointer" }}>
+            {busy ? "Checking…" : "Continue"}
+          </button>
+        </form>
+        <button onClick={()=>{ setMode(m=>m==="coach"?"client":"coach"); setError(""); setCode(""); }}
+          style={{ background:"transparent", border:"none", color:"#e8ff00", fontSize:13, cursor:"pointer", fontWeight:600 }}>
+          {mode === "coach" ? "I'm a client — I have a trainer's code" : "I'm a trainer"}
+        </button>
+        <button onClick={onSignOut} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer", textDecoration:"underline" }}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── SUBSCRIBE SCREEN ──────────────────────────────────────────────────────────
 // Shown when a signed-in user has no active subscription (and billing is on).
 // Hosted Stripe Checkout: the button redirects to Stripe, so on success we come
@@ -9237,11 +9291,16 @@ export default function BodyMorph() {
             setProgram({ weeklySchedule:[], overview:"Tap TRAINING to rebuild your program.", stretching:"full", nutrition:macrosFor(migrated), progressMilestones:[] });
           }
         }
-        // Routing: a coach goes to the dashboard (skips client wizard + paywall);
-        // otherwise the normal client flow (gated by profile + subscription).
+        // Routing: a coach goes to the dashboard (skips client wizard + paywall).
+        // ACCESS GATE: the app is invite-only — every client must have redeemed a
+        // trainer's code (active link) before they can use it. No code → gate.
         if (mRole === "coach") setPhase("dashboard");
-        else if (hasProfile) setPhase(subscribed ? "home" : "subscribe");
-        else setPhase(subscribed ? "wizard" : "subscribe");
+        else {
+          const linked = (hasBackend && uid) ? await clientHasCoach(uid) : true; // offline = no gate
+          if (!linked) setPhase("accesscode");
+          else if (hasProfile) setPhase(subscribed ? "home" : "subscribe");
+          else setPhase(subscribed ? "wizard" : "subscribe");
+        }
       } catch(loadErr) {
         console.warn("Profile load error:", loadErr);
         // Something went wrong reading storage — go to wizard but don't crash
@@ -9810,6 +9869,7 @@ export default function BodyMorph() {
   const screen = (() => {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
+  if (phase === "accesscode") return <AccessGate onLink={linkToCoach} onCoach={becomeCoach} onSignOut={handleSignOut} onLinked={()=>setPhase(profile ? "home" : "wizard")} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} initial={editProfile} startStep={editProfile ? 8 : 0} /></>;
