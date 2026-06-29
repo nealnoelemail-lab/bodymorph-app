@@ -7751,6 +7751,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                       <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontWeight:600, fontSize:17 }}>Regenerate</button>
                       <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17 }}>Use This Plan</button>
                     </div>
+                    <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:16 }}>🖨 Print / Save as PDF</button>
                     <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
                   </div>
                 );
@@ -8637,6 +8638,38 @@ p{margin:0}ul{margin:6px 0 0;padding-left:18px}@media print{body{margin:0}}</sty
 <h2>Exercise</h2><p>${esc(ev.exercise)}</p>
 <h2>Timeline</h2><p>Recommended: <b>${esc(t.recommended)}</b></p>${t.desiredVerdict ? `<p>${esc(t.desiredVerdict)}</p>` : ""}<ul>${ms}</ul>
 <p style="margin-top:28px;color:#888;font-size:12px">This plan is fitness guidance from your coach, not medical advice. Consult a physician about any medical conditions or injuries before starting.</p>
+<script>window.onload=function(){window.print()}</script></body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Print / Save-as-PDF a generated meal plan: a clean per-meal document with
+// portions, per-item macros, and the day's totals vs target.
+function printMealPlan(plan, { name, dietPref, cuisines } = {}) {
+  if (!plan || !Array.isArray(plan.meals)) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  const tt = plan.totals || {}, tg = plan.target || {};
+  const meals = plan.meals.map(ml => {
+    const rows = (ml.items || []).map(it =>
+      `<tr><td>${esc(it.food)}${it.brand ? ` <span class="brand">· ${esc(it.brand)}</span>` : ""}</td><td class="n">${esc(it.grams)} g</td><td class="n">${esc(it.cal)} cal</td><td class="n">${esc(it.protein)}g P</td></tr>`
+    ).join("");
+    return `<h2>${esc(ml.slot)}</h2><table>${rows}</table>`;
+  }).join("");
+  const cuisineLine = (Array.isArray(cuisines) && cuisines.length) ? ` · ${esc(cuisines.join(", "))}` : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Meal Plan${name ? " — " + esc(name) : ""}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
+h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:18px}
+.totals{display:flex;gap:10px;margin-bottom:8px}.totals div{flex:1;text-align:center;background:#f4f4ef;border-radius:8px;padding:8px 4px}
+.totals b{display:block;font-size:20px}.totals span{color:#888;font-size:12px}
+h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#7a8a00;margin:18px 0 4px}
+table{width:100%;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #eee;font-size:14px}
+td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8a3a}
+@media print{body{margin:0}}</style></head><body>
+<h1>Your Meal Plan${name ? ` — ${esc(name)}` : ""}</h1>
+<div class="sub">${esc(dietPref || "")} diet${cuisineLine} · ${new Date().toLocaleDateString()}</div>
+<div class="totals"><div><b>${esc(tt.cal||0)}</b><span>/ ${esc(tg.cal||0)} cal</span></div><div><b>${esc(tt.protein||0)}</b><span>/ ${esc(tg.protein||0)}g protein</span></div><div><b>${esc(tt.carbs||0)}</b><span>/ ${esc(tg.carbs||0)}g carbs</span></div><div><b>${esc(tt.fats||0)}</b><span>/ ${esc(tg.fats||0)}g fat</span></div></div>
+${meals}
+<p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
 <script>window.onload=function(){window.print()}</script></body></html>`;
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
