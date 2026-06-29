@@ -3786,7 +3786,7 @@ ABSOLUTE RULES — NEVER BREAK THESE:
 • PROTEIN SHAKES, protein powder/whey, and ordinary high-protein or whole foods are FOOD, not medical supplements — talk about them NORMALLY. You CAN encourage a protein shake as an easy way to hit their protein goal, suggest it post-workout, and log it like any meal/snack. Do NOT punt protein shakes to their doctor. The "no supplement advice" rule covers pills/powders with a dose or health claim (creatine, pre-workout, vitamins, fat-burners, herbs, peptides, medications) — NOT basic macronutrient food. Rule of thumb: if it's eaten/drunk for macros (protein, carbs, fats, calories), coach on it freely; if it's a dose or a health-effect claim, defer.
 • If pain seems serious or persists, tell them to stop and check with a doctor or licensed professional.
 • If asked for medical or supplement ADVICE, say: "That's outside what I can help with — best to check with your doctor or a licensed pro." Then redirect.
-• Keep EVERY response to 1-3 short, natural sentences. This is live voice — no lists, no markdown.
+• Keep responses SHORT — ideally ONE sentence, two at most. This is live voice: brevity keeps it snappy and natural. Only go longer if they genuinely ask for detail. No lists, no markdown.
 • Use ${profile.name}'s name occasionally, not in every response.`;
 
   const buildSysPrompt = useCallback(() => {
@@ -4377,7 +4377,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
             signal: AbortSignal.timeout(15000),
             method: "POST",
             headers: { "Authorization": `Bearer ${XAI_KEY}`, "content-type": "application/json" },
-            body: JSON.stringify({ model: GROK_LLM_MODEL, max_tokens: 220, messages: [{ role: "system", content: buildSysPrompt() }, ...msgs] }),
+            body: JSON.stringify({ model: GROK_LLM_MODEL, max_tokens: 140, messages: [{ role: "system", content: buildSysPrompt() }, ...msgs] }),
           });
           if (closedRef.current || turnRef.current !== myTurn) return;
           if (!res.ok) log("Grok LLM HTTP " + res.status);
@@ -4388,7 +4388,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
             signal: AbortSignal.timeout(15000),
             method: "POST",
             headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs }),
+            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }),
           });
           if (closedRef.current || turnRef.current !== myTurn) return;
           const data = await res.json();
