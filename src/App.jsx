@@ -403,19 +403,20 @@ function avgDailySteps(stepEntries, days = 14) {
   return Math.round(recent.reduce((s, n) => s + n, 0) / recent.length);
 }
 
-// Effective target weight from whichever goals are set. If a goal body-fat % is
-// given (and current BF is known), derive the weight at that BF assuming lean mass
-// is preserved; otherwise fall back to the explicit goal weight.
+// Effective target weight. The client's explicit goal weight ALWAYS wins — it's
+// what they chose. Only when no goal weight is set do we derive a target from the
+// goal body-fat % (the weight at that BF assuming lean mass is preserved).
 function effectiveTargetWeight(profile) {
-  const w = parseFloat(profile.weight);
   const gw = parseFloat(profile.goalWeight);
+  if (gw) return gw;                               // honor the user's explicit choice
+  const w = parseFloat(profile.weight);
   const bf = parseFloat(profile.bodyFat);
   const gbf = parseFloat(profile.goalBodyFat);
   if (w && bf > 0 && bf < 60 && gbf > 0 && gbf < bf) {
     const lean = w * (1 - bf / 100);
-    return Math.round(lean / (1 - gbf / 100));   // weight at goal BF, lean mass preserved
+    return Math.round(lean / (1 - gbf / 100));     // weight at goal BF, lean mass preserved
   }
-  return gw || null;
+  return null;
 }
 
 function fmtGoalDate(d) {
@@ -2261,8 +2262,8 @@ function GLBInfo({ onClose }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Wizard({ onComplete, onCoachCode, seed }) {
-  const [step, setStep] = useState(0);
+function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
+  const [step, setStep] = useState(startStep || 0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
   // Pre-fill the client's name from a coach invite, when present.
@@ -2278,7 +2279,31 @@ function Wizard({ onComplete, onCoachCode, seed }) {
     if (!res?.ok) setCoachMsg(res?.error || "Invalid code");
     // On success, the app routes to the dashboard (this screen unmounts).
   };
-  const [p, setP] = useState({ firstName: seedName.split(" ")[0] || "", lastName: seedName.split(" ").slice(1).join(" ") || "", name:"", gender:"", goal:"", focus:"", trainingDays:[1,2,3,4,5], sessionTime:60, age:"", weight:"", height:"", heightFt:"", heightIn:"", fitnessLevel:"", activityLevel:"moderate", bodyFat:"", goalWeight:"", goalBodyFat:"" });
+  // When editing an existing profile (initial), prefill every field so the user
+  // can adjust just what they want; derive ft/in from stored height (inches).
+  const ini = initial || {};
+  const iniH = parseFloat(ini.height);
+  const [p, setP] = useState({
+    firstName: ini.firstName || seedName.split(" ")[0] || "",
+    lastName: ini.lastName || seedName.split(" ").slice(1).join(" ") || "",
+    name: ini.name || "",
+    gender: ini.gender || "",
+    goal: ini.goal || "",
+    focus: ini.focus || "",
+    trainingDays: ini.trainingDays || [1,2,3,4,5],
+    sessionTime: ini.sessionTime || 60,
+    age: ini.age || "",
+    weight: ini.weight || "",
+    height: ini.height || "",
+    heightFt: iniH ? String(Math.floor(iniH / 12)) : "",
+    heightIn: iniH ? String(Math.round(iniH % 12)) : "",
+    fitnessLevel: ini.fitnessLevel || "",
+    activityLevel: ini.activityLevel || "moderate",
+    bodyFat: ini.bodyFat || "",
+    goalWeight: ini.goalWeight || "",
+    goalBodyFat: ini.goalBodyFat || "",
+    deficit: ini.deficit || "moderate",
+  });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
 
@@ -2516,7 +2541,7 @@ function Wizard({ onComplete, onCoachCode, seed }) {
 // committing to up front (weeks/months + a target date), not a vague 4 weeks.
 // Fat-loss goals also pick a pace (mild/moderate/aggressive), each with its own
 // honest timeline; the choice persists and drives the program's horizon.
-function FatLossResults({ profile, onContinue }) {
+function FatLossResults({ profile, onContinue, onEdit }) {
   const accent = profile.gender === "Female" ? APP_PINK : "#e8ff00";
   const mode = (goalTimeline(profile, "moderate") || {}).mode;   // "loss" | "gain" | undefined
   const isLoss = mode === "loss";
@@ -2537,6 +2562,11 @@ function FatLossResults({ profile, onContinue }) {
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
+      {onEdit && (
+        <div style={{ padding:"14px 20px 0" }}>
+          <button onClick={onEdit} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:13 }}>&#8249; Edit my goal</button>
+        </div>
+      )}
       <div style={{ padding:"24px 20px 8px", textAlign:"center" }}>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, color:accent }}>YOUR PLAN &amp; TIMELINE</div>
         <div style={{ color:"#c8c8e0", fontSize:13.5, lineHeight:1.6, marginTop:6, maxWidth:360, marginLeft:"auto", marginRight:"auto" }}>
@@ -8881,6 +8911,7 @@ export default function BodyMorph() {
   const [program, setProgram] = useState(null);
   const [aiGenerating, setAiGenerating] = useState(false);  // AI program generation in flight
   const aiGenSigRef = useRef(null);                          // guards against duplicate auto-gen
+  const [editProfile, setEditProfile] = useState(null);      // non-null = wizard re-opened to edit an existing profile
   const [dayIdx, setDayIdx]   = useState(0);
   const [logs, setLogs]       = useState({});
   const [rewards, setRewards] = useState(emptyMedalState());
@@ -9241,6 +9272,7 @@ export default function BodyMorph() {
   const showToast = (medal) => { setToast(medal); setTimeout(()=>setToast(null), 3500); };
 
   const handleWizardDone = async (prof) => {
+    setEditProfile(null);                 // leaving the wizard clears any edit context
     setProfile(prof);
     setPhase("loading");
     await Store.set(PROFILE_KEY, prof);
@@ -9592,8 +9624,8 @@ export default function BodyMorph() {
   if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
-  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} /></>;
-  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d)=>{ saveDeficit(d); setPhase("home"); }} /></>;
+  if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} initial={editProfile} startStep={editProfile ? 8 : 0} /></>;
+  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d)=>{ saveDeficit(d); setPhase("home"); }} onEdit={()=>{ setEditProfile(profile); setPhase("wizard"); }} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 
   if (phase === "home") return (
