@@ -22,6 +22,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var meterTimer: Timer?
     private var fileURL: URL?
     private var capturing = false
+    private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
     private var hasSpeech = false
     private var speechFrames = 0
     private var silenceFrames = 0
@@ -37,6 +38,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // Configure + activate the audio session (record + playback, forced to speaker)
     // and ask for mic permission. Call once when the coach session starts.
     @objc func configure(_ call: CAPPluginCall) {
+        if let k = call.getString("openaiKey"), !k.isEmpty { openaiKey = k }
         let session = AVAudioSession.sharedInstance()
         // Set up the session BEST-EFFORT: recording works even if a routing call
         // throws, so we only fail when the mic permission is actually denied.
@@ -150,14 +152,56 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         capturing = false
         r?.stop()
 
-        if emit && didSpeak, let url = url, let data = try? Data(contentsOf: url), data.count > 1200 {
-            notifyListeners("utterance", data: [
-                "audio": data.base64EncodedString(),
-                "mime": "audio/m4a"
-            ])
+        if emit && didSpeak, let url = url,
+           let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1200 {
+            transcribe(url)          // native transcription → emits `utterance` {text} (removes file)
         } else if emit {
+            if let url = url { try? FileManager.default.removeItem(at: url) }
             notifyListeners("empty", data: [:])
+        } else if let url = url {
+            try? FileManager.default.removeItem(at: url)
         }
-        if let url = url { try? FileManager.default.removeItem(at: url) }
+    }
+
+    // Transcribe the recorded clip with OpenAI via native URLSession (no WebView /
+    // no CORS), then emit the resulting TEXT to JS.
+    private func transcribe(_ url: URL) {
+        guard !openaiKey.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            notifyListeners("empty", data: ["error": "no key"]); return
+        }
+        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 20
+        req.setValue("Bearer \(openaiKey)", forHTTPHeaderField: "Authorization")
+        let boundary = "Boundary-\(UUID().uuidString)"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        field("model", "gpt-4o-mini-transcribe")
+        field("language", "en")
+        if let fileData = try? Data(contentsOf: url) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+            body.append(fileData)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+        try? FileManager.default.removeItem(at: url)
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let text = json["text"] as? String {
+                self.notifyListeners("utterance", data: ["text": text])
+            } else {
+                self.notifyListeners("empty", data: ["error": err?.localizedDescription ?? "transcribe failed"])
+            }
+        }.resume()
     }
 }

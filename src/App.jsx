@@ -3684,7 +3684,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
     // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
     if (IS_NATIVE) {
       try {
-        await VoiceCapture.configure();
+        await VoiceCapture.configure({ openaiKey: OPENAI_KEY });
         setArmed(true);
         closedRef.current = false;
         requestWakeLock();
@@ -4184,49 +4184,34 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     requestAnimationFrame(checkSilence);
   }, [log]);
 
-  // NATIVE: transcribe one captured phrase (m4a from the native plugin) → respond,
-  // mirroring the web onstop path. Sent to the same Whisper endpoint.
-  const transcribeNative = useCallback(async (blob) => {
+  // NATIVE: the plugin transcribes natively and hands back TEXT — apply the same
+  // noise filter as the web path, then respond (no fetch here).
+  const respondNative = useCallback((rawText) => {
     if (closedRef.current) return;
     const myTurn = ++turnRef.current;
     setState("processing"); setInterim("");
-    const formData = new FormData();
-    formData.append("file", blob, "audio.m4a");
-    formData.append("model", "gpt-4o-mini-transcribe");
-    formData.append("language", "en");
-    log("transcribing (" + blob.size + "b)…");
-    try {
-      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-        signal: AbortSignal.timeout(15000), method: "POST",
-        headers: { "Authorization": `Bearer ${OPENAI_KEY}` }, body: formData,
-      });
-      if (!res.ok) log("Whisper HTTP " + res.status);
-      const data = await res.json();
-      const text = (data.text || "").trim();
-      const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
-      const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
-      const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
-      log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
-      if (closedRef.current || turnRef.current !== myTurn) return;
-      if (text && !isNoise) { setLastUser(text); askRef.current?.(text, false); }
-      else { setTimeout(startListening, 200); }
-    } catch (e) {
-      log("Whisper error: " + e.message);
-      if (!closedRef.current) setTimeout(startListening, 400);
-    }
+    const text = (rawText || "").trim();
+    const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
+    const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
+    const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
+    log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
+    if (closedRef.current || turnRef.current !== myTurn) return;
+    if (text && !isNoise) { setLastUser(text); askRef.current?.(text, false); }
+    else { setTimeout(startListening, 200); }
   }, [log, startListening]);
 
   // NATIVE: wire the plugin's events to the loop (stable refs avoid stale closures).
-  const transcribeRef = useRef(null);
-  useEffect(() => { transcribeRef.current = transcribeNative; }, [transcribeNative]);
+  const respondRef = useRef(null);
+  useEffect(() => { respondRef.current = respondNative; }, [respondNative]);
   useEffect(() => {
     if (!IS_NATIVE) return;
     const handles = [];
-    VoiceCapture.addListener("utterance", ({ audio, mime }) => {
+    VoiceCapture.addListener("utterance", ({ text }) => {
       if (closedRef.current) return;
-      transcribeRef.current?.(b64ToBlob(audio, mime));
+      respondRef.current?.(text);
     }).then(h => handles.push(h));
-    VoiceCapture.addListener("empty", () => {
+    VoiceCapture.addListener("empty", (info) => {
+      if (info && info.error) log("transcribe: " + info.error);
       if (!closedRef.current && !speakingRef.current) setTimeout(() => startListening(), 200);
     }).then(h => handles.push(h));
     VoiceCapture.addListener("level", ({ level }) => {
