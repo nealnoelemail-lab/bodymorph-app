@@ -3,48 +3,53 @@ import Capacitor
 import AVFoundation
 
 // Native microphone capture for the voice coach. The WebView's getUserMedia is
-// silent on iOS, so we capture natively. Critically, this uses a CONTINUOUS
-// AVAudioEngine input tap that never stops while the coach is active — that keeps
-// live audio input running, so iOS (with the "audio" background mode) keeps the
-// app alive when the screen turns off, instead of suspending it between phrases.
+// unreliable/silent on iOS, so we capture natively with AVAudioRecorder + energy
+// VAD and transcribe each finished phrase natively (URLSession → OpenAI, no
+// WebView CORS), handing the TEXT back to JS.
 //
-// Flow: configure() sets up the session + starts the engine. listen() begins
-// detecting a phrase; on end-of-phrase (energy VAD → ~0.6s silence) we transcribe
-// the buffered audio natively (URLSession → OpenAI, no WebView CORS) and emit the
-// TEXT to JS, then stop detecting until JS calls listen() again. pause()/resume()
-// gate detection during the coach's own speech. The engine keeps running throughout.
+// Screen-off: a recorder is kept running CONTINUOUSLY the whole session — we never
+// leave the mic idle. When a phrase ends we instantly swap to a fresh recorder
+// (sub-ms gap) rather than stopping. Because real audio INPUT is always active,
+// iOS (with the "audio" background mode) keeps the app — and its meter timer —
+// alive when the screen turns off. (A continuously *recording* mic is recognized
+// as active audio; looping silent *playback* is not, which is why that failed.)
 @objc(VoiceCapturePlugin)
-public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
+public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
     public let identifier = "VoiceCapturePlugin"
     public let jsName = "VoiceCapture"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "pause", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "resume", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
     ]
 
-    private let engine = AVAudioEngine()
-    private var engineRunning = false
+    private var recorder: AVAudioRecorder?
+    private var meterTimer: Timer?
+    private var fileURL: URL?
     private var openaiKey = ""
+    private var active = false       // session running → keep a recorder alive
+    private var detecting = false    // actively looking for a phrase (false during TTS/processing)
 
-    // Detection state (touched on the audio thread; guarded by `lock`).
-    private let lock = NSLock()
-    private var detecting = false
-    private var inSpeech = false
-    private var speechSamples = 0
-    private var silenceSamples = 0
-    private var phrase = Data()           // 16-bit PCM mono for the current phrase
-    private var phraseRate: Double = 16000
-    private var levelThrottle = 0
-    private var lastBufferAt: Double = 0  // systemUptime of the last tap callback (staleness check)
-    private var observersOn = false
+    private var hasSpeech = false
+    private var speechFrames = 0
+    private var silenceFrames = 0
+    private var totalFrames = 0
+    private var idleFramesCount = 0  // frames recorded while NOT detecting (bounds keepalive file)
 
-    // Tuning
-    private let speechDb: Float = -40.0    // dBFS above which we treat audio as speech
-    private let silenceSecs = 0.6          // trailing silence that ends a phrase
-    private let minSpeechSecs = 0.2
+    // Tuning (frames are ~100ms each via the meter timer).
+    private let speechThreshold: Float = -38.0   // dBFS above which sound counts as speech
+    private let silenceHang = 6                   // ~0.6s of silence ends a phrase
+    private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
+    private let maxFrames = 120                   // ~12s hard cap per phrase
+    private let idleGiveUp = 80                   // ~8s of no speech while detecting → empty
+    private let keepaliveRestart = 100            // ~10s → recycle the idle keepalive file
+
+    private let recSettings: [String: Any] = [
+        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+        AVSampleRateKey: 16000,
+        AVNumberOfChannelsKey: 1,
+        AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+    ]
 
     // MARK: - Public API
 
@@ -58,8 +63,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
                 try session.setActive(true)
             } catch { print("[VoiceCapture] session error: \(error)") }
             do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker error: \(error)") }
-            self.registerSessionObservers()
-            self.startEngine()
+            self.active = true
+            self.detecting = false
+            self.swapRecorder()        // start the continuous (keepalive) recorder
+            self.startTimer()
             call.resolve()
         }
         if #available(iOS 17.0, *) {
@@ -80,156 +87,122 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func listen(_ call: CAPPluginCall) {
-        ensureEngineRunning()
-        beginPhrase()
-        call.resolve()
-    }
-
-    @objc func pause(_ call: CAPPluginCall) {
-        lock.lock(); detecting = false; lock.unlock()
-        call.resolve()
-    }
-
-    @objc func resume(_ call: CAPPluginCall) {
-        ensureEngineRunning()
-        beginPhrase()
-        call.resolve()
+        DispatchQueue.main.async {
+            if !self.active {        // re-arm if a previous stop() tore things down
+                self.active = true
+                self.reassertSession()
+                self.startTimer()
+            }
+            self.reassertSession()
+            self.detecting = true
+            if let old = self.swapRecorder() { try? FileManager.default.removeItem(at: old) } // fresh phrase
+            call.resolve()
+        }
     }
 
     @objc func stop(_ call: CAPPluginCall) {
-        lock.lock(); detecting = false; lock.unlock()
-        if engineRunning {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-            engineRunning = false
+        DispatchQueue.main.async {
+            self.active = false
+            self.detecting = false
+            self.meterTimer?.invalidate(); self.meterTimer = nil
+            self.recorder?.stop(); self.recorder = nil
+            if let url = self.fileURL { try? FileManager.default.removeItem(at: url) }
+            call.resolve()
         }
-        call.resolve()
     }
 
-    // MARK: - Engine
+    // MARK: - Recording
 
-    private func beginPhrase() {
-        lock.lock()
-        detecting = true; inSpeech = false; speechSamples = 0; silenceSamples = 0; phrase = Data()
-        lock.unlock()
-    }
-
-    private func startEngine() {
-        guard !engineRunning else { return }
-        let input = engine.inputNode
-        let fmt = input.outputFormat(forBus: 0)
-        guard fmt.channelCount > 0, fmt.sampleRate > 0 else {
-            print("[VoiceCapture] invalid input format \(fmt)"); return
-        }
-        phraseRate = fmt.sampleRate
-        let channels = Int(fmt.channelCount)
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 2048, format: fmt) { [weak self] buffer, _ in
-            self?.process(buffer, channels: channels)
-        }
-        engine.prepare()
-        do { try engine.start(); engineRunning = true; lastBufferAt = ProcessInfo.processInfo.systemUptime }
-        catch { print("[VoiceCapture] engine start error: \(error)") }
-    }
-
-    // The AVAudioEngine input tap can silently stop after TTS playback or a route
-    // change (engine.isRunning may even still read true while no buffers arrive).
-    // So re-assert the session and FULLY rebuild the engine whenever it isn't
-    // running OR no buffer has arrived recently. Called on every listen()/resume()
-    // (incl. the JS watchdog's restarts) and on interruption/route-change events.
-    private func ensureEngineRunning() {
+    private func reassertSession() {
         let session = AVAudioSession.sharedInstance()
-        do {
-            if session.category != .playAndRecord {
-                try session.setCategory(.playAndRecord, mode: .default,
-                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-            }
-            try session.setActive(true)
-        } catch { print("[VoiceCapture] ensure session error: \(error)") }
+        try? session.setActive(true)
         try? session.overrideOutputAudioPort(.speaker)
-
-        let stale = (ProcessInfo.processInfo.systemUptime - lastBufferAt) > 0.8
-        if engine.isRunning && !stale { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        engine.reset()
-        engineRunning = false
-        startEngine()
     }
 
-    private func registerSessionObservers() {
-        guard !observersOn else { return }
-        observersOn = true
-        let nc = NotificationCenter.default
-        nc.addObserver(self, selector: #selector(handleInterruption(_:)),
-                       name: AVAudioSession.interruptionNotification, object: nil)
-        nc.addObserver(self, selector: #selector(handleRouteChange(_:)),
-                       name: AVAudioSession.routeChangeNotification, object: nil)
-    }
-    @objc private func handleInterruption(_ n: Notification) {
-        guard let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        if type == .ended { DispatchQueue.main.async { self.ensureEngineRunning() } }
-    }
-    @objc private func handleRouteChange(_ n: Notification) {
-        DispatchQueue.main.async { self.ensureEngineRunning() }
+    private func startTimer() {
+        meterTimer?.invalidate()
+        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
     }
 
-    private func process(_ buffer: AVAudioPCMBuffer, channels: Int) {
-        lastBufferAt = ProcessInfo.processInfo.systemUptime
-        guard let chans = buffer.floatChannelData else { return }
-        let frames = Int(buffer.frameLength)
-        if frames == 0 { return }
-
-        // Downmix to mono, compute RMS, build 16-bit PCM.
-        var sumSq: Float = 0
-        var pcm = Data(capacity: frames * 2)
-        for i in 0..<frames {
-            var s: Float = 0
-            for c in 0..<channels { s += chans[c][i] }
-            s /= Float(channels)
-            sumSq += s * s
-            let clamped = max(-1.0, min(1.0, s))
-            var le = Int16(clamped * 32767).littleEndian
-            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+    // Stop the current recorder (returning its file, NOT deleted) and immediately
+    // start a fresh one — so the mic input never goes idle. Resets VAD counters.
+    @discardableResult
+    private func swapRecorder() -> URL? {
+        let oldURL = fileURL
+        recorder?.stop()
+        hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0; idleFramesCount = 0
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vc-\(UUID().uuidString).m4a")
+        fileURL = url
+        do {
+            let r = try AVAudioRecorder(url: url, settings: recSettings)
+            r.isMeteringEnabled = true
+            r.delegate = self
+            r.record()
+            recorder = r
+        } catch {
+            recorder = nil
+            print("[VoiceCapture] recorder error: \(error)")
         }
-        let rms = sqrt(sumSq / Float(frames))
-        let db = 20 * log10(max(rms, 1e-7))
+        return oldURL
+    }
 
-        // Throttled level for the on-screen meter.
-        levelThrottle += 1
-        if levelThrottle % 3 == 0 {
-            let level = max(0.0, min(100.0, (Double(db) + 60.0) / 60.0 * 100.0))
-            DispatchQueue.main.async { self.notifyListeners("level", data: ["level": level]) }
+    private func tick() {
+        guard active else { return }
+        guard let r = recorder, r.isRecording else {
+            swapRecorder()   // recorder died → restart to keep the mic alive
+            return
+        }
+        r.updateMeters()
+        let power = r.averagePower(forChannel: 0)   // ~ -160 (silent) … 0 (loud)
+        let level = max(0.0, min(100.0, (Double(power) + 60.0) / 60.0 * 100.0))
+        notifyListeners("level", data: ["level": level])
+
+        if !detecting {
+            // Keepalive only: keep recording, recycle the file periodically.
+            idleFramesCount += 1
+            if idleFramesCount >= keepaliveRestart { if let u = swapRecorder() { try? FileManager.default.removeItem(at: u) } }
+            return
         }
 
-        lock.lock()
-        guard detecting else { lock.unlock(); return }
-        let speaking = db > speechDb
-        if speaking {
-            inSpeech = true; speechSamples += frames; silenceSamples = 0
-            phrase.append(pcm)
-        } else if inSpeech {
-            silenceSamples += frames
-            phrase.append(pcm)
+        totalFrames += 1
+        if power > speechThreshold {
+            hasSpeech = true; speechFrames += 1; silenceFrames = 0
+        } else if hasSpeech {
+            silenceFrames += 1
         }
-        let endOfPhrase = inSpeech
-            && silenceSamples >= Int(silenceSecs * phraseRate)
-            && speechSamples >= Int(minSpeechSecs * phraseRate)
-        if endOfPhrase {
-            let wav = wrapWav(phrase, sampleRate: phraseRate)
-            detecting = false; inSpeech = false; phrase = Data()
-            lock.unlock()
-            transcribe(wav)
+
+        if hasSpeech && silenceFrames >= silenceHang && speechFrames >= minSpeechFrames {
+            endPhrase(emit: true)
+        } else if totalFrames >= maxFrames {
+            endPhrase(emit: hasSpeech)
+        } else if !hasSpeech && totalFrames >= idleGiveUp {
+            endPhrase(emit: false)
+        }
+    }
+
+    // A phrase finished. Swap to a fresh keepalive recorder (mic stays live), then
+    // transcribe the captured phrase file (or emit empty).
+    private func endPhrase(emit: Bool) {
+        let didSpeak = hasSpeech
+        detecting = false
+        let url = swapRecorder()   // returns the just-finished phrase file; new recorder now running
+        guard let url = url else { if emit { notifyListeners("empty", data: [:]) }; return }
+        if emit && didSpeak,
+           let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 1200 {
+            transcribe(url)
         } else {
-            lock.unlock()
+            try? FileManager.default.removeItem(at: url)
+            if emit { notifyListeners("empty", data: [:]) }
         }
     }
 
     // MARK: - Native transcription (no WebView / no CORS)
 
-    private func transcribe(_ wav: Data) {
-        guard !openaiKey.isEmpty else { notifyListeners("empty", data: ["error": "no key"]); return }
+    private func transcribe(_ url: URL) {
+        guard !openaiKey.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            notifyListeners("empty", data: ["error": "no key"]); return
+        }
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
@@ -244,12 +217,16 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         field("model", "gpt-4o-mini-transcribe")
         field("language", "en")
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
-        body.append(wav)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        if let fileData = try? Data(contentsOf: url) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+            body.append(fileData)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
+        try? FileManager.default.removeItem(at: url)
         URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err = err { self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return }
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -258,23 +235,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
                let text = json["text"] as? String {
                 self.notifyListeners("utterance", data: ["text": text])
             } else {
-                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                self.notifyListeners("empty", data: ["error": "http \(status): \(String(body.prefix(140)))"])
+                let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                self.notifyListeners("empty", data: ["error": "http \(status): \(String(bodyStr.prefix(140)))"])
             }
         }.resume()
-    }
-
-    private func wrapWav(_ pcm: Data, sampleRate: Double) -> Data {
-        let dataSize = pcm.count
-        var d = Data()
-        func a(_ s: String) { d.append(s.data(using: .ascii)!) }
-        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
-        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
-        a("RIFF"); u32(UInt32(36 + dataSize)); a("WAVE")
-        a("fmt "); u32(16); u16(1); u16(1)
-        u32(UInt32(sampleRate)); u32(UInt32(sampleRate) * 2); u16(2); u16(16)
-        a("data"); u32(UInt32(dataSize))
-        d.append(pcm)
-        return d
     }
 }
