@@ -4043,6 +4043,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     const stream = micStreamRef.current;
     const analyser = analyserRef.current;
     if (!stream || !analyser) { log("no stream/analyser"); return; }
+    // The mic's AudioContext can get suspended after audio plays or the screen dims
+    // (esp. mobile) — then the analyser reads pure silence and the coach never hears
+    // you. Resume it before every listen so speech is actually detected.
+    try { const c = audioCtxRef.current; if (c && c.state === "suspended") c.resume(); } catch {}
     setState("listening");
     setInterim("🎙 Listening…");
 
@@ -4405,9 +4409,16 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     </div>
   );
 
-  // No screen overlay — the only visible indicator is the small animated bar
-  // inside the Voice Coach card on the home screen.
-  return null;
+  // Temporary on-screen diagnostic strip (debugging "coach won't respond after the
+  // greeting"). Shows the live state, what it last heard, mic level, and the last few
+  // internal log lines so we can see exactly where the loop stalls. Remove once fixed.
+  return (
+    <div onClick={()=>setDbg([])} style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,22,0.94)", borderTop:"1px solid #2a2a3d", padding:"7px 12px 14px", fontFamily:"ui-monospace,Menlo,monospace", fontSize:10.5, color:"#9898b8", lineHeight:1.55 }}>
+      <div style={{ color:"#e8ff00" }}>🎙 {vs}{interim ? " · " + interim.replace(/[🎙\s]+/g," ").trim() : ""} · mic {Math.round(micLevel)}</div>
+      {lastUser && <div style={{ color:"#c8c8e0" }}>heard: "{lastUser}"</div>}
+      {dbg.slice(-4).map((m,i)=><div key={i}>· {m}</div>)}
+    </div>
+  );
 }
 
 // ── SESSION ───────────────────────────────────────────────────────────────────
