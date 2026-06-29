@@ -38,6 +38,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     private var phrase = Data()           // 16-bit PCM mono for the current phrase
     private var phraseRate: Double = 16000
     private var levelThrottle = 0
+    private var lastBufferAt: Double = 0  // systemUptime of the last tap callback (staleness check)
+    private var observersOn = false
 
     // Tuning
     private let speechDb: Float = -40.0    // dBFS above which we treat audio as speech
@@ -56,6 +58,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
                 try session.setActive(true)
             } catch { print("[VoiceCapture] session error: \(error)") }
             do { try session.overrideOutputAudioPort(.speaker) } catch { print("[VoiceCapture] speaker error: \(error)") }
+            self.registerSessionObservers()
             self.startEngine()
             call.resolve()
         }
@@ -77,7 +80,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func listen(_ call: CAPPluginCall) {
-        if !engineRunning { startEngine() }
+        ensureEngineRunning()
         beginPhrase()
         call.resolve()
     }
@@ -88,6 +91,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func resume(_ call: CAPPluginCall) {
+        ensureEngineRunning()
         beginPhrase()
         call.resolve()
     }
@@ -114,17 +118,65 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         guard !engineRunning else { return }
         let input = engine.inputNode
         let fmt = input.outputFormat(forBus: 0)
+        guard fmt.channelCount > 0, fmt.sampleRate > 0 else {
+            print("[VoiceCapture] invalid input format \(fmt)"); return
+        }
         phraseRate = fmt.sampleRate
         let channels = Int(fmt.channelCount)
+        input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: fmt) { [weak self] buffer, _ in
             self?.process(buffer, channels: channels)
         }
         engine.prepare()
-        do { try engine.start(); engineRunning = true }
+        do { try engine.start(); engineRunning = true; lastBufferAt = ProcessInfo.processInfo.systemUptime }
         catch { print("[VoiceCapture] engine start error: \(error)") }
     }
 
+    // The AVAudioEngine input tap can silently stop after TTS playback or a route
+    // change (engine.isRunning may even still read true while no buffers arrive).
+    // So re-assert the session and FULLY rebuild the engine whenever it isn't
+    // running OR no buffer has arrived recently. Called on every listen()/resume()
+    // (incl. the JS watchdog's restarts) and on interruption/route-change events.
+    private func ensureEngineRunning() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            if session.category != .playAndRecord {
+                try session.setCategory(.playAndRecord, mode: .default,
+                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            }
+            try session.setActive(true)
+        } catch { print("[VoiceCapture] ensure session error: \(error)") }
+        try? session.overrideOutputAudioPort(.speaker)
+
+        let stale = (ProcessInfo.processInfo.systemUptime - lastBufferAt) > 0.8
+        if engine.isRunning && !stale { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine.reset()
+        engineRunning = false
+        startEngine()
+    }
+
+    private func registerSessionObservers() {
+        guard !observersOn else { return }
+        observersOn = true
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(handleInterruption(_:)),
+                       name: AVAudioSession.interruptionNotification, object: nil)
+        nc.addObserver(self, selector: #selector(handleRouteChange(_:)),
+                       name: AVAudioSession.routeChangeNotification, object: nil)
+    }
+    @objc private func handleInterruption(_ n: Notification) {
+        guard let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        if type == .ended { DispatchQueue.main.async { self.ensureEngineRunning() } }
+    }
+    @objc private func handleRouteChange(_ n: Notification) {
+        DispatchQueue.main.async { self.ensureEngineRunning() }
+    }
+
     private func process(_ buffer: AVAudioPCMBuffer, channels: Int) {
+        lastBufferAt = ProcessInfo.processInfo.systemUptime
         guard let chans = buffer.floatChannelData else { return }
         let frames = Int(buffer.frameLength)
         if frames == 0 { return }

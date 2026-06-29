@@ -55,9 +55,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Re-assert the audio session on return to foreground (it can be deactivated
-        // by interruptions or when the screen was off).
-        configureAudioSession()
+        // NOTE: do NOT reconfigure the audio session here. While the voice coach is
+        // running, the VoiceCapture plugin owns the session + engine and re-asserts
+        // it itself; re-setting the category here was interrupting the live mic.
         registerLocalPlugins()
     }
 
