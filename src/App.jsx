@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
@@ -136,6 +137,16 @@ const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
 const ELEVEN_KEY = import.meta.env.VITE_ELEVENLABS_KEY; // ElevenLabs TTS (natural / cloned coach voices)
+// Native iOS/Android shell (Capacitor). On a real device the WebView mic is dead,
+// so the voice coach captures audio through the native VoiceCapture plugin instead.
+const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
+const VoiceCapture = registerPlugin("VoiceCapture");
+// base64 (m4a from native) → Blob for the existing Whisper upload.
+function b64ToBlob(b64, mime) {
+  const bin = atob(b64); const len = bin.length; const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime || "audio/m4a" });
+}
 const COACH_VOICE_KEY = "bodymorph_coachvoice_v2";      // { id, name } — which ElevenLabs voice the coach speaks in
 const APP_PINK = "#ff79c6";
 
@@ -3669,6 +3680,20 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   // parent's tap handler, so here we just grab the mic + start the greeting. ───
   const arm = useCallback(async () => {
     setError(null);
+    // NATIVE (iOS/Android): the WebView mic is dead, so capture through the native
+    // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
+    if (IS_NATIVE) {
+      try {
+        await VoiceCapture.configure();
+        setArmed(true);
+        closedRef.current = false;
+        requestWakeLock();
+        askRef.current?.(null, true); // greeting
+      } catch (e) {
+        setError("Microphone blocked. Enable it in Settings → BodyMorph → Microphone, then reopen the coach.");
+      }
+      return;
+    }
     try {
       // echoCancellation keeps the coach's own voice from triggering false barge-ins.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
@@ -4040,6 +4065,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // Reuses the persistent mic stream + analyser created in arm() — no re-prompt.
   const startListening = useCallback(() => {
     if (closedRef.current || speakingRef.current) { log("listen skipped (busy)"); return; }
+    // NATIVE: capture one phrase via the native plugin; the "utterance" listener
+    // handles transcription. No WebView mic / analyser involved.
+    if (IS_NATIVE) {
+      setState("listening"); setInterim("🎙 Listening…");
+      log("native listen…");
+      VoiceCapture.listen().catch(e => log("native listen err: " + (e?.message||e)));
+      return;
+    }
     const stream = micStreamRef.current;
     const analyser = analyserRef.current;
     if (!stream || !analyser) { log("no stream/analyser"); return; }
@@ -4147,6 +4180,58 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     recorder.start();
     requestAnimationFrame(checkSilence);
   }, [log]);
+
+  // NATIVE: transcribe one captured phrase (m4a from the native plugin) → respond,
+  // mirroring the web onstop path. Sent to the same Whisper endpoint.
+  const transcribeNative = useCallback(async (blob) => {
+    if (closedRef.current) return;
+    const myTurn = ++turnRef.current;
+    setState("processing"); setInterim("");
+    const formData = new FormData();
+    formData.append("file", blob, "audio.m4a");
+    formData.append("model", "gpt-4o-mini-transcribe");
+    formData.append("language", "en");
+    log("transcribing (" + blob.size + "b)…");
+    try {
+      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        signal: AbortSignal.timeout(15000), method: "POST",
+        headers: { "Authorization": `Bearer ${OPENAI_KEY}` }, body: formData,
+      });
+      if (!res.ok) log("Whisper HTTP " + res.status);
+      const data = await res.json();
+      const text = (data.text || "").trim();
+      const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
+      const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
+      const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
+      log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
+      if (closedRef.current || turnRef.current !== myTurn) return;
+      if (text && !isNoise) { setLastUser(text); askRef.current?.(text, false); }
+      else { setTimeout(startListening, 200); }
+    } catch (e) {
+      log("Whisper error: " + e.message);
+      if (!closedRef.current) setTimeout(startListening, 400);
+    }
+  }, [log, startListening]);
+
+  // NATIVE: wire the plugin's events to the loop (stable refs avoid stale closures).
+  const transcribeRef = useRef(null);
+  useEffect(() => { transcribeRef.current = transcribeNative; }, [transcribeNative]);
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    const handles = [];
+    VoiceCapture.addListener("utterance", ({ audio, mime }) => {
+      if (closedRef.current) return;
+      transcribeRef.current?.(b64ToBlob(audio, mime));
+    }).then(h => handles.push(h));
+    VoiceCapture.addListener("empty", () => {
+      if (!closedRef.current && !speakingRef.current) setTimeout(() => startListening(), 200);
+    }).then(h => handles.push(h));
+    VoiceCapture.addListener("level", ({ level }) => {
+      lastTickRef.current = performance.now();   // heartbeat for the watchdog
+      setMicLevel(level || 0);
+    }).then(h => handles.push(h));
+    return () => { handles.forEach(h => { try { h.remove(); } catch {} }); };
+  }, [startListening]);
 
   // ── Claude API ─────────────────────────────────────────────────────────────
   const askClaude = useCallback(async (userText, isInit = false, idleNudge = false) => {
@@ -4378,6 +4463,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       try { if (coachAudio) { coachAudio.pause(); coachAudio.onended = null; coachAudio.onerror = null; coachAudio.onloadedmetadata = null; coachAudio.removeAttribute("src"); coachAudio.load(); } } catch {}
       try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
       try { audioCtxRef.current?.close(); } catch {}
+      if (IS_NATIVE) { try { VoiceCapture.stop(); } catch {} }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
