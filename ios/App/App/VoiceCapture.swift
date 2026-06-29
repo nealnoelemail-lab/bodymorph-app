@@ -135,12 +135,15 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // a bare phone — never the quiet earpiece.
     private func applyOutputRoute() {
         let session = AVAudioSession.sharedInstance()
+        // Clear any prior forced-speaker override FIRST, otherwise a newly-connected
+        // headset stays masked (currentRoute keeps reporting the speaker) and audio
+        // won't switch to the earbuds mid-session.
+        try? session.overrideOutputAudioPort(.none)
         let external: Set<AVAudioSession.Port> = [
             .headphones, .headsetMic, .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .carAudio, .usbAudio
         ]
         let hasExternal = session.currentRoute.outputs.contains { external.contains($0.portType) }
-        do { try session.overrideOutputAudioPort(hasExternal ? .none : .speaker) }
-        catch { print("[VoiceCapture] route error: \(error)") }
+        if !hasExternal { try? session.overrideOutputAudioPort(.speaker) }
     }
 
     private func beginRecording() {

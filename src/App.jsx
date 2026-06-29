@@ -3787,6 +3787,10 @@ Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, 
       const cardioLine = cd.cardio?.planned
         ? `Cardio is on the plan today (${cd.cardio.planned}) — ${cd.cardio.done ? "DONE ✓" : "NOT done yet"}.`
         : "No cardio scheduled today.";
+      const mp = cd.mealPlan;
+      const mealPlanStr = (mp && mp.length)
+        ? mp.map(ml => `• ${String(ml.slot||"").toUpperCase()}: ${ml.name ? ml.name + (ml.items ? " — " : "") : ""}${ml.items || ""}${ml.cal ? ` (~${ml.cal} cal, ${ml.protein}g protein)` : ""}`).join("\n")
+        : null;
       const workoutStatusLine = cd.workout
         ? `${workoutLine} They have ${cd.workout.done ? "already trained today ✓" : "NOT logged any sets yet today"}.`
         : workoutLine;
@@ -3809,6 +3813,11 @@ TODAY'S STATUS (use this; don't ask about things you already know):
 • Steps today: ${cd.steps||0} of ${cd.stepGoal||12000} goal.
 • ${workoutStatusLine}
 • ${cardioLine}
+${mealPlanStr ? `
+THEIR MEAL PLAN FOR TODAY (what they're SUPPOSED to eat — this is their real saved plan; USE it):
+${mealPlanStr}
+When ${profile.name} asks "what am I supposed to have for lunch / breakfast / dinner / a snack?", ANSWER from this plan — name the dish and what's in it. Encourage them to follow it, and tie it to their goal. If they ate something different, that's fine: log what they actually ate (FOOD tag) and gently steer back toward the plan next meal. You DO have their plan — never tell them you can't see it.` : `
+They don't have an AI meal plan saved yet, so you don't know their specific planned dishes. If they ask what they're "supposed" to eat, DON'T say "you'd know better than me" — instead suggest something concrete that fits their calorie/protein targets above (e.g. a high-protein lunch around their remaining macros), and mention they can generate a full meal plan in the app's Nutrition section so you can guide them meal-by-meal.`}
 
 TODAY'S TO-DO LIST ([x] = already checked off, [ ] = still open):
 ${todoListStr}
@@ -9914,6 +9923,15 @@ export default function BodyMorph() {
       fats: { total: Math.round(fTotal), goal: parseFloat(cMacros.fats)||0 },
       steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
       stepGoal: stepTargetFor(profile),
+      mealPlan: (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length)
+        ? mealPlan.meals.map(ml => ({
+            slot: ml.slot,
+            name: ml.name || "",
+            items: (ml.items||[]).map(it => `${it.food}${it.grams?` (${it.grams}g)`:""}`).filter(Boolean).join(", "),
+            cal: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.cal)||0),0)),
+            protein: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.protein)||0),0)),
+          }))
+        : null,
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
