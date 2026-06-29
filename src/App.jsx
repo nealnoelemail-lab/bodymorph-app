@@ -139,15 +139,24 @@ const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
 const ELEVEN_KEY = import.meta.env.VITE_ELEVENLABS_KEY; // ElevenLabs TTS (natural / cloned coach voices)
 // ── Voice provider abstraction ──────────────────────────────────────────────
 // One switch selects the whole voice stack so we're never vendor-locked:
-//   "legacy"   → OpenAI Whisper (STT) + ElevenLabs (TTS)   [proven fallback]
-//   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)  [single-vendor, cheaper, lower latency]
+//   "legacy"   → OpenAI Whisper (STT) + ElevenLabs (TTS)        [proven fallback]
+//   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)       [single-vendor, lower latency]
+//   "grok"     → xAI Grok STT + TTS (+ cloning)                 [single-vendor, ~10x cheaper]
 const CARTESIA_KEY = import.meta.env.VITE_CARTESIA_KEY;
+const XAI_KEY = import.meta.env.VITE_XAI_KEY;
 const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
 const USE_CARTESIA = VOICE_PROVIDER === "cartesia" && !!CARTESIA_KEY;
+const USE_GROK = VOICE_PROVIDER === "grok" && !!XAI_KEY;
 const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
 const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
+const GROK_DEFAULT_VOICE = "rex"; // confident male preset (eve/ara/rex/sal/leo); placeholder until per-coach clones
+// LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
+// Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
+const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
+const USE_GROK_LLM = LLM_PROVIDER === "grok" && !!XAI_KEY;
+const GROK_LLM_MODEL = import.meta.env.VITE_GROK_LLM_MODEL || "grok-4.3"; // confirm exact id via /v1/models once credits are active
 // Native iOS/Android shell (Capacitor). On a real device the WebView mic is dead,
 // so the voice coach captures audio through the native VoiceCapture plugin instead.
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
@@ -3662,6 +3671,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const voiceIdRef   = useRef(null);
   voiceIdRef.current = voiceId; // current ElevenLabs voice id (null → browser TTS)
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
+  const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -3696,7 +3706,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
     // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
     if (IS_NATIVE) {
       try {
-        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, provider: VOICE_PROVIDER });
+        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, xaiKey: XAI_KEY, provider: VOICE_PROVIDER });
         setArmed(true);
         closedRef.current = false;
         requestWakeLock();
@@ -4118,7 +4128,36 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       }
     };
 
-    if (USE_CARTESIA) cartesiaSpeak();
+    // ── xAI Grok Sonic-class TTS (single-vendor, ~10x cheaper) — same playback path ──
+    const grokSpeak = async () => {
+      try {
+        const res = await fetch("https://api.x.ai/v1/tts", {
+          method: "POST",
+          signal: AbortSignal.timeout(12000),
+          headers: { "Authorization": `Bearer ${XAI_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voice_id: grokVoiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }),
+        });
+        if (!res.ok || closedRef.current || done) { if (!res.ok) log("Grok HTTP " + res.status); throw new Error("tts " + res.status); }
+        const blob = await res.blob();
+        if (closedRef.current || done) return;
+        const url = URL.createObjectURL(blob);
+        if (!coachAudio) coachAudio = new Audio();
+        coachAudio.src = url;
+        coachAudio.onended = () => { URL.revokeObjectURL(url); finish(); };
+        coachAudio.onerror = () => { URL.revokeObjectURL(url); if (!done) finish(); };
+        const secs = Math.min(40, Math.max(5, (text.split(/\s+/).length / 2.6) + 3));
+        capId = setTimeout(finish, secs * 1000);
+        await coachAudio.play();
+        startBargeWatch();
+      } catch (e) {
+        log("Grok fail → browser voice: " + e.message);
+        if (!done && !closedRef.current) browserSpeak();
+        else if (!done) finish();
+      }
+    };
+
+    if (USE_GROK) grokSpeak();
+    else if (USE_CARTESIA) cartesiaSpeak();
     else if (ELEVEN_KEY && voiceIdRef.current) elevenSpeak();
     else browserSpeak();
   }, [log]);
@@ -4208,20 +4247,17 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
       const formData = new FormData();
       formData.append("file", blob, `audio.${ext}`);
-      formData.append("model", USE_CARTESIA ? CARTESIA_STT_MODEL : "gpt-4o-mini-transcribe");
-      formData.append("language", "en");
+      if (USE_GROK) { /* Grok /stt infers the model; only the file is required */ }
+      else { formData.append("model", USE_CARTESIA ? CARTESIA_STT_MODEL : "gpt-4o-mini-transcribe"); formData.append("language", "en"); }
       log("sending to transcribe…");
       try {
-        const res = await fetch(
-          USE_CARTESIA ? "https://api.cartesia.ai/stt" : "https://api.openai.com/v1/audio/transcriptions",
-          {
-            signal: AbortSignal.timeout(15000),
-            method: "POST",
-            headers: USE_CARTESIA
-              ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION }
-              : { "Authorization": `Bearer ${OPENAI_KEY}` },
-            body: formData,
-          });
+        const sttUrl = USE_GROK ? "https://api.x.ai/v1/stt"
+                     : USE_CARTESIA ? "https://api.cartesia.ai/stt"
+                     : "https://api.openai.com/v1/audio/transcriptions";
+        const sttHeaders = USE_GROK ? { "Authorization": `Bearer ${XAI_KEY}` }
+                         : USE_CARTESIA ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION }
+                         : { "Authorization": `Bearer ${OPENAI_KEY}` };
+        const res = await fetch(sttUrl, { signal: AbortSignal.timeout(15000), method: "POST", headers: sttHeaders, body: formData });
         if (!res.ok) { log("STT HTTP " + res.status); }
         const data = await res.json();
         const text = (data.text || "").trim();
@@ -4301,20 +4337,35 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         : [...prior, { role: "user", content: userText }];
     if (!isInit) messagesRef.current = msgs;
 
-    const useStreaming = !USE_CARTESIA && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
+    const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
     const ac = new AbortController();
     try {
       // ── Non-streaming path (browser voice already starts instantly) ──
       if (!useStreaming) {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          signal: AbortSignal.timeout(15000),
-          method: "POST",
-          headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-          body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs }),
-        });
-        if (closedRef.current || turnRef.current !== myTurn) return;
-        const data = await res.json();
-        const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+        let aiText;
+        if (USE_GROK_LLM) {
+          // xAI Grok brain (OpenAI-compatible: system goes in as the first message).
+          const res = await fetch("https://api.x.ai/v1/chat/completions", {
+            signal: AbortSignal.timeout(15000),
+            method: "POST",
+            headers: { "Authorization": `Bearer ${XAI_KEY}`, "content-type": "application/json" },
+            body: JSON.stringify({ model: GROK_LLM_MODEL, max_tokens: 220, messages: [{ role: "system", content: buildSysPrompt() }, ...msgs] }),
+          });
+          if (closedRef.current || turnRef.current !== myTurn) return;
+          if (!res.ok) log("Grok LLM HTTP " + res.status);
+          const data = await res.json();
+          aiText = data.choices?.[0]?.message?.content || "Keep going — you've got this.";
+        } else {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            signal: AbortSignal.timeout(15000),
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
+            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs }),
+          });
+          if (closedRef.current || turnRef.current !== myTurn) return;
+          const data = await res.json();
+          aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+        }
         const confirm = processActions(aiText);
         if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
         setLastAI(cleanSpeak(aiText));

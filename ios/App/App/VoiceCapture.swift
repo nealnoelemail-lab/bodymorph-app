@@ -25,7 +25,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var capturing = false
     private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
     private var cartesiaKey = "" // passed from JS; used when provider == "cartesia"
-    private var provider = "legacy"   // "legacy" (OpenAI Whisper) | "cartesia" (Ink-Whisper)
+    private var xaiKey = ""       // passed from JS; used when provider == "grok"
+    private var provider = "legacy"   // "legacy" (OpenAI Whisper) | "cartesia" (Ink-Whisper) | "grok" (Grok STT)
     private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
     private var hasSpeech = false
     private var speechFrames = 0
@@ -44,6 +45,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     @objc func configure(_ call: CAPPluginCall) {
         if let k = call.getString("openaiKey"), !k.isEmpty { openaiKey = k }
         if let k = call.getString("cartesiaKey"), !k.isEmpty { cartesiaKey = k }
+        if let k = call.getString("xaiKey"), !k.isEmpty { xaiKey = k }
         if let p = call.getString("provider"), !p.isEmpty { provider = p.lowercased() }
         let session = AVAudioSession.sharedInstance()
         // Set up the session BEST-EFFORT: recording works even if a routing call
@@ -229,15 +231,16 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // then emit the resulting TEXT to JS. Routes to Cartesia (Ink-Whisper) or OpenAI
     // (Whisper) based on the provider passed from JS — both return JSON {"text": ...}.
     private func transcribe(_ url: URL) {
+        let useGrok = (provider == "grok") && !xaiKey.isEmpty
         let useCartesia = (provider == "cartesia") && !cartesiaKey.isEmpty
-        let key = useCartesia ? cartesiaKey : openaiKey
+        let key = useGrok ? xaiKey : (useCartesia ? cartesiaKey : openaiKey)
         guard !key.isEmpty else {
             try? FileManager.default.removeItem(at: url)
             notifyListeners("empty", data: ["error": "no key"]); return
         }
-        let endpoint = useCartesia ? "https://api.cartesia.ai/stt"
-                                   : "https://api.openai.com/v1/audio/transcriptions"
-        let model = useCartesia ? "ink-whisper" : "gpt-4o-mini-transcribe"
+        let endpoint = useGrok ? "https://api.x.ai/v1/stt"
+                     : useCartesia ? "https://api.cartesia.ai/stt"
+                     : "https://api.openai.com/v1/audio/transcriptions"
         var req = URLRequest(url: URL(string: endpoint)!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
@@ -251,8 +254,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        field("model", model)
-        field("language", "en")
+        if !useGrok {   // Grok /stt infers the model; OpenAI + Cartesia need it specified
+            field("model", useCartesia ? "ink-whisper" : "gpt-4o-mini-transcribe")
+            field("language", "en")
+        }
         if let fileData = try? Data(contentsOf: url) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n".data(using: .utf8)!)
