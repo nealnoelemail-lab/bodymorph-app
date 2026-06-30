@@ -4892,7 +4892,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 20px 7px", borderBottom:"1px solid #2a2a3d", position:"sticky", top:0, background:"#0a0a0f", zIndex:10 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 20px 7px", borderBottom:"1px solid #2a2a3d", position:"sticky", top:"env(safe-area-inset-top)", background:"#0a0a0f", zIndex:10 }}>
         <div>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>{day.day}</div>
           <div style={{ color:sessionAccent, fontSize:12 }}>{day.type}</div>
