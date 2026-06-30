@@ -3080,7 +3080,7 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
             ))}
           </div>
         ) : (
-          <div style={{ marginTop:12, fontSize:12.5, color:"#74748a", lineHeight:1.5 }}>No AI meal plan saved yet — generate one in Nutrition → ✨ Generate AI Meal Plan, tap “Use This Plan,” and it'll appear here.</div>
+          <div style={{ marginTop:12, fontSize:12.5, color:"#74748a", lineHeight:1.5 }}>No AI meal plan saved yet — generate one in Nutrition → Generate Meal Plan, tap “Use This Plan,” and it'll appear here.</div>
         )}
       </div>
 
@@ -7516,6 +7516,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const [foodLogger, setFoodLogger] = useState(null);
   // AI meal-plan generator
   const [genOpen, setGenOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false); // goal + diet selection page before generating
   const [allergies, setAllergies] = useState((nutritionGoals && nutritionGoals.allergies) || "");
   const [allergens, setAllergens] = useState((nutritionGoals && nutritionGoals.allergens) || []); // checked common allergens
   const [allergenOpen, setAllergenOpen] = useState(false);
@@ -7803,6 +7804,55 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     );
   }
 
+  // ── Meal-plan SETUP page: pick goal + diet, then generate ──
+  if (setupOpen && !genOpen) {
+    const GOALS = [
+      ["Cut (Lose Fat, Preserve Muscle)",  "CUT",      "Lose fat — real deficit"],
+      ["Reshape (Build Muscle & Lose Fat)","RESHAPE",  "Recomp — near maintenance"],
+      ["Bulk (Build Muscle Mass)",         "BULK",     "Build muscle — surplus"],
+      ["Athletic Performance",             "ATHLETIC", "Maintain — perform"],
+    ];
+    return (
+      <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
+        <style>{GLOBAL_CSS}</style><WatermarkPlain />
+        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
+          <button onClick={()=>setSetupOpen(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>MEAL PLAN SETUP</div>
+        </div>
+        <div style={{ padding:"6px 20px 0", maxWidth:480, margin:"0 auto" }}>
+
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:23, letterSpacing:1, marginBottom:12 }}>GOAL</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:26 }}>
+            {GOALS.map(([val,label,sub]) => {
+              const on = (profile?.goal||"")===val;
+              return (
+                <button key={val} onClick={()=>{ if (onUpdateProfile) onUpdateProfile({ goal: val }); }} style={{ textAlign:"left", background:on?"rgba(232,255,0,0.12)":"#1a1a26", border:"2px solid "+(on?"#e8ff00":"#2a2a3d"), borderRadius:14, padding:"16px 16px", cursor:"pointer", minHeight:96 }}>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:27, letterSpacing:0.5, color:on?"#e8ff00":"#f0f0f8" }}>{label}</div>
+                  <div style={{ fontSize:14.5, color:"#b8b8d0", marginTop:6, lineHeight:1.3 }}>{sub}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:23, letterSpacing:1, marginBottom:12 }}>DIET STYLE</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:28 }}>
+            {DIET_STYLES.map(d=>(
+              <div key={d.id} style={{ position:"relative" }}>
+                <button onClick={()=>onSaveDietPref(d.id)} style={{ width:"100%", textAlign:"left", background:"#1a1a26", border:"2px solid "+(dietPref===d.id?"#e8ff00":"#2a2a3d"), borderRadius:12, padding:"14px", cursor:"pointer" }}>
+                  <div style={{ fontSize:20 }}>{d.emoji}</div>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:0.5, marginTop:3, paddingRight:18, color:dietPref===d.id?"#e8ff00":"#f0f0f8" }}>{d.label}</div>
+                </button>
+                <button onClick={()=>setDiet(d)} style={{ position:"absolute", top:6, right:6, background:"rgba(255,255,255,0.14)", border:"none", borderRadius:4, color:"#dcdcf0", fontSize:13, cursor:"pointer", padding:"2px 6px", lineHeight:1, fontWeight:700 }}>ⓘ</button>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={()=>{ setSetupOpen(false); setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:14, color:"#000", padding:"18px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:21 }}>Generate Meal Plan</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
       <style>{GLOBAL_CSS}</style><WatermarkPlain />
@@ -7829,44 +7879,6 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       </div>
 
       <div style={{ padding:"0 20px" }}>
-
-        {/* Diet styles — pick first, drives everything below */}
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, marginBottom:6 }}>DIET STYLES</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, marginBottom:14 }}>
-          {DIET_STYLES.map(d=>(
-            <div key={d.id} style={{ position:"relative" }}>
-              <button onClick={()=>onSaveDietPref(d.id)} style={{ width:"100%", textAlign:"left", background:"#1a1a26", border:"2px solid "+(dietPref===d.id?"#e8ff00":"#2a2a3d"), borderRadius:8, padding:"8px 8px 8px 8px", cursor:"pointer" }}>
-                <div style={{ fontSize:14 }}>{d.emoji}</div>
-                <div style={{ fontFamily:"'Bebas Neue'", fontSize:19.5, letterSpacing:0.5, marginTop:2, paddingRight:20 }}>{d.label}</div>
-              </button>
-              <button onClick={()=>setDiet(d)} style={{ position:"absolute", top:4, right:4, background:"rgba(255,255,255,0.14)", border:"none", borderRadius:4, color:"#dcdcf0", fontSize:12, cursor:"pointer", padding:"2px 5px", lineHeight:1, fontWeight:700 }}>ⓘ</button>
-            </div>
-          ))}
-        </div>
-
-        {/* AI meal plan — right under the diet style the user picks */}
-        <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19.5 }}>✨ Generate AI Meal Plan</button>
-
-        {/* Goal — drives the calorie & macro targets; tap to change and watch them update */}
-        <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:10 }}>
-          <div style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5, marginBottom:8 }}>GOAL — sets your calories &amp; macros</div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-            {[
-              ["Cut (Lose Fat, Preserve Muscle)", "Cut", "Lose fat · real deficit"],
-              ["Reshape (Build Muscle & Lose Fat)", "Reshape", "Recomp · ~maintenance"],
-              ["Bulk (Build Muscle Mass)", "Bulk", "Build muscle · surplus"],
-              ["Athletic Performance", "Athletic", "Maintain · perform"],
-            ].map(([val, label, sub]) => {
-              const on = (profile?.goal || "") === val;
-              return (
-                <button key={val} onClick={()=>{ if (onUpdateProfile) onUpdateProfile({ goal: val }); }} style={{ textAlign:"left", background: on ? "rgba(232,255,0,0.10)" : "#0e0e16", border:"2px solid "+(on?"#e8ff00":"#2a2a3d"), borderRadius:9, padding:"9px 10px", cursor:"pointer" }}>
-                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:0.5, color: on ? "#e8ff00" : "#f0f0f8" }}>{label}</div>
-                  <div style={{ fontSize:10.5, color:"#9898b8", marginTop:1 }}>{sub}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
         {/* Calorie Goal */}
         <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:10 }}>
@@ -7903,7 +7915,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>MEAL PLAN</div>
-          <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
+          <button onClick={()=>setSetupOpen(true)} style={{ background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:10, color:"#000", padding:"8px 14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Generate Meal Plan</button>
         </div>
 
         {genOpen && (
