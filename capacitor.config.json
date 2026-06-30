@@ -1,5 +1,10 @@
 {
   "appId": "com.bodymorph.app",
   "appName": "BodyMorph",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "Keyboard": {
+      "resize": "none"
+    }
+  }
 }

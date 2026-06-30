@@ -35,7 +35,7 @@ html {
    screen (the last direct child; Toast, if shown, renders before it) to the real
    usable height so every page settles in exactly the same place. */
 #root > div:last-child {
-  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  min-height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
 }
 
 /* The coach business dashboard is a desktop layout — lift the phone-width cap

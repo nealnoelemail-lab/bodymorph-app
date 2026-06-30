@@ -7914,8 +7914,8 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
 
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>MEAL PLAN</div>
-          <button onClick={()=>setSetupOpen(true)} style={{ background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:10, color:"#000", padding:"8px 14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Generate Meal Plan</button>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>FOOD LOG</div>
+          <button onClick={()=>setSetupOpen(true)} style={{ background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:11, color:"#000", padding:"11px 18px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Generate Meal Plan</button>
         </div>
 
         {genOpen && (
