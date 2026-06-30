@@ -4900,6 +4900,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           {onToggleCoach && (
             <button onClick={onToggleCoach} title="Voice coach for this workout"
+              className={"silver-edge " + (coachOn ? "vc-on" : "vc-idle")}
               style={{ display:"flex", alignItems:"center", gap:6, background: coachOn ? sessionAccent : "transparent", border:"1px solid "+sessionAccent, borderRadius:8, color: coachOn ? "#000" : sessionAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontWeight:700, fontFamily:"'DM Sans'" }}>
               <span style={{ fontSize:13 }}>&#127897;</span>{coachOn ? "Coaching" : "Coach"}
             </button>
