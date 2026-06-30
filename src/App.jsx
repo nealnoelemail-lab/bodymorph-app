@@ -152,7 +152,7 @@ const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
 const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
 const GROK_DEFAULT_VOICE = "btusfwwmofuz"; // the coach's cloned voice (fallback only; the picker normally sets the voice)
-const GROK_TTS_SPEED = 1.2; // coach speaking pace (Grok allows 0.7–1.5); 1.2 ≈ natural conversational
+const GROK_TTS_SPEED = 1.1; // coach speaking pace (Grok allows 0.7–1.5); 1.1 ≈ natural conversational
 // LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
 // Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
 const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
