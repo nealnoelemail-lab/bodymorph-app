@@ -67,7 +67,7 @@ const GLOBAL_CSS = `
   }
   .watermark-img {
     position: fixed;
-    top: 56%; left: 50%;
+    top: 51.5%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
     filter: drop-shadow(0 0 14px rgba(232,180,0,0.85));
     width: 100%;
@@ -79,7 +79,7 @@ const GLOBAL_CSS = `
   }
   .watermark-img-plain {
     position: fixed;
-    top: 56%; left: 50%;
+    top: 51.5%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
     filter: brightness(0.35) saturate(0);
     width: 100%;
@@ -7936,13 +7936,13 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
 
                   {/* Cuisines — mix & match for variety so meals don't get boring */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:4 }}>Cuisines <span style={{color:"#74748a", fontSize:15}}>(optional — mix & match for variety)</span></div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom: cuisines.length?8:16 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8, marginBottom: cuisines.length?8:16 }}>
                     {["Italian","Mexican","Chinese","Japanese","Thai","Indian","Mediterranean","Middle Eastern","American","Korean","Greek","Caribbean"].map(c => {
                       const on = cuisines.includes(c);
-                      return <button key={c} onClick={()=>toggleCuisine(c)} style={{ background: on?"rgba(232,255,0,0.15)":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#e8ff00":"#c8c8e0", borderRadius:18, padding:"9px 14px", cursor:"pointer", fontSize:16, fontFamily:"'DM Sans'" }}>{on?"✓ ":""}{c}</button>;
+                      return <button key={c} onClick={()=>toggleCuisine(c)} style={{ background: on?"rgba(232,255,0,0.15)":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#e8ff00":"#c8c8e0", borderRadius:12, padding:"15px 6px", cursor:"pointer", fontSize:16.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{c}</button>;
                     })}
                   </div>
-                  {cuisines.length > 0 && <div style={{ fontSize:14, color:"#74748a", marginBottom:16 }}>We'll rotate {cuisines.length===1?"this cuisine":"these cuisines"} across your meals so the day stays interesting.</div>}
+                  {cuisines.length > 0 && <div style={{ fontSize:17.5, color:"#9898b8", marginBottom:16, lineHeight:1.4 }}>We'll rotate {cuisines.length===1?"this cuisine":"these cuisines"} across your meals so the day stays interesting.</div>}
 
                   {/* Carb level — re-balances carbs vs fat inside any diet */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Carb level:</div>
