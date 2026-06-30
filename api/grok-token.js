@@ -2,13 +2,14 @@
 // The real XAI_KEY stays on the server; the app receives only a throwaway token and
 // connects DIRECTLY to xAI with it (no relay hop → streaming latency preserved).
 // xAI's recommended pattern for mobile apps. Auth-gated to signed-in users.
-import { getUser, applyCors } from "./_lib/server.js";
+import { authUser, applyCors, authConfigured } from "./_lib/proxy.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const user = await getUser(req);
+  if (!authConfigured()) return res.status(500).json({ error: "Server missing SUPABASE_URL / SUPABASE_ANON_KEY" });
+  const user = await authUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
   const key = process.env.XAI_KEY;

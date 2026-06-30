@@ -2,13 +2,14 @@
 // never ships it. Auth-gated to signed-in BodyMorph users (Supabase Bearer token).
 // Forwards the client's request body verbatim and supports BOTH a single JSON
 // response AND streaming (SSE) — the voice coach streams (stream:true).
-import { getUser, applyCors } from "./_lib/server.js";
+import { authUser, applyCors, authConfigured } from "./_lib/proxy.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const user = await getUser(req);
+  if (!authConfigured()) return res.status(500).json({ error: "Server missing SUPABASE_URL / SUPABASE_ANON_KEY" });
+  const user = await authUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
   const key = process.env.ANTHROPIC_KEY;

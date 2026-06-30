@@ -1,7 +1,7 @@
 // Server-side proxy for xAI Grok speech-to-text. Holds XAI_KEY so the app never
 // ships it. Auth-gated. The client sends a multipart/form-data body (the audio clip);
 // we forward the raw bytes untouched with the same content-type.
-import { getUser, applyCors } from "./_lib/server.js";
+import { authUser, applyCors, authConfigured } from "./_lib/proxy.js";
 
 // Don't let the platform parse the multipart body — we forward it raw.
 export const config = { api: { bodyParser: false } };
@@ -10,7 +10,8 @@ export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const user = await getUser(req);
+  if (!authConfigured()) return res.status(500).json({ error: "Server missing SUPABASE_URL / SUPABASE_ANON_KEY" });
+  const user = await authUser(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
   const key = process.env.XAI_KEY;
