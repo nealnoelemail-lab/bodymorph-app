@@ -3710,6 +3710,8 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const lastTickRef  = useRef(0); // heartbeat — last time the listen loop ran a frame
   const recentSummaryRef = useRef([]); // rolling last-7-days summaries
   const idleNudgeRef = useRef(0); // how many times we've nudged a silent user in a row
+  const idleAnchorRef = useRef(0); // timestamp the idle clock counts from (companion standby)
+  const idleNudgedRef = useRef(false); // have we already given the gentle "still there?" nudge?
   const turnRef = useRef(0); // monotonic turn id — only the latest turn is allowed to speak
   const wakeLockRef = useRef(null); // screen wake lock so the phone doesn't auto-sleep mid-session
 
@@ -4293,7 +4295,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       log("stopped: " + blob.size + " bytes, audio=" + hasAudio);
       if (!hasAudio || closedRef.current) {
         if (closedRef.current || speakingRef.current) return;
-        if (idleStop) { idleNudgeRef.current++; askRef.current?.(null, false, true); return; } // check in
+        if (idleStop) { setTimeout(startListening, 200); return; } // silence → re-listen; the idle timer owns nudge/standby
         setTimeout(startListening, 250);
         return;
       }
@@ -4324,6 +4326,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
         if (closedRef.current || turnRef.current !== myTurn) return; // superseded by a newer turn
         if (text && !isNoise) {
+          idleAnchorRef.current = performance.now(); idleNudgedRef.current = false;
           setLastUser(text);
           askRef.current?.(text, false);
         } else {
@@ -4351,7 +4354,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
     log(text ? (isNoise ? "ignored noise: " + text : "heard: " + text) : "empty");
     if (closedRef.current || turnRef.current !== myTurn) return;
-    if (text && !isNoise) { setLastUser(text); askRef.current?.(text, false); }
+    if (text && !isNoise) { idleAnchorRef.current = performance.now(); idleNudgedRef.current = false; setLastUser(text); askRef.current?.(text, false); }
     else { setTimeout(startListening, 200); }
   }, [log, startListening]);
 
@@ -4641,6 +4644,32 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     }, 2500);
     return () => clearInterval(id);
   }, [armed, startListening, log]);
+
+  // ── Idle → standby (COMPANION mode only) ──────────────────────────────────────
+  // If no one speaks back, don't sit there with the mic hot and the screen awake
+  // forever. After ~15s of silence give ONE gentle nudge; if still silent ~15s more
+  // (~30s total) drop to standby (close = mic off, screen can sleep, tap the coach
+  // button to resume). DURING A WORKOUT the coach stays on — `companion` is false in a
+  // session/stretch, so this timer simply doesn't run then. ──────────────────────
+  const IDLE_NUDGE_MS = 15000, IDLE_STANDBY_MS = 15000;
+  useEffect(() => {
+    if (!armed || !companion) return;
+    idleAnchorRef.current = performance.now(); idleNudgedRef.current = false;
+    const id = setInterval(() => {
+      if (closedRef.current) return;
+      // Any active turn (the coach thinking or talking) is NOT idle — keep resetting
+      // the clock. We deliberately do NOT clear `idleNudged` here, so the coach's own
+      // nudge speech doesn't count as the user re-engaging.
+      if (speakingRef.current || vsRef.current === "processing") { idleAnchorRef.current = performance.now(); return; }
+      const idle = performance.now() - (idleAnchorRef.current || performance.now());
+      if (!idleNudgedRef.current) {
+        if (idle >= IDLE_NUDGE_MS) { idleNudgedRef.current = true; idleAnchorRef.current = performance.now(); log("idle → nudge"); askRef.current?.(null, false, true); }
+      } else if (idle >= IDLE_STANDBY_MS) {
+        log("idle → standby"); try { if (IS_NATIVE) VoiceCapture.stop(); } catch {} onClose?.();
+      }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [armed, companion, log]);
 
   // ── UI ───────────────────────────────────────────────────────────────────────
   // No screen overlay anymore. The only visible indicator is a small animated bar
