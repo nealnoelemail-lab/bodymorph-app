@@ -782,6 +782,7 @@ function exercisesForTime(sessionTime) {
 // Build a 7-day week tailored to the focus.
 // Day name helpers
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]; // meal-plan week (Mon–Sun)
 const DEFAULT_DAYS = [1,2,3,4,5]; // Mon-Fri, used if none chosen
 
 // Build the list of session templates (without day labels) for a given focus + count.
@@ -7137,13 +7138,15 @@ function applySolver(plan, target) {
   return plan;
 }
 
-async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines }) {
+async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines, avoidDishes }) {
   const cuisineList = Array.isArray(cuisines) ? cuisines.filter(Boolean) : [];
+  const avoidList = Array.isArray(avoidDishes) ? avoidDishes.filter(Boolean) : [];
   // 1. AI proposes the day's foods with simple USDA-friendly search terms + gram portions.
   const prompt = `You are a sports nutritionist building ONE day's meal plan for ${name || "a client"}.
 Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
 ${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH them across the day for variety (don't make every meal the same cuisine; ideally give different meals different cuisines): ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
+${avoidList.length ? `VARIETY — this day is part of a 7-day week. Do NOT reuse any of these dish names already used earlier in the week, and keep today's meals clearly different from them: ${avoidList.join("; ")}.` : ""}
 Build breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME that describes what the ingredients make together (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice", "Greek Chicken Power Bowl"). The items are that dish's components.
 Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
 Reply ONLY with JSON, no markdown, no commentary:
@@ -7528,7 +7531,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const [cuisines, setCuisines] = useState((nutritionGoals && nutritionGoals.cuisines) || []);
   const toggleCuisine = (c) => setCuisines(list => list.includes(c) ? list.filter(x=>x!==c) : [...list, c]);
   const [generating, setGenerating] = useState(false);
-  const [genPlan, setGenPlan] = useState(null);
+  const [genPlan, setGenPlan] = useState(null);   // { days:[{day,meals,totals}], target }
+  const [genDay, setGenDay] = useState(0);          // which weekday is showing
+  const [genStatus, setGenStatus] = useState("");   // progress text while building the week
   const [genErr, setGenErr] = useState(null);
   const [tgt, setTgt] = useState({ cal: parseInt(n.dailyCalories)||2000, protein: parseInt(n.protein)||150, carbs: parseInt(n.carbs)||150, fats: parseInt(n.fats)||60 });
   const [useBranded, setUseBranded] = useState(false);
@@ -7666,25 +7671,32 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
 
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
-    setGenerating(true); setGenErr(null); setGenPlan(null);
+    setGenerating(true); setGenErr(null); setGenPlan(null); setGenDay(0); setGenStatus("");
     onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands, cuisines }); // remember prefs
+    const targets = { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal };
     try {
-      const plan = await generateMealPlan({
-        name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
-        allergies: combinedAllergies(), useBranded, preferredBrands: useBranded ? prefBrandList() : [],
-        cuisines,
-        targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
-      });
-      setGenPlan(plan);
-    } catch (e) { setGenErr("Couldn't generate a plan ("+e.message+"). Please try again."); }
-    setGenerating(false);
+      const days = [];
+      const usedDishes = [];
+      for (let i = 0; i < WEEKDAYS.length; i++) {
+        setGenStatus(`Building ${WEEKDAYS[i]}… (${i + 1} of 7)`);
+        const day = await generateMealPlan({
+          name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
+          allergies: combinedAllergies(), useBranded, preferredBrands: useBranded ? prefBrandList() : [],
+          cuisines, avoidDishes: usedDishes.slice(), targets,
+        });
+        (day.meals || []).forEach(m => { if (m.name) usedDishes.push(m.name); });
+        days.push({ day: WEEKDAYS[i], meals: day.meals, totals: day.totals });
+      }
+      setGenPlan({ days, target: targets });
+    } catch (e) { setGenErr("Couldn't generate the week ("+e.message+"). Please try again."); }
+    setGenStatus(""); setGenerating(false);
   };
   // Swap one food for an AI-suggested alternative, then re-balance the whole day's portions.
   const swapFood = async (mi, ii) => {
     if (!genPlan || swapping) return;
     setSwapping(mi+"-"+ii);
     try {
-      const cur = genPlan.meals[mi].items[ii];
+      const cur = genPlan.days[genDay].meals[mi].items[ii];
       const av = combinedAllergies();
       const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${av?` Avoid anything containing: ${av}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -7700,30 +7712,22 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       if (m) { per100 = { cal:m.cal, protein:m.protein, carbs:m.carbs, fats:m.fats }; verified=true; brand=m.brand||null; }
       else { const est = await lookupFoodMacros(`100 grams of ${alt.food}`); per100 = { cal:est?.cal||0, protein:est?.protein||0, carbs:est?.carbs||0, fats:est?.fats||0 }; verified=false; }
       const plan = JSON.parse(JSON.stringify(genPlan));
-      plan.meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
-      applySolver(plan, genPlan.target); // re-balance so macros still hit
+      plan.days[genDay].meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
+      applySolver(plan.days[genDay], genPlan.target); // re-balance the active day so macros still hit
       setGenPlan(plan);
     } catch { /* leave as-is on failure */ }
     setSwapping(null);
   };
-  // Write the generated plan into the day's food log (as the plan — NOT yet eaten).
+  // Save the generated WEEK (for reference / grocery / the coach). We don't pre-fill the
+  // daily food log — the user logs what they actually eat.
   const applyGenPlan = () => {
     if (!genPlan) return;
-    const updated = { ...(foodLog||{}) };
-    const day = { ...(updated[dateKey]||{}) };
-    genPlan.meals.forEach(ml => {
-      const items = (ml.items||[]).map(it => ({ food: `${it.food} (${it.grams}g)`, cal:String(it.cal), protein:String(it.protein), carbs:String(it.carbs), fats:String(it.fats), logged:false }));
-      if (!items.length) return;
-      if (ml.slot === "snacks") day.snacks = items;
-      else { // combine a meal's items into one slot entry
-        const sum = items.reduce((a,x)=>({cal:a.cal+ +x.cal, protein:a.protein+ +x.protein, carbs:a.carbs+ +x.carbs, fats:a.fats+ +x.fats}), {cal:0,protein:0,carbs:0,fats:0});
-        day[ml.slot] = { food: items.map(x=>x.food).join(", "), cal:String(sum.cal), protein:String(sum.protein), carbs:String(sum.carbs), fats:String(sum.fats), logged:false };
-      }
+    if (onSaveMealPlan) onSaveMealPlan({
+      days: genPlan.days,
+      meals: genPlan.days[0]?.meals || [],     // backward-compat: Program Summary / coach read .meals
+      totals: genPlan.days[0]?.totals || {},
+      target: genPlan.target, diet: dietPref, savedDate: ymdLocal(), week: true,
     });
-    updated[dateKey] = day;
-    onSaveFoodLog(updated);
-    // Persist the plan so it shows in My Program Summary.
-    if (onSaveMealPlan) onSaveMealPlan({ meals: genPlan.meals, totals: genPlan.totals, target: genPlan.target, diet: dietPref, savedDate: dateKey });
     setGenOpen(false); setGenPlan(null);
   };
 
@@ -7931,7 +7935,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
               {!genPlan && (
                 <div>
                   <div style={{ fontSize:22, color:"#9898b8", marginBottom:16, lineHeight:1.45 }}>
-                    A full day built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
+                    A full 7-day week built for your <b style={{color:"#f0f0f8"}}>{(profile?.goal||"goal").split("(")[0].trim().toLowerCase()}</b> goal on a <b style={{color:"#f0f0f8"}}>{dietPref}</b> diet, using real foods portioned to hit your targets.
                   </div>
 
                   {/* Cuisines — mix & match for variety so meals don't get boring */}
@@ -8000,21 +8004,28 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
 
                   {genErr && <div style={{ color:"#ff7070", fontSize:17, marginBottom:12 }}>{genErr}</div>}
                   <button disabled={generating} onClick={runGenerate} style={{ width:"100%", background: generating?"#3a3a4a":"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"16px", cursor: generating?"default":"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19 }}>
-                    {generating ? "Building your plan… (10–20s)" : "Generate Plan"}
+                    {generating ? (genStatus || "Building your week…") : "Generate 7-Day Plan"}
                   </button>
                   {generating && <div style={{ color:"#74748a", fontSize:15, textAlign:"center", marginTop:10 }}>Picking foods, verifying macros, and dialing in portions…</div>}
                 </div>
               )}
 
               {genPlan && (() => {
-                const tt = genPlan.totals||{}, tg = genPlan.target||{};
+                const dayPlan = genPlan.days?.[genDay] || genPlan.days?.[0] || { meals:[], totals:{} };
+                const tt = dayPlan.totals||{}, tg = genPlan.target||{};
                 const chip = (label,val,goal,col) => (<div style={{ flex:1, textAlign:"center", background:"#12121a", borderRadius:10, padding:"9px 4px" }}><div style={{ color:col, fontSize:22, fontWeight:700, fontFamily:"'Oswald',sans-serif" }}>{val}</div><div style={{ color:"#74748a", fontSize:13 }}>/ {goal} {label}</div></div>);
                 return (
                   <div>
+                    {/* Weekday tabs — pick a day of the week */}
+                    <div style={{ display:"flex", gap:5, marginBottom:12 }}>
+                      {(genPlan.days||[]).map((d,i)=>(
+                        <button key={i} onClick={()=>setGenDay(i)} style={{ flex:1, background: i===genDay?"#e8ff00":"#1a1a26", border:"1px solid "+(i===genDay?"#e8ff00":"#2a2a3d"), color: i===genDay?"#000":"#c8c8e0", borderRadius:8, padding:"9px 2px", cursor:"pointer", fontSize:13, fontWeight:700, fontFamily:"'DM Sans'" }}>{d.day.slice(0,3)}</button>
+                      ))}
+                    </div>
                     <div style={{ display:"flex", gap:6, marginBottom:14 }}>
                       {chip("cal", tt.cal, tg.cal, "#e8ff00")}{chip("P", tt.protein, tg.protein, "#3d8eff")}{chip("C", tt.carbs, tg.carbs, "#9b5de5")}{chip("F", tt.fats, tg.fats, "#3ddc84")}
                     </div>
-                    {genPlan.meals.map((ml,mi)=>(
+                    {dayPlan.meals.map((ml,mi)=>(
                       <div key={mi} style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
                         <div style={{ marginBottom:7 }}>
                           <div style={{ fontFamily:"'DM Sans'", fontSize:11.5, letterSpacing:1.5, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
@@ -8034,10 +8045,10 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                       <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17 }}>Use This Plan</button>
                     </div>
                     <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                      <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🖨 Print / PDF</button>
-                      <button onClick={()=>printGroceryList(genPlan, { name: profile?.name, days: 7 })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🛒 Grocery List</button>
+                      <button onClick={()=>printMealPlan({ meals: dayPlan.meals, totals: dayPlan.totals }, { name: `${profile?.name||""} — ${dayPlan.day}`, dietPref, cuisines })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🖨 Print {dayPlan.day}</button>
+                      <button onClick={()=>printGroceryList({ meals: (genPlan.days||[]).flatMap(d=>d.meals) }, { name: profile?.name, days: 1 })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🛒 Week Grocery List</button>
                     </div>
-                    <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
+                    <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Your 7-day plan is ready. Tap “Use This Plan” to save it — the weekly grocery list covers all 7 days. Nothing's logged until you actually eat it.</div>
                   </div>
                 );
               })()}
@@ -10111,15 +10122,21 @@ export default function BodyMorph() {
       steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
       stepGoal: stepTargetFor(profile),
       sleep: (sleepEntries||[]).find(e=>e.date===today)?.hours ?? null, // last night's hours (null = not logged)
-      mealPlan: (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length)
-        ? mealPlan.meals.map(ml => ({
-            slot: ml.slot,
-            name: ml.name || "",
-            items: (ml.items||[]).map(it => `${it.food}${it.grams?` (${it.grams}g)`:""}`).filter(Boolean).join(", "),
-            cal: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.cal)||0),0)),
-            protein: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.protein)||0),0)),
-          }))
-        : null,
+      mealPlan: (() => {
+        // For a saved 7-day plan, use TODAY's weekday; otherwise the single-day plan.
+        const src = (mealPlan && Array.isArray(mealPlan.days) && mealPlan.days.length)
+          ? (mealPlan.days[(new Date().getDay() + 6) % 7]?.meals)   // WEEKDAYS is Mon-first
+          : (mealPlan && mealPlan.meals);
+        return (Array.isArray(src) && src.length)
+          ? src.map(ml => ({
+              slot: ml.slot,
+              name: ml.name || "",
+              items: (ml.items||[]).map(it => `${it.food}${it.grams?` (${it.grams}g)`:""}`).filter(Boolean).join(", "),
+              cal: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.cal)||0),0)),
+              protein: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.protein)||0),0)),
+            }))
+          : null;
+      })(),
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
