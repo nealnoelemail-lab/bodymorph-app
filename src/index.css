@@ -4,7 +4,9 @@ html, body, #root {
 }
 html, body {
   height: 100%;
-  overflow-x: hidden;   /* never let a screen bleed off the side */
+  width: 100%;
+  position: relative;
+  overflow-x: clip;     /* hard-stop ANY sideways scroll/drift — page only moves top↕bottom */
 }
 
 /* Dark page background so desktop gutters around the centered app stay dark.
@@ -20,9 +22,10 @@ html {
    unaffected. Caps every screen at once — no per-screen maxWidth needed. */
 #root {
   max-width: 480px;
+  width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
-  overflow-x: hidden;
+  overflow-x: clip;
   /* Push the whole app below the iOS status bar / Dynamic Island and above the
      home indicator (native shell). Zero on devices/desktop without insets. */
   padding-top: env(safe-area-inset-top);

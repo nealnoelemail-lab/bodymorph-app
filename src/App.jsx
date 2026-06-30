@@ -7919,7 +7919,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         </div>
 
         {genOpen && (
-          <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", padding:"calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 40px)" }}>
+          <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", overflowX:"hidden", boxSizing:"border-box", padding:"calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 40px)" }}>
             <div style={{ maxWidth:440, margin:"0 auto" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#e8ff00" }}>✨ AI MEAL PLAN</div>
@@ -7941,26 +7941,6 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                     })}
                   </div>
                   {cuisines.length > 0 && <div style={{ fontSize:14, color:"#74748a", marginBottom:16 }}>We'll rotate {cuisines.length===1?"this cuisine":"these cuisines"} across your meals so the day stays interesting.</div>}
-
-                  {/* Body-fat % — refines protein (lean mass). Estimate now, update later. */}
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-                    <div style={{ fontSize:19, color:"#9898b8" }}>Body fat % <span style={{color:"#74748a", fontSize:15}}>(optional)</span></div>
-                    <button onClick={()=>setBfHelp(h=>!h)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#9898b8", fontSize:14, padding:"4px 10px", cursor:"pointer" }}>How do I estimate?</button>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: bfHelp?8:16 }}>
-                    <input type="number" inputMode="decimal" value={bodyFat} onChange={e=>setBodyFat(e.target.value)} onBlur={saveBodyFat} placeholder="e.g. 20" style={{ flex:1, background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"12px", fontSize:18, outline:"none", boxSizing:"border-box" }} />
-                    <span style={{ color:"#9898b8", fontSize:18 }}>%</span>
-                    <button onClick={saveBodyFat} style={{ background: bfSaved?"#3ddc84":"#e8ff00", border:"none", borderRadius:8, color:"#000", padding:"12px 18px", cursor:"pointer", fontWeight:700, fontSize:16, minWidth:78 }}>{bfSaved ? "Saved ✓" : "Save"}</button>
-                  </div>
-                  {bfSaved && <div style={{ color:"#3ddc84", fontSize:15, marginBottom:12, marginTop:-4 }}>✓ Saved — your targets below have been updated.</div>}
-                  {bfHelp && (
-                    <div style={{ background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, padding:"12px 14px", marginBottom:16, fontSize:15, color:"#c8c8e0", lineHeight:1.6 }}>
-                      A rough eyeball estimate is fine — you can update it later when you get a real measurement (calipers, a smart scale, or a DEXA scan).<br/>
-                      <b style={{color:"#3d8eff"}}>Men:</b> ~10–12% = lean/athletic, ~15–18% = average, ~20–25%+ = higher.<br/>
-                      <b style={{color:"#ff79c6"}}>Women:</b> ~18–22% = lean/athletic, ~23–28% = average, ~30%+ = higher.<br/>
-                      <span style={{color:"#74748a"}}>Leave blank if unsure — we'll just use your bodyweight.</span>
-                    </div>
-                  )}
 
                   {/* Carb level — re-balances carbs vs fat inside any diet */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Carb level:</div>
