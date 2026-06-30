@@ -21,6 +21,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // we're first called, so RETRY on a short timer until it is — otherwise the
     // plugin silently never registers and JS sees "not implemented on iOS".
     private func registerLocalPlugins() {
+        configureWebView()   // also lock the scroll view / dark background once the web view is up
         guard !didRegisterPlugins else { return }
         if let vc = window?.rootViewController as? CAPBridgeViewController, let bridge = vc.bridge {
             bridge.registerPluginInstance(VoiceCapturePlugin())
@@ -31,6 +32,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         if pluginRegisterAttempts < 60 {   // ~15s of 0.25s retries, then give up
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.registerLocalPlugins() }
         }
+    }
+
+    // Stop the WebView from rubber-band overscrolling sideways (which dragged the whole
+    // page left/right and revealed the WebView's default white background) and paint its
+    // background dark so nothing white can ever show through. Vertical scrolling still
+    // works; the page just can't drift horizontally.
+    private func configureWebView() {
+        guard let vc = window?.rootViewController as? CAPBridgeViewController,
+              let webView = vc.webView else { return }
+        let dark = UIColor(red: 10/255.0, green: 10/255.0, blue: 15/255.0, alpha: 1.0)  // #0a0a0f
+        webView.isOpaque = true
+        webView.backgroundColor = dark
+        webView.scrollView.backgroundColor = dark
+        webView.scrollView.bounces = false
+        webView.scrollView.alwaysBounceHorizontal = false
+        webView.scrollView.showsHorizontalScrollIndicator = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
     }
 
     // Configure a record+playback audio session so the voice coach can listen and
