@@ -7852,20 +7852,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   // Write the generated plan into the day's food log (as the plan — NOT yet eaten).
   const applyGenPlan = () => {
     if (!genPlan) return;
-    const updated = { ...(foodLog||{}) };
-    const day = { ...(updated[dateKey]||{}) };
-    genPlan.meals.forEach(ml => {
-      const items = (ml.items||[]).map(it => ({ food: `${it.food} (${it.grams}g)`, cal:String(it.cal), protein:String(it.protein), carbs:String(it.carbs), fats:String(it.fats), logged:false }));
-      if (!items.length) return;
-      if (ml.slot === "snacks") day.snacks = items;
-      else { // combine a meal's items into one slot entry
-        const sum = items.reduce((a,x)=>({cal:a.cal+ +x.cal, protein:a.protein+ +x.protein, carbs:a.carbs+ +x.carbs, fats:a.fats+ +x.fats}), {cal:0,protein:0,carbs:0,fats:0});
-        day[ml.slot] = { food: items.map(x=>x.food).join(", "), cal:String(sum.cal), protein:String(sum.protein), carbs:String(sum.carbs), fats:String(sum.fats), logged:false };
-      }
-    });
-    updated[dateKey] = day;
-    onSaveFoodLog(updated);
-    // Persist the plan so it shows in My Program Summary.
+    // Save the plan ONLY (for the voice coach, My Program Summary, and Edit Meal Plan).
+    // Do NOT prefill the food log — the daily log stays blank and calories read zero
+    // until the client actually logs each meal AFTER eating it.
     if (onSaveMealPlan) onSaveMealPlan({ meals: genPlan.meals, totals: genPlan.totals, target: genPlan.target, diet: dietPref, savedDate: dateKey });
     setGenOpen(false); setGenPlan(null);
   };
