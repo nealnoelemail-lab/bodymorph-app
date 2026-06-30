@@ -8125,7 +8125,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                     <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Add Food
                     </button>
-                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"#e8ff00", color: snacksLogged?"#e8ff00":"#000", border: snacksLogged?"2px solid #e8ff00":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       {snacksLogged?"Unlog":"Log It"}
                     </button>
                   </div>
@@ -8212,7 +8212,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     Add Food
                   </button>
-                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"#e8ff00", color: isLogged?"#e8ff00":"#000", border: isLogged?"2px solid #e8ff00":"none", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     {isLogged?"Unlog":"Log It"}
                   </button>
                 </div>
