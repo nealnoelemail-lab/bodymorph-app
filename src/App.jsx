@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
@@ -3804,6 +3804,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
     if (IS_NATIVE) {
       try {
         await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, xaiKey: XAI_KEY, provider: VOICE_PROVIDER });
+        lastTickRef.current = performance.now(); // seed the watchdog so it can't fire a spurious restart at startup
         setArmed(true);
         closedRef.current = false;
         requestWakeLock();
@@ -10253,7 +10254,12 @@ export default function BodyMorph() {
       return { ...prev, [exercise.exercise]: next };
     });
   };
-  const companionData = profile ? (() => {
+  // Memoized: this object loops over the food log, supplements, peptides, meal plan
+  // and builds the to-do list. Rebuilding it on every render (the coach pushes voice
+  // state up ~3x/sec) saturated the main thread and froze the WebView. Recompute only
+  // when its real inputs change.
+  const companionData = useMemo(() => {
+    if (!profile) return null;
     const today = ymdLocal();
     const tLog = (foodLog && foodLog[today]) || {};
     const slotInfo = (slot) => {
@@ -10325,7 +10331,7 @@ export default function BodyMorph() {
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
     };
-  })() : null;
+  }, [profile, foodLog, dietPref, program, logs, cardioSessions, cardioPlan, supplements, peptides, todoChecked, hydration, stepEntries, sleepEntries, mealPlan]);
   const voiceCoachEl = homeVoice ? (
     <VoiceCoach
       profile={profile}
