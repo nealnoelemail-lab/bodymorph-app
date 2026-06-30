@@ -8972,7 +8972,14 @@ function planText(name, ev) {
 // document into a hidden same-document iframe and call its print() — which presents
 // iOS's native print/share sheet (AirPrint, or "Save to Files" as a PDF). Also works
 // on the web/desktop.
-function printHtml(html) {
+function printHtml(html, fileName) {
+  // Native iOS: WKWebView doesn't surface window.open OR window.print(), so hand the
+  // document to the native plugin, which renders a real PDF and opens the iOS share
+  // sheet (Save to Files / Print / Mail / AirDrop).
+  if (IS_NATIVE) {
+    try { VoiceCapture.printDoc({ html, fileName: fileName || "BodyMorph" }); return; }
+    catch (e) { /* fall through to the web path */ }
+  }
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
@@ -9005,7 +9012,7 @@ p{margin:0}ul{margin:6px 0 0;padding-left:18px}@media print{body{margin:0}}</sty
 <h2>Timeline</h2><p>Recommended: <b>${esc(t.recommended)}</b></p>${t.desiredVerdict ? `<p>${esc(t.desiredVerdict)}</p>` : ""}<ul>${ms}</ul>
 <p style="margin-top:28px;color:#888;font-size:12px">This plan is fitness guidance from your coach, not medical advice. Consult a physician about any medical conditions or injuries before starting.</p>
 </body></html>`;
-  printHtml(html);
+  printHtml(html, `BodyMorph Plan${name ? " — " + name : ""}`);
 }
 
 // Print / Save-as-PDF a generated meal plan: a clean per-meal document with
@@ -9037,7 +9044,7 @@ td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8
 ${meals}
 <p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
 </body></html>`;
-  printHtml(html);
+  printHtml(html, `Meal Plan${name ? " — " + name : ""}`);
 }
 
 // Aggregate a day's meal plan into a 7-day shopping list: sum grams per unique

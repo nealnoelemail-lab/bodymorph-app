@@ -19,6 +19,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopSpeaking", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "printDoc", returnType: CAPPluginReturnPromise),
     ]
 
     private var recorder: AVAudioRecorder?
@@ -141,6 +142,47 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     @objc func stopSpeaking(_ call: CAPPluginCall) {
         DispatchQueue.main.async { self.stopTTSInternal() }
         call.resolve()
+    }
+
+    // Render an HTML document to a real PDF and present iOS's share sheet so the user
+    // can Save to Files, Print (AirPrint), Mail, or AirDrop it. WKWebView's window.open
+    // and window.print() don't surface any UI inside a Capacitor app, so we do it natively.
+    @objc func printDoc(_ call: CAPPluginCall) {
+        let html = call.getString("html") ?? ""
+        let fileName = (call.getString("fileName") ?? "BodyMorph")
+            .replacingOccurrences(of: "/", with: "-")
+        DispatchQueue.main.async {
+            // US-Letter page at 72 dpi with 1/3" margins.
+            let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+            let printable = pageRect.insetBy(dx: 24, dy: 24)
+            let formatter = UIMarkupTextPrintFormatter(markupText: html)
+            let renderer = UIPrintPageRenderer()
+            renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
+            renderer.setValue(NSValue(cgRect: pageRect), forKey: "paperRect")
+            renderer.setValue(NSValue(cgRect: printable), forKey: "printableRect")
+
+            let pdf = NSMutableData()
+            UIGraphicsBeginPDFContextToData(pdf, pageRect, nil)
+            let pages = max(renderer.numberOfPages, 1)
+            for i in 0..<pages {
+                UIGraphicsBeginPDFPage()
+                renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+            }
+            UIGraphicsEndPDFContext()
+
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).pdf")
+            do { try pdf.write(to: url, options: .atomic) }
+            catch { call.reject("Couldn't build the PDF: \(error.localizedDescription)"); return }
+
+            guard let presenter = self.bridge?.viewController else { call.reject("No view controller"); return }
+            let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let pop = share.popoverPresentationController {   // iPad anchor
+                pop.sourceView = presenter.view
+                pop.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+                pop.permittedArrowDirections = []
+            }
+            presenter.present(share, animated: true) { call.resolve() }
+        }
     }
 
     private func setupTTSEngine() {
