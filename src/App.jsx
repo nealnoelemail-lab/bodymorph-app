@@ -7269,7 +7269,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   };
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto", paddingTop:"calc(env(safe-area-inset-top) + 8px)", paddingBottom:"env(safe-area-inset-bottom)", boxSizing:"border-box" }}>
       <style>{GLOBAL_CSS}</style>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", borderBottom:"1px solid #1a1a26" }}>
@@ -7283,17 +7283,17 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
       {/* Scrollable content */}
       <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
 
-        {/* Two main options */}
-        <div style={{ display:"flex", gap:10, marginBottom:16 }}>
-          <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"rgba(61,142,255,0.12)", border:"2px solid #3d8eff", borderRadius:14, color:"#3d8eff", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:28 }}>📷</span>
-            <span>Macro AI</span>
-            <span style={{ fontSize:11, fontWeight:400, color:"#9898b8" }}>Snap a photo</span>
+        {/* Two main options — stacked: big photo on top, search below */}
+        <div style={{ display:"flex", flexDirection:"column", gap:14, marginBottom:16 }}>
+          <button onClick={()=>fileRef.current.click()} style={{ background:"rgba(61,142,255,0.12)", border:"1px solid rgba(61,142,255,0.5)", borderRadius:18, color:"#3d8eff", padding:"40px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+            <span style={{ fontSize:50 }}>📷</span>
+            <span style={{ fontSize:23 }}>Macro AI</span>
+            <span style={{ fontSize:14, fontWeight:400, color:"#9898b8" }}>Snap a photo of your meal</span>
           </button>
-          <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={{ flex:1, background: searchActive ? "rgba(232,255,0,0.15)" : "rgba(232,255,0,0.07)", border:"2px solid #e8ff00", borderRadius:14, color:"#e8ff00", padding:"16px 10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <span style={{ fontSize:28 }}>🔍</span>
-            <span>Search Food</span>
-            <span style={{ fontSize:11, fontWeight:400, color:"#9898b8" }}>USDA database</span>
+          <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={{ background: searchActive ? "rgba(232,255,0,0.15)" : "rgba(232,255,0,0.07)", border:"1px solid rgba(232,255,0,0.5)", borderRadius:18, color:"#e8ff00", padding:"30px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+            <span style={{ fontSize:40 }}>🔍</span>
+            <span style={{ fontSize:20 }}>Search Food</span>
+            <span style={{ fontSize:14, fontWeight:400, color:"#9898b8" }}>Add it manually from the USDA database</span>
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />

@@ -49,6 +49,12 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BodyMorph's voice coach listens so it can talk you through your workout and log your sets hands-free.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>BodyMorph uses the camera so you can snap a photo of your meal and have Macro AI estimate its calories and macros.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>BodyMorph lets you pick a meal photo from your library so Macro AI can estimate its calories and macros.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>BodyMorph can save meal photos to your library.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
