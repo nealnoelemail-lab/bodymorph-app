@@ -7847,6 +7847,27 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         {/* AI meal plan — right under the diet style the user picks */}
         <button onClick={()=>{ setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", marginBottom:14, background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:12, color:"#000", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:19.5 }}>✨ Generate AI Meal Plan</button>
 
+        {/* Goal — drives the calorie & macro targets; tap to change and watch them update */}
+        <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:10 }}>
+          <div style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5, marginBottom:8 }}>GOAL — sets your calories &amp; macros</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+            {[
+              ["Cut (Lose Fat, Preserve Muscle)", "Cut", "Lose fat · real deficit"],
+              ["Reshape (Build Muscle & Lose Fat)", "Reshape", "Recomp · ~maintenance"],
+              ["Bulk (Build Muscle Mass)", "Bulk", "Build muscle · surplus"],
+              ["Athletic Performance", "Athletic", "Maintain · perform"],
+            ].map(([val, label, sub]) => {
+              const on = (profile?.goal || "") === val;
+              return (
+                <button key={val} onClick={()=>{ if (onUpdateProfile) onUpdateProfile({ goal: val }); }} style={{ textAlign:"left", background: on ? "rgba(232,255,0,0.10)" : "#0e0e16", border:"2px solid "+(on?"#e8ff00":"#2a2a3d"), borderRadius:9, padding:"9px 10px", cursor:"pointer" }}>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:0.5, color: on ? "#e8ff00" : "#f0f0f8" }}>{label}</div>
+                  <div style={{ fontSize:10.5, color:"#9898b8", marginTop:1 }}>{sub}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Calorie Goal */}
         <div style={{ background:"#1a1a26", borderRadius:16, padding:"14px 20px", marginBottom:10 }}>
           <div style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5, marginBottom:6 }}>CALORIE GOAL</div>
