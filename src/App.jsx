@@ -7826,9 +7826,9 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             {GOALS.map(([val,label,sub]) => {
               const on = (profile?.goal||"")===val;
               return (
-                <button key={val} onClick={()=>{ if (onUpdateProfile) onUpdateProfile({ goal: val }); }} style={{ textAlign:"left", background:on?"rgba(232,255,0,0.12)":"#1a1a26", border:"2px solid "+(on?"#e8ff00":"#2a2a3d"), borderRadius:14, padding:"16px 16px", cursor:"pointer", minHeight:96 }}>
+                <button key={val} onClick={()=>{ if (onUpdateProfile) onUpdateProfile({ goal: val }); }} style={{ textAlign:"left", background:on?"rgba(232,255,0,0.12)":"#1a1a26", border:"2px solid "+(on?"#e8ff00":"#2a2a3d"), borderRadius:14, padding:"16px 16px", cursor:"pointer", minHeight:108 }}>
                   <div style={{ fontFamily:"'Bebas Neue'", fontSize:27, letterSpacing:0.5, color:on?"#e8ff00":"#f0f0f8" }}>{label}</div>
-                  <div style={{ fontSize:14.5, color:"#b8b8d0", marginTop:6, lineHeight:1.3 }}>{sub}</div>
+                  <div style={{ fontSize:19, color:"#b8b8d0", marginTop:6, lineHeight:1.3 }}>{sub}</div>
                 </button>
               );
             })}
