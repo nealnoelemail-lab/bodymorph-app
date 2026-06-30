@@ -739,15 +739,22 @@ function pickFocusGroups(profile) {
   return { groups:["chest","back","legs","glutes","shoulders","arms"], stretch:"upper" }; // full body
 }
 
-function dayPlan(label, type, focusText, primaryGroups, accessoryGroups, target) {
+function dayPlan(label, type, focusText, primaryGroups, accessoryGroups, target, opts) {
   // Build exercises to fit the session length: load primary groups heavily, top up from accessories.
   const seen = new Set();
   const workout = [];
   const TARGET = target || 6;
+  const rotation = (opts && opts.rotation) || 0; // 0/1/2 → 4-week exercise rotation (sets A/B/C)
+  const block = opts && opts.block;              // 2-week intensity block (sets/reps/rest override)
 
   function addFrom(group, max) {
-    if (!EX[group]) return;
-    for (const ex of EX[group]) {
+    const pool = EX[group];
+    if (!pool) return;
+    // Rotate the pool so each 4-week phase pulls a DIFFERENT slice of lifts for the
+    // same muscle (same body part, fresh exercises → dodges adaptation).
+    const off = (rotation * 2) % pool.length;
+    const ordered = pool.slice(off).concat(pool.slice(0, off));
+    for (const ex of ordered) {
       if (workout.length >= TARGET) break;
       if (max <= 0) break;
       if (seen.has(ex.exercise)) continue;
@@ -768,7 +775,8 @@ function dayPlan(label, type, focusText, primaryGroups, accessoryGroups, target)
   // If still short, pull more from the first primary group
   if (workout.length < TARGET && primaries[0]) addFrom(primaries[0], TARGET);
 
-  return { day:label, type, focus:focusText, workout: workout.slice(0, TARGET) };
+  const out = workout.slice(0, TARGET).map(ex => applyBlock(ex, block));
+  return { day:label, type, focus:focusText, workout: out };
 }
 
 // Map session length (minutes) to how many exercises fit. ~8-10 min per exercise.
@@ -1112,6 +1120,51 @@ function toValidDayIndex(d) {
   return nameIdx >= 0 ? nameIdx : null;
 }
 
+// ── BASIC-PROGRAM PERIODIZATION (Upper / Lower / Full / Core only) ────────────
+// A 90-day / 12-week block. Intensity steps every 2 weeks (6 blocks); exercises
+// rotate every 4 weeks (sets A/B/C). Experience level sets the starting block,
+// the ceiling, and a frequency lean. Calendar-driven like HFT/GLB — the program
+// auto-advances as real weeks pass. Every value is a coach-overridable default.
+const BASIC_BLOCKS = [
+  { reps:"12-15", sets:"3", rest:"75s",  tag:"Foundation" },
+  { reps:"10-12", sets:"3", rest:"90s",  tag:"Add load" },
+  { reps:"8-12",  sets:"4", rest:"90s",  tag:"Build volume" },
+  { reps:"8-10",  sets:"4", rest:"120s", tag:"Heavier" },
+  { reps:"6-8",   sets:"4", rest:"120s", tag:"Strength" },
+  { reps:"6-10",  sets:"5", rest:"150s", tag:"Peak" },
+];
+// Week 1–12 within the current 90-day block; re-baselines (loops) afterward.
+function basicProgramWeek(startDate) {
+  if (!startDate) return 1;
+  const days = Math.max(0, Math.floor((new Date() - new Date(startDate)) / 86400000));
+  return (Math.floor(days / 7) % 12) + 1;
+}
+// Experience level → starting block index + ceiling. Beginners start gentle and
+// cap mid-ramp; advanced/pro start already loaded and reach the peak.
+function basicLevelRamp(level) {
+  if (level === "Beginner") return { start:0, cap:3 };
+  if (level === "Advanced") return { start:1, cap:5 };
+  if (level === "Pro")      return { start:1, cap:5 };
+  return { start:0, cap:5 }; // Intermediate
+}
+// Which intensity block + 4-week exercise rotation applies to this client right now.
+function basicBlockFor(profile) {
+  const week = basicProgramWeek(profile && profile.basicStartDate);
+  const { start, cap } = basicLevelRamp((profile && profile.fitnessLevel) || "Intermediate");
+  const blockIndex = Math.min(start + Math.floor((week - 1) / 2), cap);
+  return { week, blockIndex, block: BASIC_BLOCKS[blockIndex], rotation: Math.floor((week - 1) / 4) % 3 };
+}
+// Apply a block's sets/reps/rest to an exercise, preserving time-holds, "to failure",
+// and per-side ("each") rep formats so a plank never becomes "8-10 reps".
+function applyBlock(ex, block) {
+  if (!block) return ex;
+  const r = String(ex.reps || "");
+  const reps = /hold|fail|sec|min|\d+\s*s\b/i.test(r) ? ex.reps
+             : /each/i.test(r) ? `${block.reps} each`
+             : block.reps;
+  return { ...ex, sets: block.sets, reps, rest: block.rest };
+}
+
 function buildWeek(profile) {
   const raw = (profile.trainingDays && profile.trainingDays.length)
     ? [...profile.trainingDays]
@@ -1123,9 +1176,10 @@ function buildWeek(profile) {
   const validDays = days.length ? days : DEFAULT_DAYS;
   const templates = sessionTemplates(profile.focus, validDays.length, profile.goal, profile.gender);
   const target = exercisesForTime(profile.sessionTime);
+  const { block, rotation } = basicBlockFor(profile);   // periodize this week
   return validDays.map((dayNum, i) => {
     const t = templates[i % templates.length];
-    return dayPlan(DAY_NAMES[dayNum], t.type, t.focusText, t.primary, t.accessory, target);
+    return dayPlan(DAY_NAMES[dayNum], t.type, t.focusText, t.primary, t.accessory, target, { block, rotation });
   });
 }
 
@@ -1796,19 +1850,20 @@ function buildProgram(profile) {
   const { stretch } = pickFocusGroups(profile);
   const goalWord = profile.goal.split("(")[0].trim();
   const focusWord = profile.focus.split("(")[0].trim();
+  const bb = basicBlockFor(profile);
 
   return {
-    overview: "A 4-week precision starter block built for your " + goalWord.toLowerCase() +
-      " goal with a " + focusWord.toLowerCase() + " emphasis. Every movement uses precise angles, controlled tempo, and a strong mind-muscle squeeze over heavy momentum.",
+    overview: `A 90-day, 12-week ${focusWord.toLowerCase()} block for your ${goalWord.toLowerCase()} goal. Intensity steps up every 2 weeks, and the exercises rotate every 4 weeks so the same muscles keep adapting. You're in week ${bb.week} — the ${bb.block.tag} phase (${bb.block.sets} sets of ${bb.block.reps}, ${bb.block.rest} rest). Precise angles, controlled tempo, a strong mind-muscle squeeze over heavy momentum.`,
     weeklySchedule: buildWeek(profile),
     stretching: STRETCHES[stretch],
     nutrition: macrosFor(profile),
-    progressMilestones: [
-      { week:1, goal:"Master form and angle setup on every exercise. Keep weight moderate and own the 3-1-2 tempo." },
-      { week:2, goal:"Add a small amount of weight while holding strict tempo. Dial in your mind-muscle connection." },
-      { week:3, goal:"Push the final set of each exercise close to failure. Add a drop set on one movement per session." },
-      { week:4, goal:"Peak intensity week. Beat week 1 numbers with the same clean form, then reassess and rebuild." },
-    ],
+    basicPeriodized: true,
+    currentWeek: bb.week,
+    currentBlock: bb.blockIndex + 1,
+    progressMilestones: BASIC_BLOCKS.map((b, i) => ({
+      week: i * 2 + 1,
+      goal: `Weeks ${i * 2 + 1}–${i * 2 + 2} · ${b.tag}: ${b.sets} sets of ${b.reps}, ${b.rest} rest.${i % 2 === 0 ? " Fresh exercises this block." : ""}`,
+    })),
   };
 }
 
@@ -1823,9 +1878,13 @@ function buildProgram(profile) {
 // Curated, time-phased 90-day focuses keep their periodized templates — the
 // progression is the whole point, so we don't let the AI flatten it.
 function isAIProgramEligible(profile) {
-  const f = (profile && profile.focus) || "";
-  return !(f.includes("Active Aging") || f.includes("BodyMorph (No Gym)") ||
-           f.includes("HFT") || f.includes("Booty"));
+  // The 4 basic programs (Upper/Lower/Full/Core) are now deterministically
+  // PERIODIZED — 90-day blocks, 2-week intensity steps, 4-week exercise rotation.
+  // Those guardrails must be guaranteed by code, not left to the AI to honor, so
+  // we no longer route any program through the model. The specialty programs were
+  // already excluded; templates now own every program. (Kept as a function so the
+  // caching/UI call sites still work and AI can be re-enabled later if desired.)
+  return false;
 }
 
 // Inputs that define the STRUCTURE of a program. Body-weight / metric edits are
@@ -8314,6 +8373,7 @@ function migrateProfile(p) {
     deficit:       "moderate",
     hftStartDate: null,
     glbStartDate: null,
+    basicStartDate: null,
   };
   const merged = { ...defaults, ...p };
   // Sanitize trainingDays: accepts numeric indices (0-6) or day name strings ("Monday" etc.)
@@ -9731,6 +9791,20 @@ export default function BodyMorph() {
 
   useEffect(() => {
     if (loaded && profile) {
+      // Lazily start the basic-program 90-day clock for anyone on a basic program
+      // (Upper/Lower/Full/Core) without one — existing users + fresh onboarding — so
+      // the 2-week intensity steps and 4-week rotation actually advance over time.
+      const f = profile.focus || "";
+      const isBasic = !!f && !["HFT","Booty","Active Aging","BodyMorph (No Gym)"].some(s => f.includes(s));
+      if (isBasic && !profile.basicStartDate) {
+        setProfile(prev => {
+          if (!prev || prev.basicStartDate) return prev;
+          const updated = { ...prev, basicStartDate: ymdLocal() };
+          Store.set(PROFILE_KEY, updated);
+          return updated;
+        });
+        return; // re-runs with the date set, then resolves the program below
+      }
       try { setProgram(resolveProgram(profile)); } catch(e) { console.warn("program rebuild:", e); }
       if (userRef.current) pushProfileDebounced(userRef.current.id, profile);
       // Auto-personalize: eligible client + no cached AI program for these inputs ->
@@ -9978,6 +10052,10 @@ export default function BodyMorph() {
     if (focus.includes("Booty")) {
       updated.glbStartDate = ymdLocal();
     }
+    // Starting a BASIC program (Upper/Lower/Full/Core) resets its 90-day periodization
+    // clock to today so the 2-week intensity steps + 4-week rotation count from now.
+    const isSpecialty = ["HFT","Booty","Active Aging","BodyMorph (No Gym)"].some(s => focus.includes(s));
+    if (!isSpecialty) updated.basicStartDate = ymdLocal();
     setProfile(updated);
     try { setProgram(resolveProgram(updated)); }
     catch(e) { console.warn("buildProgram error on change:", e); }
