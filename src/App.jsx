@@ -4654,16 +4654,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     </div>
   );
 
-  // Temporary on-screen diagnostic strip (debugging "coach won't respond after the
-  // greeting"). Shows the live state, what it last heard, mic level, and the last few
-  // internal log lines so we can see exactly where the loop stalls. Remove once fixed.
-  return (
+  // The coach runs hands-free in the BACKGROUND — no on-screen overlay. The only
+  // visible indicator is the small animated bar inside the Voice Coach card on Home.
+  // (The diagnostic strip below is kept for development; flip to `true` to show it.)
+  const SHOW_VOICE_DEBUG = false;
+  if (SHOW_VOICE_DEBUG) return (
     <div onClick={()=>setDbg([])} style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,22,0.94)", borderTop:"1px solid #2a2a3d", padding:"7px 12px 14px", fontFamily:"ui-monospace,Menlo,monospace", fontSize:10.5, color:"#9898b8", lineHeight:1.55 }}>
       <div style={{ color:"#e8ff00" }}>🎙 {vs}{interim ? " · " + interim.replace(/[🎙\s]+/g," ").trim() : ""} · mic {Math.round(micLevel)}</div>
       {lastUser && <div style={{ color:"#c8c8e0" }}>heard: "{lastUser}"</div>}
       {dbg.slice(-4).map((m,i)=><div key={i}>· {m}</div>)}
     </div>
   );
+  return null;
 }
 
 // ── SESSION ───────────────────────────────────────────────────────────────────
