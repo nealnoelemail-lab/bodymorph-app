@@ -8029,13 +8029,10 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                         ); })}
                       </div>
                     ))}
-                    <div style={{ display:"flex", gap:8, marginTop:6 }}>
-                      <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontWeight:600, fontSize:17 }}>Regenerate</button>
-                      <button onClick={applyGenPlan} style={{ flex:2, background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17 }}>Use This Plan</button>
-                    </div>
+                    <button onClick={applyGenPlan} style={{ width:"100%", background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17, marginTop:6 }}>Use This Plan</button>
                     <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                      <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🖨 Print / PDF</button>
-                      <button onClick={()=>printGroceryList(genPlan, { name: profile?.name, days: 7 })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:15 }}>🛒 Grocery List</button>
+                      <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:17 }}>Regenerate</button>
+                      <button onClick={()=>printMealPlan(genPlan, { name: profile?.name, dietPref, cuisines })} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:17 }}>🖨 Print / PDF</button>
                     </div>
                     <div style={{ color:"#74748a", fontSize:14, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Added to today as your plan — log each meal once you've actually eaten it.</div>
                   </div>
