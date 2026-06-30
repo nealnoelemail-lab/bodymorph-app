@@ -129,10 +129,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     @objc func speak(_ call: CAPPluginCall) {
         let text = (call.getString("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let voice = call.getString("voiceId") ?? "eve"
+        let speed = max(0.7, min(1.5, call.getDouble("speed") ?? 1.0))   // Grok allows 0.7–1.5
         guard !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
         guard !text.isEmpty else { notifyListeners("speakDone", data: [:]); call.resolve(); return }
         DispatchQueue.main.async {
-            self.startTTS(text: text, voice: voice)
+            self.startTTS(text: text, voice: voice, speed: speed)
             call.resolve()
         }
     }
@@ -152,7 +153,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         ttsEngineReady = true
     }
 
-    private func startTTS(text: String, voice: String) {
+    private func startTTS(text: String, voice: String, speed: Double) {
         stopTTSInternal()
         let session = AVAudioSession.sharedInstance()
         try? session.setActive(true)
@@ -167,6 +168,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             URLQueryItem(name: "codec", value: "pcm"),
             URLQueryItem(name: "sample_rate", value: "24000"),
             URLQueryItem(name: "optimize_streaming_latency", value: "2"),
+            URLQueryItem(name: "speed", value: String(format: "%.2f", speed)),
         ]
         guard let url = comps.url else { finishTTS(error: "bad url"); return }
         var req = URLRequest(url: url)

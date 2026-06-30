@@ -152,6 +152,7 @@ const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
 const CARTESIA_DEFAULT_VOICE = "630ed21c-2c5c-41cf-9d82-10a7fd668370"; // "Corey – Supportive Buddy" (warm conversational male; placeholder until per-coach clones)
 const GROK_DEFAULT_VOICE = "btusfwwmofuz"; // the coach's cloned voice (fallback only; the picker normally sets the voice)
+const GROK_TTS_SPEED = 1.2; // coach speaking pace (Grok allows 0.7–1.5); 1.2 ≈ natural conversational
 // LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
 // Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
 const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
@@ -4194,7 +4195,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       };
       const secs = Math.min(45, Math.max(6, (text.split(/\s+/).length / 2.4) + 6)); // safety cap
       capId = setTimeout(() => finish(), secs * 1000);
-      VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE })
+      VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED })
         .catch(e => { log("native speak err: " + (e?.message || e)); if (!done && !closedRef.current) browserSpeak(); else if (!done) finish(); });
     };
 
