@@ -6032,6 +6032,110 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   );
 }
 
+// Routine editor: pick which stretches are in a routine (catalog), AND drag them into
+// the exact order the voice coach should guide them (top → bottom = guidance order).
+function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverrides, onSaveVideo, onClose }) {
+  const routineLabel = (STRETCH_TYPES.find(t=>t.id===routineId)||{}).label || "Routine";
+  const saved = (routines && routines[routineId]) || [];
+  const [seq, setSeq] = useState(saved);            // working order (smooth during a drag)
+  const savedKey = saved.join(",");
+  // Re-sync when membership changes from the catalog below; untouched mid-drag.
+  useEffect(() => { setSeq((routines && routines[routineId]) || []); }, [savedKey, routineId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persist = (arr) => onSaveRoutines({ ...(routines||{}), [routineId]: arr });
+  const togglePose = (poseId) => {
+    const arr = [...saved];
+    const i = arr.indexOf(poseId);
+    if (i >= 0) arr.splice(i,1); else arr.push(poseId);
+    persist(arr);
+  };
+  const removeFromSeq = (poseId) => persist(saved.filter(id => id !== poseId));
+
+  // ── Drag-to-reorder via Pointer Events (works with touch in the iOS WKWebView;
+  // HTML5 drag-and-drop does not). The handle has touch-action:none so dragging it
+  // never scrolls the page; the rest of the row still scrolls normally. ───────────
+  const listRef = useRef(null);
+  const drag = useRef(null);
+  const [dragId, setDragId] = useState(null);
+  const onDown = (e, id) => {
+    e.preventDefault();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    drag.current = { id, pointerId: e.pointerId };
+    setDragId(id);
+  };
+  const onMove = (e) => {
+    const d = drag.current; if (!d || e.pointerId !== d.pointerId) return;
+    e.preventDefault();
+    const rows = Array.from(listRef.current ? listRef.current.querySelectorAll("[data-pose]") : []);
+    const y = e.clientY;
+    let beforeId = null;
+    for (const r of rows) { const rc = r.getBoundingClientRect(); if (y < rc.top + rc.height/2) { beforeId = r.getAttribute("data-pose"); break; } }
+    setSeq(prev => {
+      const arr = [...prev];
+      const from = arr.indexOf(d.id); if (from < 0) return prev;
+      arr.splice(from, 1);
+      let to = beforeId ? arr.indexOf(beforeId) : arr.length;
+      if (to < 0) to = arr.length;
+      arr.splice(to, 0, d.id);
+      return arr.join(",") === prev.join(",") ? prev : arr;
+    });
+  };
+  const onUp = (e) => {
+    if (!drag.current || (e && e.pointerId !== drag.current.pointerId)) return;
+    drag.current = null; setDragId(null);
+    setSeq(cur => { persist(cur); return cur; }); // commit the new order
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
+        <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{routineLabel.toUpperCase()}</div>
+      </div>
+      <div style={{ padding:"8px 20px 0" }}>
+        <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:14 }}>
+          Pick which stretches are in your {routineLabel} below, then <b>drag the &#8801; handle</b> to set the order &mdash; the coach guides you top to bottom.
+        </div>
+
+        {/* YOUR SEQUENCE — ordered + draggable */}
+        {seq.length > 0 && (<>
+          <div style={{ ...S.sectionTitle }}>YOUR SEQUENCE &mdash; DRAG TO REORDER</div>
+          <div ref={listRef} style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:18 }}>
+            {seq.map((id, i) => {
+              const t = POSE_TYPES.find(x=>x.id===id) || STRETCH_TYPES.find(x=>x.id===id) || { id, label:id };
+              const dragging = dragId === id;
+              return (
+                <div key={id} data-pose={id} style={{ display:"flex", alignItems:"center", gap:10, background: dragging?"#23233a":"#1a1a26", border:"1px solid "+(dragging?"#e8ff00":"#2a2a3d"), borderRadius:12, padding:"10px 12px", boxShadow: dragging?"0 6px 18px rgba(0,0,0,0.5)":"none", touchAction:"pan-y" }}>
+                  <button onPointerDown={(e)=>onDown(e,id)} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} title="Drag to reorder" style={{ flexShrink:0, background:"transparent", border:"none", color:"#9898b8", cursor:"grab", fontSize:22, lineHeight:1, padding:"4px 6px", touchAction:"none" }}>&#8801;</button>
+                  <span style={{ flexShrink:0, width:22, height:22, borderRadius:"50%", background:"#0e0e16", color:"#e8ff00", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</span>
+                  <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex", flexShrink:0 }}><YogaIcon id={id} size={26} /></span>
+                  <span style={{ flex:1, fontSize:15, color:"#f0f0f8" }}>{t.label}</span>
+                  <button onClick={()=>removeFromSeq(id)} title="Remove" style={{ flexShrink:0, background:"transparent", border:"none", color:"#ff7070", cursor:"pointer", fontSize:20, padding:"2px 8px" }}>&times;</button>
+                </div>
+              );
+            })}
+          </div>
+        </>)}
+
+        {/* CATALOG — add / remove + per-pose video config */}
+        <div style={{ ...S.sectionTitle }}>ALL STRETCHES &mdash; TAP TO ADD / REMOVE</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {POSE_TYPES.map(t => (
+            <StretchCard key={t.id} t={t} on={saved.includes(t.id)} toggle={togglePose} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
+          ))}
+        </div>
+        <div style={{ color:"#9898b8", fontSize:12, textAlign:"center", marginTop:14 }}>{saved.length} stretch{saved.length===1?"":"es"} in this routine</div>
+        <div style={{ display:"flex", gap:10, marginTop:16 }}>
+          <button onClick={()=>onSaveRoutines({ ...(routines||{}), [routineId]: [...(DEFAULT_ROUTINES[routineId]||[])] })} style={{ flex:1, background:"transparent", color:"#ff7070", border:"2px solid #ff7070", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>RESET</button>
+          <button onClick={onClose} style={{ flex:2, background:"#3d8eff", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch }) {
   const startGuided = (routineId, label) => {
     const ids = (routines && routines[routineId]) || DEFAULT_ROUTINES[routineId] || [];
@@ -6051,44 +6155,10 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
     onSave(updated);
   };
 
-  // Routine config screen
-  if (editRoutine) {
-    const routineLabel = (STRETCH_TYPES.find(t=>t.id===editRoutine)||{}).label || "Routine";
-    const contents = (routines && routines[editRoutine]) || [];
-    const togglePose = (poseId) => {
-      const updated = { ...(routines||{}) };
-      const arr = [...((updated[editRoutine]) || [])];
-      const i = arr.indexOf(poseId);
-      if (i >= 0) arr.splice(i,1); else arr.push(poseId);
-      updated[editRoutine] = arr;
-      onSaveRoutines(updated);
-    };
-    return (
-      <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
-        <style>{GLOBAL_CSS}</style>
-        <WatermarkPlain />
-        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <button onClick={()=>setEditRoutine(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{routineLabel.toUpperCase()}</div>
-        </div>
-        <div style={{ padding:"8px 20px 0" }}>
-          <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:14 }}>
-            Choose which stretches are part of your {routineLabel}. This set is reused whenever you add this routine to a day.
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {POSE_TYPES.map(t => (
-              <StretchCard key={t.id} t={t} on={contents.includes(t.id)} toggle={togglePose} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
-            ))}
-          </div>
-          <div style={{ color:"#9898b8", fontSize:12, textAlign:"center", marginTop:14 }}>{contents.length} stretch{contents.length===1?"":"es"} in this routine</div>
-          <div style={{ display:"flex", gap:10, marginTop:16 }}>
-            <button onClick={()=>{ onSaveRoutines({ ...(routines||{}), [editRoutine]: [...(DEFAULT_ROUTINES[editRoutine]||[])] }); }} style={{ flex:1, background:"transparent", color:"#ff7070", border:"2px solid #ff7070", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>RESET</button>
-            <button onClick={()=>setEditRoutine(null)} style={{ flex:2, background:"#3d8eff", color:"#000", border:"none", borderRadius:14, padding:"15px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Routine config + sequence editor
+  if (editRoutine) return (
+    <RoutineEditor routineId={editRoutine} routines={routines} onSaveRoutines={onSaveRoutines} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} onClose={()=>setEditRoutine(null)} />
+  );
 
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
