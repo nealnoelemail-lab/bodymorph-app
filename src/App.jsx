@@ -3,6 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
+import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, USE_PROXY } from "./aiproxy";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -148,7 +149,7 @@ const CARTESIA_KEY = import.meta.env.VITE_CARTESIA_KEY;
 const XAI_KEY = import.meta.env.VITE_XAI_KEY;
 const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
 const USE_CARTESIA = VOICE_PROVIDER === "cartesia" && !!CARTESIA_KEY;
-const USE_GROK = VOICE_PROVIDER === "grok" && !!XAI_KEY;
+const USE_GROK = VOICE_PROVIDER === "grok" && (USE_PROXY || !!XAI_KEY); // proxy mode holds the key server-side
 const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
@@ -1934,7 +1935,7 @@ function orderedTrainingDays(profile) {
 // full program object (same shape buildProgram returns) merged with locally
 // computed nutrition + stretching. Throws on any failure so callers fall back.
 async function generateProgram(profile) {
-  if (!ANTHROPIC_KEY) throw new Error("no-key");
+  if (!USE_PROXY && !ANTHROPIC_KEY) throw new Error("no-key");
   const dayNames = orderedTrainingDays(profile);
   const exCount = exercisesForTime(profile.sessionTime);
   const { stretch } = pickFocusGroups(profile);
@@ -1983,11 +1984,7 @@ ${milestoneRule}
 Respond with ONLY valid minified JSON, no markdown, no commentary, in exactly this shape:
 {"overview":"...","weeklySchedule":[{"day":"Monday","type":"Push","focus":"Chest, Shoulders, Triceps","workout":[{"exercise":"...","sets":"4","reps":"8-12","rest":"90s","tempo":"3-1-2","coachCue":"..."}]}],"progressMilestones":[{"week":1,"goal":"..."},{"week":${quick?4:totalWeeks},"goal":"..."}]}`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type":"application/json", "x-api-key":ANTHROPIC_KEY, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-    body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:4000, messages:[{ role:"user", content:prompt }] }),
-  });
+  const res = await anthropicFetch({ model:"claude-sonnet-4-6", max_tokens:4000, messages:[{ role:"user", content:prompt }] });
   if (!res.ok) throw new Error("api-" + res.status);
   const data = await res.json();
   let text = (data.content && data.content[0] && data.content[0].text) || "";
@@ -3308,11 +3305,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
     const sample = `Hey ${profile.name}, it's Coach. Let's have a great session.`;
     let req;
     if (USE_GROK) {
-      req = fetch("https://api.x.ai/v1/tts", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${XAI_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sample, voice_id: id, language: "en" }),
-      });
+      req = grokTtsFetch({ text: sample, voice_id: id, language: "en" });
     } else if (ELEVEN_KEY) {
       req = fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}`, {
         method: "POST",
@@ -3689,20 +3682,11 @@ async function fetchFormCues(videoId, exerciseName) {
 
   // 3. Ask Claude to extract the 3 most important form cues
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 120,
-        system: "You extract the 3 most important form cues from fitness video content. Return ONLY 3 short, specific, actionable cues as a single paragraph. No lists, no headers, no intro. Write as if a coach is speaking them aloud.",
-        messages: [{ role: "user", content: `Exercise: ${exerciseName}\n\n${context}\n\nExtract the 3 most important form cues.` }],
-      }),
+    const res = await anthropicFetch({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 120,
+      system: "You extract the 3 most important form cues from fitness video content. Return ONLY 3 short, specific, actionable cues as a single paragraph. No lists, no headers, no intro. Write as if a coach is speaking them aloud.",
+      messages: [{ role: "user", content: `Exercise: ${exerciseName}\n\n${context}\n\nExtract the 3 most important form cues.` }],
     });
     const data = await res.json();
     const cues = data.content?.[0]?.text?.trim() || "";
@@ -3723,15 +3707,11 @@ async function summarizeCoachDay(messages, name) {
     .join("\n").slice(0, 4000);
   if (convo.trim().length < 20) return "";
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 110,
-        system: "Summarize this day's fitness-coaching conversation into 1-2 short sentences capturing ONLY facts worth remembering for future sessions: workouts/PRs, how they felt, soreness or pain mentioned, nutrition/hydration notes, goals, and struggles. Be specific and concise. Return only the summary, no preamble.",
-        messages: [{ role: "user", content: convo }],
-      }),
+    const res = await anthropicFetch({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 110,
+      system: "Summarize this day's fitness-coaching conversation into 1-2 short sentences capturing ONLY facts worth remembering for future sessions: workouts/PRs, how they felt, soreness or pain mentioned, nutrition/hydration notes, goals, and struggles. Be specific and concise. Return only the summary, no preamble.",
+      messages: [{ role: "user", content: convo }],
     });
     const data = await res.json();
     return data.content?.[0]?.text?.trim() || "";
@@ -4253,12 +4233,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // ── xAI Grok Sonic-class TTS (single-vendor, ~10x cheaper) — same playback path ──
     const grokSpeak = async () => {
       try {
-        const res = await fetch("https://api.x.ai/v1/tts", {
-          method: "POST",
-          signal: AbortSignal.timeout(12000),
-          headers: { "Authorization": `Bearer ${XAI_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice_id: voiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }),
-        });
+        const res = await grokTtsFetch({ text, voice_id: voiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }, { signal: AbortSignal.timeout(12000) });
         if (!res.ok || closedRef.current || done) { if (!res.ok) log("Grok HTTP " + res.status); throw new Error("tts " + res.status); }
         const blob = await res.blob();
         if (closedRef.current || done) return;
@@ -4387,13 +4362,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       else { formData.append("model", USE_CARTESIA ? CARTESIA_STT_MODEL : "gpt-4o-mini-transcribe"); formData.append("language", "en"); }
       log("sending to transcribe…");
       try {
-        const sttUrl = USE_GROK ? "https://api.x.ai/v1/stt"
-                     : USE_CARTESIA ? "https://api.cartesia.ai/stt"
-                     : "https://api.openai.com/v1/audio/transcriptions";
-        const sttHeaders = USE_GROK ? { "Authorization": `Bearer ${XAI_KEY}` }
-                         : USE_CARTESIA ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION }
-                         : { "Authorization": `Bearer ${OPENAI_KEY}` };
-        const res = await fetch(sttUrl, { signal: AbortSignal.timeout(15000), method: "POST", headers: sttHeaders, body: formData });
+        let res;
+        if (USE_GROK) {
+          res = await grokSttFetch(formData, { signal: AbortSignal.timeout(15000) });
+        } else {
+          const sttUrl = USE_CARTESIA ? "https://api.cartesia.ai/stt" : "https://api.openai.com/v1/audio/transcriptions";
+          const sttHeaders = USE_CARTESIA ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION } : { "Authorization": `Bearer ${OPENAI_KEY}` };
+          res = await fetch(sttUrl, { signal: AbortSignal.timeout(15000), method: "POST", headers: sttHeaders, body: formData });
+        }
         if (!res.ok) { log("STT HTTP " + res.status); }
         const data = await res.json();
         const text = (data.text || "").trim();
@@ -4496,12 +4472,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           const data = await res.json();
           aiText = data.choices?.[0]?.message?.content || "Keep going — you've got this.";
         } else {
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
-            signal: AbortSignal.timeout(15000),
-            method: "POST",
-            headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }),
-          });
+          const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: AbortSignal.timeout(15000) });
           if (closedRef.current || turnRef.current !== myTurn) return;
           const data = await res.json();
           aiText = data.content?.[0]?.text || "Keep going — you've got this.";
@@ -4603,12 +4574,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (lastB >= 0) { const toSpeak = chunk.slice(0, lastB + 1); spokenUpto += toSpeak.length; enqueue(toSpeak); }
       };
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        signal: ac.signal,
-        method: "POST",
-        headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true }),
-      });
+      const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true }, { signal: ac.signal });
       if (closedRef.current || turnRef.current !== myTurn) { endTurn(false); return; }
 
       const reader = res.body.getReader(); const dec = new TextDecoder(); let sbuf = "";
@@ -7144,11 +7110,7 @@ function MacroAI({ slotLabel, onResult }) {
           ]
         }]
       };
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify(body)
-      });
+      const res = await anthropicFetch(body);
       if (!res.ok) { const errText = await res.text(); throw new Error("API " + res.status + ": " + errText.slice(0,100)); }
       const data = await res.json();
       if (data.error) throw new Error(data.error.message || "API error");
@@ -7240,11 +7202,7 @@ async function lookupFoodMacros(name) {
           ". Reply ONLY with a JSON object (no markdown, no words) using exactly these keys: {cal: 000, protein: 00, carbs: 00, fats: 00}. Numbers only, grams for macros."
       }]
     };
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify(body)
-    });
+    const res = await anthropicFetch(body);
     if (!res.ok) return null;
     const data = await res.json();
     const text = (data.content && data.content[0] && data.content[0].text) || "";
@@ -7352,11 +7310,7 @@ Build breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH
 Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
 Reply ONLY with JSON, no markdown, no commentary:
 {"meals":[{"slot":"breakfast","name":"Dish name","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","name":"Dish name","items":[...]},{"slot":"dinner","name":"Dish name","items":[...]},{"slot":"snacks","name":"Dish name","items":[...]}]}`;
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
-  });
+  const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 1500, messages: [{ role: "user", content: prompt }] });
   if (!res.ok) throw new Error("AI error " + res.status);
   const data = await res.json();
   const txt = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
@@ -7417,7 +7371,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
         { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
         { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
       ]}]};
-      const res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{ "Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" }, body:JSON.stringify(body) });
+      const res = await anthropicFetch(body);
       if(!res.ok) throw new Error("API error");
       const data=await res.json();
       const text=(data.content&&data.content[0]&&data.content[0].text)||"";
@@ -7903,10 +7857,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       const cur = genPlan.meals[mi].items[ii];
       const av = combinedAllergies();
       const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${av?` Avoid anything containing: ${av}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{ "Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" },
-        body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:120, messages:[{role:"user", content:prompt}] }),
-      });
+      const res = await anthropicFetch({ model:"claude-haiku-4-5-20251001", max_tokens:120, messages:[{role:"user", content:prompt}] });
       if (!res.ok) throw new Error("ai");
       const alt = JSON.parse(((await res.json()).content?.[0]?.text||"").replace(/```json|```/g,"").trim());
       if (!alt || !alt.food) throw new Error("parse");
@@ -9847,7 +9798,7 @@ export default function BodyMorph() {
   // profile (then persist + sync). Guarded by signature so the same structural
   // inputs aren't generated twice. On failure we silently keep the template.
   const generateAndCacheProgram = useCallback(async (prof) => {
-    if (!prof || !ANTHROPIC_KEY || !isAIProgramEligible(prof)) return;
+    if (!prof || (!USE_PROXY && !ANTHROPIC_KEY) || !isAIProgramEligible(prof)) return;
     const sig = programSignature(prof);
     if (aiGenSigRef.current === sig) return;     // already generating/generated this signature
     aiGenSigRef.current = sig;
@@ -9895,7 +9846,7 @@ export default function BodyMorph() {
       if (userRef.current) pushProfileDebounced(userRef.current.id, profile);
       // Auto-personalize: eligible client + no cached AI program for these inputs ->
       // generate in the background and swap it in live when ready.
-      if (ANTHROPIC_KEY && isAIProgramEligible(profile) &&
+      if ((USE_PROXY || ANTHROPIC_KEY) && isAIProgramEligible(profile) &&
           profile.aiProgramSig !== programSignature(profile)) {
         generateAndCacheProgram(profile);
       }
