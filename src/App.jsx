@@ -4772,7 +4772,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 // ── SESSION ───────────────────────────────────────────────────────────────────
 // Shows the day's exercise summary + a date picker + START button.
 // After START, reveals set-by-set logging for each exercise.
-function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo }) {
+function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo, coachOn, onToggleCoach }) {
   const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
   const [dateStr, setDateStr] = useState(ymdLocal());
@@ -4889,7 +4889,15 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>{day.day}</div>
           <div style={{ color:sessionAccent, fontSize:12 }}>{day.type}</div>
         </div>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {onToggleCoach && (
+            <button onClick={onToggleCoach} title="Voice coach for this workout"
+              style={{ display:"flex", alignItems:"center", gap:6, background: coachOn ? sessionAccent : "transparent", border:"1px solid "+sessionAccent, borderRadius:8, color: coachOn ? "#000" : sessionAccent, padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontWeight:700, fontFamily:"'DM Sans'" }}>
+              <span style={{ fontSize:13 }}>&#127897;</span>{coachOn ? "Coaching" : "Coach"}
+            </button>
+          )}
+          <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 11px", cursor:"pointer", fontSize:12 }}>Exit</button>
+        </div>
       </div>
 
       <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
@@ -10408,7 +10416,8 @@ export default function BodyMorph() {
       <Session profile={profile} day={(program.weeklySchedule||[])[dayIdx]||{}} logs={logs}
         cardioPlan={cardioPlan} stretchPlan={stretchPlan} stretchRoutines={stretchRoutines}
         onLogExercise={logExercise} onCompleteWorkout={completeWorkout} onSaveExtras={addCardioSessionFromDay}
-        onBack={()=>setPhase("home")} videoOverrides={videoOverrides} onSaveVideo={saveVideo} />
+        onBack={()=>setPhase("home")} videoOverrides={videoOverrides} onSaveVideo={saveVideo}
+        coachOn={homeVoice} onToggleCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
 
