@@ -7506,7 +7506,7 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   );
 }
 
-function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onSaveMealPlan, onBack }) {
+function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onSaveMealPlan, mealPlan, onBack }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
   const dietAwareMacros = macrosFor(profile || {}, dietPref);
@@ -7917,7 +7917,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>FOOD LOG</div>
-          <button onClick={()=>setSetupOpen(true)} style={{ background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:11, color:"#000", padding:"11px 18px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Generate Meal Plan</button>
+          <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
         </div>
 
         {genOpen && (
@@ -8206,6 +8206,12 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
               </div>
             );
           })}
+        </div>
+
+        {/* Meal-plan actions — generate a fresh plan or edit the saved one */}
+        <div style={{ display:"flex", gap:10, marginBottom:24 }}>
+          <button onClick={()=>setSetupOpen(true)} style={{ flex:1, background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.5)", borderRadius:12, color:"#e8ff00", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Generate Meal Plan</button>
+          <button onClick={()=>{ if (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length) { setGenPlan({ meals: mealPlan.meals, totals: mealPlan.totals||{}, target: mealPlan.target || { cal:calGoal, protein:proteinGoal, carbs:carbsGoal, fats:fatsGoal } }); setGenOpen(true); } else { setSetupOpen(true); } }} style={{ flex:1, background:"rgba(61,220,132,0.12)", border:"1px solid rgba(61,220,132,0.5)", borderRadius:12, color:"#3ddc84", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Edit Meal Plan</button>
         </div>
 
       </div>
@@ -10198,7 +10204,7 @@ export default function BodyMorph() {
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
-  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} onBack={()=>setPhase("home")} /></>);
+  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
