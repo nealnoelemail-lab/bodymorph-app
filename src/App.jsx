@@ -7062,17 +7062,24 @@ function MacroAI({ slotLabel, onResult }) {
   const reset = () => { setImgSrc(null); setScanning(false); setResult(null); setError(null); };
 
   const analyze = async (file) => {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(file);
-    });
+    // Compress the multi-MB camera photo to a ~1024px JPEG BEFORE it touches React
+    // state, the DOM, or the upload. A raw iOS photo is 3–16 MB of base64; decoding +
+    // rendering that synchronously is what made the camera and Use/Retake lag ~8s.
+    let dataUrl;
+    try { dataUrl = await compressImage(file, 1024, 0.7); }
+    catch {
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+    }
     setImgSrc(dataUrl);
     setScanning(true); setError(null); setResult(null);
     try {
       const base64 = dataUrl.split(",")[1];
-      const mediaType = file.type || "image/jpeg";
+      const mediaType = dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : (file.type || "image/jpeg");
       const body = {
         model: "claude-sonnet-4-6",
         max_tokens: 300,
@@ -7346,10 +7353,13 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const removeLocal = (i) => setLocalItems(prev => prev.filter((_,idx)=>idx!==i).length ? prev.filter((_,idx)=>idx!==i) : []);
 
   const handlePhoto = async (file) => {
-    const dataUrl = await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=e=>resolve(e.target.result); r.onerror=()=>reject(); r.readAsDataURL(file); });
+    // Compress to ~1024px JPEG first (raw iOS photos are multi-MB and freeze the UI).
+    let dataUrl;
+    try { dataUrl = await compressImage(file, 1024, 0.7); }
+    catch { dataUrl = await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=e=>resolve(e.target.result); r.onerror=()=>reject(); r.readAsDataURL(file); }); }
     setImgSrc(dataUrl); setScanning(true); setScanResult(null); setScanError(null);
     try {
-      const base64=dataUrl.split(",")[1]; const mediaType=file.type||"image/jpeg";
+      const base64=dataUrl.split(",")[1]; const mediaType=dataUrl.startsWith("data:image/jpeg")?"image/jpeg":(file.type||"image/jpeg");
       const body={ model:"claude-sonnet-4-6", max_tokens:300, messages:[{ role:"user", content:[
         { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
         { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
