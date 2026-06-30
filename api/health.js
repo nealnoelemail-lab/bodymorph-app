@@ -8,14 +8,17 @@ export default function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   return res.status(200).json({
     ok: true,
-    deploy: "launch-prep proxy v2",
+    deploy: "launch-prep proxy v3",
     env: {
-      supabaseUrl: !!process.env.SUPABASE_URL,
-      supabaseAnonKey: !!process.env.SUPABASE_ANON_KEY,
+      // Supabase: client + server both use the VITE_ ones (safe-to-be-public).
+      supabase: !!((process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) && (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY)),
+      // Secrets: server-only, NO prefix.
       anthropicKey: !!process.env.ANTHROPIC_KEY,
       xaiKey: !!process.env.XAI_KEY,
     },
     authReady: authConfigured(),
+    // Relevant var NAMES present on this deployment (names only, never values).
+    seen: Object.keys(process.env).filter(k => /SUPA|ANTHROP|XAI/i.test(k)).sort(),
     time: new Date().toISOString(),
   });
 }

@@ -6,17 +6,22 @@
 // on import (which is what made every endpoint 500 on the preview).
 import { createClient } from "@supabase/supabase-js";
 
+// Accept the non-prefixed server vars OR the VITE_-prefixed ones already in the project
+// (the prefix only matters for the client BUILD; the server can read either).
+const SUPA_URL = () => process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPA_ANON = () => process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
 let _sb = null;
 function sb() {
   if (_sb) return _sb;
-  const url = process.env.SUPABASE_URL, anon = process.env.SUPABASE_ANON_KEY;
+  const url = SUPA_URL(), anon = SUPA_ANON();
   if (!url || !anon) return null;
   _sb = createClient(url, anon, { auth: { persistSession: false } });
   return _sb;
 }
 
 // True if the Supabase env needed to verify tokens is present.
-export const authConfigured = () => !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+export const authConfigured = () => !!(SUPA_URL() && SUPA_ANON());
 
 // Verify the caller's Supabase access token (Authorization: Bearer …). Returns the
 // user object, or null if the token is missing/invalid (or Supabase isn't configured).
