@@ -7656,6 +7656,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const n = dietAwareMacros;
   const [diet, setDiet] = useState(null);
   const [sel, setSel] = useState(new Date().getDay());
+  const [confirmClear, setConfirmClear] = useState(false); // "Clear Log" confirmation dialog
   const [editSlot, setEditSlot] = useState(null);  // which meal slot is being edited
   const [confirmDelete, setConfirmDelete] = useState(null); // slot id pending delete confirmation
   const [foodLogger, setFoodLogger] = useState(null);
@@ -7706,6 +7707,14 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   })();
 
   const dayLog = (foodLog && foodLog[dateKey]) || {};
+  // Wipe everything logged for the selected day (after the "Are you sure?" confirm).
+  const clearDay = () => {
+    const updated = { ...(foodLog||{}) };
+    delete updated[dateKey];
+    onSaveFoodLog(updated);
+    setConfirmClear(false);
+    setEditSlot(null);
+  };
   const setSlot = (slot, field, val) => {
     const updated = { ...(foodLog||{}) };
     updated[dateKey] = { ...(updated[dateKey]||{}), [slot]: { ...(updated[dateKey]?.[slot]||{}), [field]: val } };
@@ -8049,8 +8058,21 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>FOOD LOG</div>
-          <div style={{ color:"#9898b8", fontSize:12 }}>{DAY_NAMES[sel]}</div>
+          <button onClick={()=>setConfirmClear(true)} style={{ background:"transparent", border:"1px solid rgba(255,61,61,0.4)", borderRadius:8, color:"#ff7070", padding:"6px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600, fontFamily:"'DM Sans'" }}>Clear Log</button>
         </div>
+
+        {confirmClear && (
+          <div onClick={()=>setConfirmClear(false)} style={{ position:"fixed", inset:0, zIndex:400, background:"rgba(0,0,0,0.72)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:16, padding:"22px 20px", maxWidth:340, width:"100%", textAlign:"center", boxSizing:"border-box" }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1, marginBottom:8 }}>CLEAR FOOD LOG?</div>
+              <div style={{ color:"#c8c8e0", fontSize:14, lineHeight:1.55, marginBottom:18 }}>This erases everything you logged for {DAY_NAMES[sel]}. This can't be undone.</div>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={()=>setConfirmClear(false)} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"13px", cursor:"pointer", fontSize:15, fontWeight:600, fontFamily:"'DM Sans'" }}>Cancel</button>
+                <button onClick={clearDay} style={{ flex:1, background:"#ff3d3d", border:"none", borderRadius:12, color:"#fff", padding:"13px", cursor:"pointer", fontSize:15, fontWeight:700, fontFamily:"'DM Sans'" }}>Clear Log</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {genOpen && (
           <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", overflowX:"hidden", boxSizing:"border-box", padding:"calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 40px)" }}>
