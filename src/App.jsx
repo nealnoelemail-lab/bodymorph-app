@@ -6132,7 +6132,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
-                <button onClick={()=>startGuided(t.id, t.label)} title="Guided voice session" style={{ flexShrink:0, background:"transparent", border:"1px solid #3ddc84", borderRadius:10, color:"#3ddc84", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9654; Guide</button>
+                <button onClick={()=>startGuided(t.id, t.label)} title="Guided voice session" style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9654; Guide</button>
                 <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#3d8eff", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
             );
