@@ -55,12 +55,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // speak at the same time, route to speaker/Bluetooth, and — paired with the
     // "audio" UIBackgroundMode — keep the mic alive when the screen dims/locks.
     private func configureAudioSession() {
+        // Pre-set a record+playback category that DUCKS (lowers) other audio rather than
+        // stopping it. CRUCIAL: do NOT activate the session here — activating at launch
+        // seized audio and killed the user's music the instant they opened the app. The
+        // voice coach (VoiceCapture) activates the session only when it actually starts,
+        // and releases it (notifyOthersOnDeactivation) on stop, so music un-ducks/resumes.
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord,
                                     mode: .spokenAudio,
-                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-            try session.setActive(true, options: [])
+                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
         } catch {
             print("[BodyMorph] audio session error: \(error)")
         }

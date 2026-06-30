@@ -71,8 +71,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         // throws, so we only fail when the mic permission is actually denied.
         func setupSessionAndResolve() {
             do {
+                // .duckOthers lowers the user's music/podcast (like a GPS voice) instead
+                // of stopping it while the coach talks and listens.
                 try session.setCategory(.playAndRecord, mode: .default,
-                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
                 try session.setActive(true)
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
             self.applyOutputRoute()
@@ -121,6 +123,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             self.stopTTSInternal()
             self.stopKeepAlive()
             UIApplication.shared.isIdleTimerDisabled = false   // restore normal auto-lock
+            // Release the audio session so the user's music/podcast UN-ducks and resumes
+            // from where it left off. Without this, their music stayed silent forever.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             call.resolve()
         }
     }
