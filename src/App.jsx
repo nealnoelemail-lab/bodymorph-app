@@ -4780,7 +4780,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 // ── SESSION ───────────────────────────────────────────────────────────────────
 // Shows the day's exercise summary + a date picker + START button.
 // After START, reveals set-by-set logging for each exercise.
-function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo, coachOn, onToggleCoach }) {
+function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo, coachOn, onToggleCoach, liveSets }) {
   const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
   const [dateStr, setDateStr] = useState(ymdLocal());
@@ -4910,7 +4910,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
 
       <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
         {workout.map((ex,i) => (
-          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
+          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} voiceSets={(liveSets && liveSets[ex.exercise]) || null} />
         ))}
 
         {/* Cardio for the day */}
@@ -4965,7 +4965,7 @@ function ExtraRow({ icon, iconColor, label, state, onDone, onMins }) {
 }
 
 // One exercise with N set rows. Auto-fills from last session; user adjusts.
-function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo }) {
+function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo, voiceSets }) {
   const loggerAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   const numSets = Math.max(1, parseInt(ex.sets) || 3);
   const last = history.length ? history[history.length-1] : null;
@@ -4981,6 +4981,41 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
   const [rows, setRows] = useState(init);
   const [savedTick, setSavedTick] = useState(false);
   const firstRun = useRef(true);
+  const consumedVoiceRef = useRef(0); // how many coach-logged sets we've already shown
+  const skipSaveRef = useRef(false);  // the coach already saved its set — don't double-save its merge
+
+  // The voice coach logs sets too. Mirror its new sets into the visible rows so the
+  // client SEES each set appear the instant the coach logs it. The coach already wrote
+  // these to history, so we suppress this component's auto-save for the merge.
+  const voiceLen = (voiceSets || []).length;
+  useEffect(() => {
+    const vs = voiceSets || [];
+    if (vs.length > consumedVoiceRef.current) {
+      const fresh = vs.slice(consumedVoiceRef.current);
+      consumedVoiceRef.current = vs.length;
+      skipSaveRef.current = true;
+      setRows(prev => {
+        const next = [...prev];
+        for (const s of fresh) {
+          const val = { weight: String(s.weight||""), reps: String(s.reps||"") };
+          const emptyIdx = next.findIndex(r => !r.weight && !r.reps);
+          if (emptyIdx >= 0) next[emptyIdx] = val; else next.push(val);
+        }
+        return next;
+      });
+      setSavedTick(true); setTimeout(()=>setSavedTick(false), 1400);
+    } else if (vs.length < consumedVoiceRef.current) {
+      consumedVoiceRef.current = vs.length;
+      skipSaveRef.current = true;
+      setRows(prev => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].weight || next[i].reps) { if (next.length > 1) next.splice(i,1); else next[i] = { weight:"", reps:"" }; break; }
+        }
+        return next;
+      });
+    }
+  }, [voiceLen]); // eslint-disable-line react-hooks/exhaustive-deps
   const pr = history.reduce((mx,h) => {
     const w = h.sets ? Math.max(...h.sets.map(s=>parseFloat(s.weight)||0)) : (parseFloat(h.weight)||0);
     return Math.max(mx, w);
@@ -4997,6 +5032,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
   // Auto-save: whenever rows change (after first render), debounce-save to history.
   useEffect(() => {
     if (firstRun.current) { firstRun.current = false; return; }
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; } // coach-merged set; already in history
     const filled = rows.filter(r => r.weight || r.reps);
     if (!filled.length) return;
     const t = setTimeout(() => {
@@ -9627,6 +9663,7 @@ export default function BodyMorph() {
   const aiGenSigRef = useRef(null);                          // guards against duplicate auto-gen
   const [editProfile, setEditProfile] = useState(null);      // non-null = wizard re-opened to edit an existing profile
   const [dayIdx, setDayIdx]   = useState(0);
+  const [liveSets, setLiveSets] = useState({}); // sets the voice coach logged THIS session, keyed by exercise name — so the on-screen logger fills in live
   const [logs, setLogs]       = useState({});
   const [rewards, setRewards] = useState(emptyMedalState());
   const [bodyEntries, setBodyEntries] = useState([]);
@@ -10263,6 +10300,8 @@ export default function BodyMorph() {
       sets: [{ weight: String(weight), reps: String(reps) }],
       weight: String(weight), reps: String(reps),
     });
+    // Mirror into liveSets so the on-screen logger fills the set in immediately.
+    setLiveSets(prev => ({ ...prev, [exercise.exercise]: [ ...(prev[exercise.exercise]||[]), { weight: String(weight), reps: String(reps) } ] }));
   };
   // Voice companion: undo the most recently logged set of an exercise (today's last entry).
   const handleVoiceSetRemove = ({ ex }) => {
@@ -10279,6 +10318,7 @@ export default function BodyMorph() {
       const next = [...arr]; next.splice(i, 1);
       return { ...prev, [exercise.exercise]: next };
     });
+    setLiveSets(prev => { const a = [ ...(prev[exercise.exercise]||[]) ]; a.pop(); return { ...prev, [exercise.exercise]: a }; });
   };
   // Memoized: this object loops over the food log, supplements, peptides, meal plan
   // and builds the to-do list. Rebuilding it on every render (the coach pushes voice
@@ -10395,7 +10435,7 @@ export default function BodyMorph() {
   if (phase === "home") return (
     <><Toast />
       <Home profile={profile} program={program} rewards={rewards}
-        onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }}
+        onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
         onEditTime={()=>setPhase("edittime")}
@@ -10413,7 +10453,7 @@ export default function BodyMorph() {
 
   if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} /></>);
 
-  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
+  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
 
   if (phase === "editdays") return (<><Toast /><EditDays profile={profile} onSave={saveTrainingDays} onBack={()=>setPhase("home")} /></>);
   if (phase === "edittime") return (<><Toast /><EditTime profile={profile} onSave={saveSessionTime} onBack={()=>setPhase("home")} /></>);
@@ -10425,6 +10465,7 @@ export default function BodyMorph() {
         cardioPlan={cardioPlan} stretchPlan={stretchPlan} stretchRoutines={stretchRoutines}
         onLogExercise={logExercise} onCompleteWorkout={completeWorkout} onSaveExtras={addCardioSessionFromDay}
         onBack={()=>setPhase("home")} videoOverrides={videoOverrides} onSaveVideo={saveVideo}
+        liveSets={liveSets}
         coachOn={homeVoice} onToggleCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
