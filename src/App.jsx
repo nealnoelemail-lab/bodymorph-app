@@ -4052,7 +4052,15 @@ TODAY: ${day.day} — ${day.type}${day.focus ? " | Focus: " + day.focus : ""}
 EXERCISES:
 ${exLines}
 
-LOGGING SETS — When ${profile.name} tells you they completed a set (stating weight and reps), append this tag on a new line at the very end of your response, after your coaching words:
+COUNTING REPS — work each set LIVE with them (this is the heart of great coaching):
+• At the START of each exercise, confirm the working weight they're using, so you can pair it with their reps.
+• Encourage ${profile.name} to COUNT THEIR REPS OUT LOUD as they perform them — tell them it works best with an earbud/headset in, and that you'll count right along with them ("count 'em out for me, I've got you"). Track the count as you hear it.
+• The MOMENT the set ends — they stop counting, or say "done", "that's it", "last one" — LOG it right then with the weight and the rep count you heard. Then call out the next set.
+• If they'd rather NOT count out loud, that's fine: tell them to just say "done with that set" when they finish — then YOU ask "how many reps did you get?", and log what they tell you.
+
+LOG EACH SET THE INSTANT IT'S DONE — one finished set = one LOG tag immediately, in that very turn. NEVER hold logs and dump them at the end of the exercise or the workout. ${profile.name} wants to watch each set get logged as they go — it keeps them motivated.
+
+LOGGING SETS — When ${profile.name} finishes a set (whether you counted their out-loud reps or they told you the number), append this tag on a new line at the very end of your response, after your coaching words:
 |||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
 
