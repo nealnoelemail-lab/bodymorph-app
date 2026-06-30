@@ -1,7 +1,10 @@
 html, body, #root {
   margin: 0;
   padding: 0;
+}
+html, body {
   height: 100%;
+  overflow-x: hidden;   /* never let a screen bleed off the side */
 }
 
 /* Dark page background so desktop gutters around the centered app stay dark.
@@ -19,10 +22,20 @@ html {
   max-width: 480px;
   margin: 0 auto;
   box-sizing: border-box;
+  overflow-x: hidden;
   /* Push the whole app below the iOS status bar / Dynamic Island and above the
      home indicator (native shell). Zero on devices/desktop without insets. */
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* CRITICAL for consistent page positioning: screens are written as min-height:100vh,
+   but #root already eats the safe-area insets — so 100vh overflows the viewport and
+   pages "scroll-jump" / sit at different heights as you navigate. Cap the ACTIVE
+   screen (the last direct child; Toast, if shown, renders before it) to the real
+   usable height so every page settles in exactly the same place. */
+#root > div:last-child {
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
 }
 
 /* The coach business dashboard is a desktop layout — lift the phone-width cap

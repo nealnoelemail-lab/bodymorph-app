@@ -7919,7 +7919,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         </div>
 
         {genOpen && (
-          <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", padding:"20px 16px 40px" }}>
+          <div style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(8,8,12,0.96)", overflowY:"auto", padding:"calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 40px)" }}>
             <div style={{ maxWidth:440, margin:"0 auto" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#e8ff00" }}>✨ AI MEAL PLAN</div>
@@ -8085,7 +8085,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                 onSaveFoodLog(updated);
               };
               return (
-                <div key="snacks" style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(snacksLogged?"#3ddc84":snackHasData?"#e8ff00":"#2a2a3d") }}>
+                <div key="snacks" style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(snacksLogged?"rgba(61,220,132,0.45)":snackHasData?"rgba(232,255,0,0.4)":"#2a2a3d") }}>
                   {/* ROW 1 — Snack name + descriptions */}
                   <div style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px 10px" }}>
                     <span style={{ fontSize:22, flexShrink:0 }}>{slot.emoji}</span>
@@ -8171,7 +8171,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             const isLogged = hasData && items.every(x => x.logged);
             const namesLine = items.filter(x=>x.food).map(x=>x.food).join(", ");
             return (
-              <div key={slot.id} style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(isLogged?"#3ddc84":hasData?"#e8ff00":"#2a2a3d") }}>
+              <div key={slot.id} style={{ background:"#1a1a26", borderRadius:14, overflow:"hidden", border:"1px solid "+(isLogged?"rgba(61,220,132,0.45)":hasData?"rgba(232,255,0,0.4)":"#2a2a3d") }}>
                 {/* ROW 1 — Meal name + description */}
                 <div style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px 10px" }}>
                   <span style={{ fontSize:22, flexShrink:0 }}>{slot.emoji}</span>
