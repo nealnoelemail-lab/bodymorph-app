@@ -8967,6 +8967,26 @@ function planText(name, ev) {
     "This plan is fitness guidance from your coach, not medical advice.", "— Your BodyMorph coach",
   ].filter(x => x !== undefined).join("\n");
 }
+// Print / Save-as-PDF helper that works INSIDE the native WKWebView. window.open()
+// returns null there (popups are blocked), so nothing printed. Instead we render the
+// document into a hidden same-document iframe and call its print() — which presents
+// iOS's native print/share sheet (AirPrint, or "Save to Files" as a PDF). Also works
+// on the web/desktop.
+function printHtml(html) {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(iframe);
+  const cleanup = () => { try { document.body.removeChild(iframe); } catch (e) {} };
+  const fire = () => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { /* ignore */ }
+    setTimeout(cleanup, 60000); // leave it mounted while the print sheet is open, then remove
+  };
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  if (doc.readyState === "complete") setTimeout(fire, 350); // let it lay out, then print
+  else iframe.onload = () => setTimeout(fire, 350);
+}
 // Open a clean printable document; the browser print dialog offers "Save as PDF".
 function openPlanPrint(name, ev) {
   const t = ev.timeline || {};
@@ -8984,9 +9004,8 @@ p{margin:0}ul{margin:6px 0 0;padding-left:18px}@media print{body{margin:0}}</sty
 <h2>Exercise</h2><p>${esc(ev.exercise)}</p>
 <h2>Timeline</h2><p>Recommended: <b>${esc(t.recommended)}</b></p>${t.desiredVerdict ? `<p>${esc(t.desiredVerdict)}</p>` : ""}<ul>${ms}</ul>
 <p style="margin-top:28px;color:#888;font-size:12px">This plan is fitness guidance from your coach, not medical advice. Consult a physician about any medical conditions or injuries before starting.</p>
-<script>window.onload=function(){window.print()}</script></body></html>`;
-  const w = window.open("", "_blank");
-  if (w) { w.document.write(html); w.document.close(); }
+</body></html>`;
+  printHtml(html);
 }
 
 // Print / Save-as-PDF a generated meal plan: a clean per-meal document with
@@ -9017,9 +9036,8 @@ td.n{text-align:right;color:#555;white-space:nowrap;width:70px}.brand{color:#3a8
 <div class="totals"><div><b>${esc(tt.cal||0)}</b><span>/ ${esc(tg.cal||0)} cal</span></div><div><b>${esc(tt.protein||0)}</b><span>/ ${esc(tg.protein||0)}g protein</span></div><div><b>${esc(tt.carbs||0)}</b><span>/ ${esc(tg.carbs||0)}g carbs</span></div><div><b>${esc(tt.fats||0)}</b><span>/ ${esc(tg.fats||0)}g fat</span></div></div>
 ${meals}
 <p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
-<script>window.onload=function(){window.print()}</script></body></html>`;
-  const w = window.open("", "_blank");
-  if (w) { w.document.write(html); w.document.close(); }
+</body></html>`;
+  printHtml(html);
 }
 
 // Aggregate a day's meal plan into a 7-day shopping list: sum grams per unique
