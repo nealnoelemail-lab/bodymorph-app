@@ -6032,16 +6032,11 @@ function StretchCard({ t, on, toggle, gender, videoOverrides, onSaveVideo }) {
   );
 }
 
-// Routine editor: pick which stretches are in a routine (catalog), AND drag them into
-// the exact order the voice coach should guide them (top → bottom = guidance order).
+// Routine editor: pick which stretches are in a routine (catalog), AND order them with
+// ▲▼ controls into the exact sequence the voice coach guides you (top → bottom).
 function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverrides, onSaveVideo, onClose }) {
   const routineLabel = (STRETCH_TYPES.find(t=>t.id===routineId)||{}).label || "Routine";
   const saved = (routines && routines[routineId]) || [];
-  const [seq, setSeq] = useState(saved);            // working order (smooth during a drag)
-  const savedKey = saved.join(",");
-  // Re-sync when membership changes from the catalog below; untouched mid-drag.
-  useEffect(() => { setSeq((routines && routines[routineId]) || []); }, [savedKey, routineId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const persist = (arr) => onSaveRoutines({ ...(routines||{}), [routineId]: arr });
   const togglePose = (poseId) => {
     const arr = [...saved];
@@ -6050,41 +6045,15 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
     persist(arr);
   };
   const removeFromSeq = (poseId) => persist(saved.filter(id => id !== poseId));
-
-  // ── Drag-to-reorder via Pointer Events (works with touch in the iOS WKWebView;
-  // HTML5 drag-and-drop does not). The handle has touch-action:none so dragging it
-  // never scrolls the page; the rest of the row still scrolls normally. ───────────
-  const listRef = useRef(null);
-  const drag = useRef(null);
-  const [dragId, setDragId] = useState(null);
-  const onDown = (e, id) => {
-    e.preventDefault();
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-    drag.current = { id, pointerId: e.pointerId };
-    setDragId(id);
+  // Swap a stretch with its neighbor (up = -1, down = +1). Simple + bulletproof on touch.
+  const move = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= saved.length) return;
+    const arr = [...saved];
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    persist(arr);
   };
-  const onMove = (e) => {
-    const d = drag.current; if (!d || e.pointerId !== d.pointerId) return;
-    e.preventDefault();
-    const rows = Array.from(listRef.current ? listRef.current.querySelectorAll("[data-pose]") : []);
-    const y = e.clientY;
-    let beforeId = null;
-    for (const r of rows) { const rc = r.getBoundingClientRect(); if (y < rc.top + rc.height/2) { beforeId = r.getAttribute("data-pose"); break; } }
-    setSeq(prev => {
-      const arr = [...prev];
-      const from = arr.indexOf(d.id); if (from < 0) return prev;
-      arr.splice(from, 1);
-      let to = beforeId ? arr.indexOf(beforeId) : arr.length;
-      if (to < 0) to = arr.length;
-      arr.splice(to, 0, d.id);
-      return arr.join(",") === prev.join(",") ? prev : arr;
-    });
-  };
-  const onUp = (e) => {
-    if (!drag.current || (e && e.pointerId !== drag.current.pointerId)) return;
-    drag.current = null; setDragId(null);
-    setSeq(cur => { persist(cur); return cur; }); // commit the new order
-  };
+  const arrowBtn = (disabled) => ({ background: disabled?"#141420":"#0e0e16", border:"1px solid #2a2a3d", borderRadius:6, color: disabled?"#3a3a4a":"#e8ff00", cursor: disabled?"default":"pointer", fontSize:11, lineHeight:1, padding:"5px 8px", minWidth:30 });
 
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
@@ -6096,19 +6065,21 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
       </div>
       <div style={{ padding:"8px 20px 0" }}>
         <div style={{ color:"#d6d6ec", fontSize:13.5, lineHeight:1.6, marginBottom:14 }}>
-          Pick which stretches are in your {routineLabel} below, then <b>drag the &#8801; handle</b> to set the order &mdash; the coach guides you top to bottom.
+          Pick which stretches are in your {routineLabel} below, then use the <b>&#9650;/&#9660;</b> arrows to set the order &mdash; the coach guides you top to bottom.
         </div>
 
-        {/* YOUR SEQUENCE — ordered + draggable */}
-        {seq.length > 0 && (<>
-          <div style={{ ...S.sectionTitle }}>YOUR SEQUENCE &mdash; DRAG TO REORDER</div>
-          <div ref={listRef} style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:18 }}>
-            {seq.map((id, i) => {
+        {/* YOUR SEQUENCE — ordered via ▲▼ */}
+        {saved.length > 0 && (<>
+          <div style={{ ...S.sectionTitle }}>YOUR SEQUENCE &mdash; TAP &#9650;/&#9660; TO REORDER</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:18 }}>
+            {saved.map((id, i) => {
               const t = POSE_TYPES.find(x=>x.id===id) || STRETCH_TYPES.find(x=>x.id===id) || { id, label:id };
-              const dragging = dragId === id;
               return (
-                <div key={id} data-pose={id} style={{ display:"flex", alignItems:"center", gap:10, background: dragging?"#23233a":"#1a1a26", border:"1px solid "+(dragging?"#e8ff00":"#2a2a3d"), borderRadius:12, padding:"10px 12px", boxShadow: dragging?"0 6px 18px rgba(0,0,0,0.5)":"none", touchAction:"pan-y" }}>
-                  <button onPointerDown={(e)=>onDown(e,id)} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} title="Drag to reorder" style={{ flexShrink:0, background:"transparent", border:"none", color:"#9898b8", cursor:"grab", fontSize:22, lineHeight:1, padding:"4px 6px", touchAction:"none" }}>&#8801;</button>
+                <div key={id} style={{ display:"flex", alignItems:"center", gap:10, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"10px 12px" }}>
+                  <div style={{ display:"flex", flexDirection:"column", gap:3, flexShrink:0 }}>
+                    <button onClick={()=>move(i,-1)} disabled={i===0} title="Move up" style={arrowBtn(i===0)}>&#9650;</button>
+                    <button onClick={()=>move(i,1)} disabled={i===saved.length-1} title="Move down" style={arrowBtn(i===saved.length-1)}>&#9660;</button>
+                  </div>
                   <span style={{ flexShrink:0, width:22, height:22, borderRadius:"50%", background:"#0e0e16", color:"#e8ff00", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</span>
                   <span style={{ background:"#0e0e16", borderRadius:8, padding:3, display:"flex", flexShrink:0 }}><YogaIcon id={id} size={26} /></span>
                   <span style={{ flex:1, fontSize:15, color:"#f0f0f8" }}>{t.label}</span>
