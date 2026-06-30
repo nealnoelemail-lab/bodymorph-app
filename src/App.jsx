@@ -1851,6 +1851,7 @@ function buildProgram(profile) {
   const goalWord = profile.goal.split("(")[0].trim();
   const focusWord = profile.focus.split("(")[0].trim();
   const bb = basicBlockFor(profile);
+  const { start, cap } = basicLevelRamp(profile.fitnessLevel || "Intermediate");
 
   return {
     overview: `A 90-day, 12-week ${focusWord.toLowerCase()} block for your ${goalWord.toLowerCase()} goal. Intensity steps up every 2 weeks, and the exercises rotate every 4 weeks so the same muscles keep adapting. You're in week ${bb.week} — the ${bb.block.tag} phase (${bb.block.sets} sets of ${bb.block.reps}, ${bb.block.rest} rest). Precise angles, controlled tempo, a strong mind-muscle squeeze over heavy momentum.`,
@@ -1860,10 +1861,19 @@ function buildProgram(profile) {
     basicPeriodized: true,
     currentWeek: bb.week,
     currentBlock: bb.blockIndex + 1,
-    progressMilestones: BASIC_BLOCKS.map((b, i) => ({
-      week: i * 2 + 1,
-      goal: `Weeks ${i * 2 + 1}–${i * 2 + 2} · ${b.tag}: ${b.sets} sets of ${b.reps}, ${b.rest} rest.${i % 2 === 0 ? " Fresh exercises this block." : ""}`,
-    })),
+    // Level-aware roadmap: each 2-week window shows the block THIS client actually
+    // reaches (beginners cap early and "hold" at their ceiling instead of being shown
+    // Strength/Peak weeks they never hit). Rotation note lands on each new 4-week block.
+    progressMilestones: Array.from({ length: 6 }, (_, i) => {
+      const idx = Math.min(start + i, cap);
+      const held = i > 0 && idx === cap && Math.min(start + (i - 1), cap) === cap;
+      const b = BASIC_BLOCKS[idx];
+      const fresh = i % 2 === 0 ? " Fresh exercises this block." : "";
+      const goal = held
+        ? `Weeks ${i * 2 + 1}–${i * 2 + 2} · ${b.tag} (hold): add reps or load within ${b.sets} sets of ${b.reps} and beat last block — strict form.${fresh}`
+        : `Weeks ${i * 2 + 1}–${i * 2 + 2} · ${b.tag}: ${b.sets} sets of ${b.reps}, ${b.rest} rest.${fresh}`;
+      return { week: i * 2 + 1, goal };
+    }),
   };
 }
 
