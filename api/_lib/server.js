@@ -34,3 +34,16 @@ export async function readRawBody(req) {
 
 // The app's base URL for Stripe redirect/return URLs.
 export const appUrl = (req) => process.env.APP_URL || `https://${req.headers.host}`;
+
+// Permissive CORS for the AI-proxy endpoints. The native app (origin
+// capacitor://localhost) and the web app both call these cross-origin. Safe to allow
+// any origin because EVERY proxy endpoint requires a valid Supabase Bearer token —
+// the token is the real security gate, not the origin. Returns true if the request was
+// an OPTIONS preflight (caller should end the response).
+export function applyCors(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "authorization, content-type");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  if (req.method === "OPTIONS") { res.status(204).end(); return true; }
+  return false;
+}
