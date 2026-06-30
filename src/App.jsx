@@ -67,22 +67,24 @@ const GLOBAL_CSS = `
   }
   .watermark-img {
     position: fixed;
-    top: 42%; left: 50%;
+    top: 56%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
     filter: drop-shadow(0 0 14px rgba(232,180,0,0.85));
-    height: 88%;
-    width: auto;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
     pointer-events: none;
     z-index: -1;
     animation: silhouetteGlow 3s ease-in-out infinite;
   }
   .watermark-img-plain {
     position: fixed;
-    top: 42%; left: 50%;
+    top: 56%; left: 50%;
     transform: translate3d(-50%, -50%, 0);
     filter: brightness(0.35) saturate(0);
-    height: 88%;
-    width: auto;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
     opacity: 0.45;
     pointer-events: none;
     z-index: -1;
