@@ -17,6 +17,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopSpeaking", returnType: CAPPluginReturnPromise),
     ]
 
     private var recorder: AVAudioRecorder?
@@ -28,6 +30,22 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var xaiKey = ""       // passed from JS; used when provider == "grok"
     private var provider = "legacy"   // "legacy" (OpenAI Whisper) | "cartesia" (Ink-Whisper) | "grok" (Grok STT)
     private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
+
+    // ── Streaming TTS (Grok WebSocket → AVAudioEngine progressive playback) ──
+    // The browser WebSocket API can't set the Authorization header Grok requires, so
+    // streaming TTS runs here in native code: open a WS, push the text, and play the
+    // base64 PCM audio chunks as they stream back — first audio in ~0.5s instead of
+    // waiting ~2.3s for the whole clip.
+    private let ttsEngine = AVAudioEngine()
+    private let ttsPlayer = AVAudioPlayerNode()
+    private var ttsFormat: AVAudioFormat?
+    private var ttsEngineReady = false
+    private var ttsWS: URLSessionWebSocketTask?
+    private var ttsURLSession: URLSession?
+    private var ttsScheduled = 0
+    private var ttsCompleted = 0
+    private var ttsStreamDone = false
+    private var ttsActive = false
     private var hasSpeech = false
     private var speechFrames = 0
     private var silenceFrames = 0
@@ -99,10 +117,150 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     @objc func stop(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             self.endRecording(emit: false)
+            self.stopTTSInternal()
             self.stopKeepAlive()
             UIApplication.shared.isIdleTimerDisabled = false   // restore normal auto-lock
             call.resolve()
         }
+    }
+
+    // MARK: - Streaming TTS (Grok WebSocket → progressive AVAudioEngine playback)
+
+    @objc func speak(_ call: CAPPluginCall) {
+        let text = (call.getString("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let voice = call.getString("voiceId") ?? "eve"
+        guard !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
+        guard !text.isEmpty else { notifyListeners("speakDone", data: [:]); call.resolve(); return }
+        DispatchQueue.main.async {
+            self.startTTS(text: text, voice: voice)
+            call.resolve()
+        }
+    }
+
+    @objc func stopSpeaking(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { self.stopTTSInternal() }
+        call.resolve()
+    }
+
+    private func setupTTSEngine() {
+        if ttsEngineReady { return }
+        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)
+        ttsFormat = fmt
+        ttsEngine.attach(ttsPlayer)
+        ttsEngine.connect(ttsPlayer, to: ttsEngine.mainMixerNode, format: fmt)
+        ttsEngine.prepare()
+        ttsEngineReady = true
+    }
+
+    private func startTTS(text: String, voice: String) {
+        stopTTSInternal()
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(true)
+        applyOutputRoute()                       // keep playback on speaker / earbuds
+        setupTTSEngine()
+        ttsScheduled = 0; ttsCompleted = 0; ttsStreamDone = false; ttsActive = true
+
+        var comps = URLComponents(string: "wss://api.x.ai/v1/tts")!
+        comps.queryItems = [
+            URLQueryItem(name: "language", value: "en"),
+            URLQueryItem(name: "voice", value: voice),
+            URLQueryItem(name: "codec", value: "pcm"),
+            URLQueryItem(name: "sample_rate", value: "24000"),
+            URLQueryItem(name: "optimize_streaming_latency", value: "2"),
+        ]
+        guard let url = comps.url else { finishTTS(error: "bad url"); return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
+        let s = URLSession(configuration: .default)
+        ttsURLSession = s
+        let ws = s.webSocketTask(with: req)
+        ttsWS = ws
+        ws.resume()
+
+        if let msg = try? JSONSerialization.data(withJSONObject: ["type": "text.delta", "delta": text]),
+           let str = String(data: msg, encoding: .utf8) {
+            ws.send(.string(str)) { _ in }
+        }
+        ws.send(.string("{\"type\":\"text.done\"}")) { _ in }
+        receiveTTS()
+    }
+
+    private func receiveTTS() {
+        guard let ws = ttsWS else { return }
+        ws.receive { [weak self] result in
+            guard let self = self, self.ttsActive else { return }
+            switch result {
+            case .failure(let err):
+                DispatchQueue.main.async { self.finishTTS(error: "ws: \(err.localizedDescription)") }
+            case .success(let msg):
+                switch msg {
+                case .string(let str): self.handleTTSMessage(str)
+                case .data(let d): if let str = String(data: d, encoding: .utf8) { self.handleTTSMessage(str) }
+                @unknown default: break
+                }
+                self.receiveTTS()
+            }
+        }
+    }
+
+    private func handleTTSMessage(_ str: String) {
+        guard let data = str.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        switch type {
+        case "audio.delta":
+            if let b64 = obj["delta"] as? String, let pcm = Data(base64Encoded: b64) { scheduleTTSAudio(pcm) }
+        case "audio.done":
+            DispatchQueue.main.async { self.ttsStreamDone = true; self.checkTTSComplete() }
+        case "error":
+            DispatchQueue.main.async { self.finishTTS(error: (obj["message"] as? String) ?? "tts error") }
+        default: break
+        }
+    }
+
+    private func scheduleTTSAudio(_ pcm: Data) {
+        guard let fmt = ttsFormat else { return }
+        let frames = pcm.count / 2   // 16-bit LE samples
+        if frames == 0 { return }
+        guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames)) else { return }
+        buf.frameLength = AVAudioFrameCount(frames)
+        pcm.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            let samples = raw.bindMemory(to: Int16.self)
+            if let ch = buf.floatChannelData {
+                for i in 0..<frames {
+                    ch[0][i] = max(-1.0, min(1.0, Float(Int16(littleEndian: samples[i])) / 32768.0))
+                }
+            }
+        }
+        DispatchQueue.main.async {
+            guard self.ttsActive else { return }
+            if !self.ttsEngine.isRunning { try? self.ttsEngine.start() }
+            if !self.ttsPlayer.isPlaying { self.ttsPlayer.play() }
+            self.ttsScheduled += 1
+            self.ttsPlayer.scheduleBuffer(buf) {
+                DispatchQueue.main.async { self.ttsCompleted += 1; self.checkTTSComplete() }
+            }
+        }
+    }
+
+    private func checkTTSComplete() {
+        if ttsActive && ttsStreamDone && ttsCompleted >= ttsScheduled { finishTTS(error: nil) }
+    }
+
+    private func finishTTS(error: String?) {
+        guard ttsActive else { return }
+        if let error = error { print("[VoiceCapture] TTS: \(error)") }
+        let hadError = error != nil
+        stopTTSInternal()
+        notifyListeners("speakDone", data: hadError ? ["error": error!] : [:])
+    }
+
+    private func stopTTSInternal() {
+        ttsActive = false
+        ttsWS?.cancel(with: .goingAway, reason: nil); ttsWS = nil
+        ttsURLSession?.invalidateAndCancel(); ttsURLSession = nil
+        if ttsPlayer.isPlaying { ttsPlayer.stop() }
+        if ttsEngine.isRunning { ttsEngine.stop() }
     }
 
     // Loop silent audio so the app keeps "producing audio" — with the UIBackgroundModes

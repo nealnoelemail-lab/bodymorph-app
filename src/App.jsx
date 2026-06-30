@@ -3694,6 +3694,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   voiceIdRef.current = voiceId; // current ElevenLabs voice id (null → browser TTS)
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
+  const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -4184,7 +4185,21 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       }
     };
 
-    if (USE_GROK) grokSpeak();
+    // ── NATIVE Grok streaming TTS — the plugin opens a WebSocket and plays audio
+    // chunks as they arrive (first sound in ~0.5s). Fires "speakDone" when finished.
+    const nativeStreamSpeak = () => {
+      speakDoneRef.current = (info) => {
+        if (info && info.error && !done && !closedRef.current) { log("native TTS err: " + info.error); browserSpeak(); }
+        else finish();
+      };
+      const secs = Math.min(45, Math.max(6, (text.split(/\s+/).length / 2.4) + 6)); // safety cap
+      capId = setTimeout(() => finish(), secs * 1000);
+      VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE })
+        .catch(e => { log("native speak err: " + (e?.message || e)); if (!done && !closedRef.current) browserSpeak(); else if (!done) finish(); });
+    };
+
+    if (IS_NATIVE && USE_GROK) nativeStreamSpeak();
+    else if (USE_GROK) grokSpeak();
     else if (USE_CARTESIA) cartesiaSpeak();
     else if (ELEVEN_KEY && voiceIdRef.current) elevenSpeak();
     else browserSpeak();
@@ -4344,6 +4359,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     VoiceCapture.addListener("level", ({ level }) => {
       lastTickRef.current = performance.now();   // heartbeat for the watchdog
       setMicLevel(level || 0);
+    }).then(h => handles.push(h));
+    VoiceCapture.addListener("speakDone", (info) => {
+      speakDoneRef.current?.(info);              // native streaming TTS finished → resume the loop
     }).then(h => handles.push(h));
     return () => { handles.forEach(h => { try { h.remove(); } catch {} }); };
   }, [startListening]);
