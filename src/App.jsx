@@ -8067,7 +8067,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             if (slot.id === "snacks") {
               // Multi-snack slot
               const open = editSlot === "snacks";
-              const sugSnack = scaleSug(getMealSuggestion(dietPref, sel, "snacks"));
+              const sugSnack = null; // no prepopulated snack suggestion — user logs what they ate
               const snacksLogged = snackList.length > 0 && snackList.every(s=>s.logged);
               const displaySnacks = snackHasData ? snackList : (sugSnack ? [sugSnack] : [{}]);
               const totalSnackCal = displaySnacks.reduce((s,x)=>s+(parseInt(x.cal)||0),0);
@@ -8122,12 +8122,14 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   )}
                   {/* ROW 3 — Buttons */}
                   <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    <button onClick={()=>setFoodLogger({ slotId:"snacks", slotLabel:"Snacks", sug:null })} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"1px solid rgba(61,220,132,0.4)", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       Add Food
                     </button>
-                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                    {snackHasData && (
+                    <button onClick={snacksLogged?unlogSnacks:logSnacks} style={{ flex:1, background: snacksLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"1px solid rgba(232,255,0,0.4)", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                       {snacksLogged?"Unlog":"Log It"}
                     </button>
+                    )}
                   </div>
                   {/* Edit snacks */}
                   {open && (
@@ -8162,7 +8164,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
 
             // Regular meal slots (breakfast, lunch, dinner) — now itemized lists
             const items = slotList(slot.id);
-            const sug = scaleSug(getMealSuggestion(dietPref, sel, slot.id));
+            const sug = null; // no prepopulated suggestion — the slot starts empty; the user logs what they actually ate
             const hasData = items.some(x => x.food || x.cal);
             const tot = slotTotals(slot.id);
             const open = editSlot===slot.id;
@@ -8209,12 +8211,14 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                 )}
                 {/* ROW 3 — Buttons */}
                 <div style={{ display:"flex", gap:8, padding:"10px 14px" }}>
-                  <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"2px solid #3ddc84", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  <button onClick={()=>{ try { setFoodLogger({ slotId:slot.id, slotLabel:slot.label, sug:sug||null }); } catch(e) { console.error("FoodLogger error:", e); } }} style={{ flex:1, background:"rgba(61,220,132,0.07)", color:"#3ddc84", border:"1px solid rgba(61,220,132,0.4)", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     Add Food
                   </button>
-                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
+                  {hasData && (
+                  <button onClick={()=>{ if(isLogged){unlogSlot(slot.id);}else{logSlot(slot.id,sug);} }} style={{ flex:1, background: isLogged?"transparent":"rgba(232,255,0,0.07)", color:"#e8ff00", border:"1px solid rgba(232,255,0,0.4)", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>
                     {isLogged?"Unlog":"Log It"}
                   </button>
+                  )}
                 </div>
 
               </div>
