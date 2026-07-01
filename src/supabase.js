@@ -48,6 +48,58 @@ export async function sendPasswordReset(email) {
   return { error: friendly(error) };
 }
 
+// ── PHONE VERIFICATION (one-time at signup) + PHONE-BASED PASSWORD RECOVERY ────
+// Normalize to E.164 (Supabase/Twilio require it): strip spaces/dashes/parens; a bare
+// 10-digit US number gets a +1. Anything already starting with + is left as-is.
+export function normalizePhone(raw, defaultCountry = "1") {
+  let s = String(raw || "").trim().replace(/[()\-\s.]/g, "");
+  if (!s) return "";
+  if (s.startsWith("+")) return s;
+  if (s.startsWith("00")) return "+" + s.slice(2);
+  const digits = s.replace(/\D/g, "");
+  if (digits.length === 10) return `+${defaultCountry}${digits}`;   // US 10-digit
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return `+${digits}`;
+}
+
+// Attach a phone to the SIGNED-IN user and text them a one-time code (Supabase → Twilio).
+export async function startPhoneVerify(phone) {
+  if (!supabase) return { error: "No backend configured." };
+  const { error } = await supabase.auth.updateUser({ phone: normalizePhone(phone) });
+  return { error: friendly(error) };
+}
+// Confirm that code → the phone is now verified + attached to the account.
+export async function confirmPhoneVerify(phone, token) {
+  if (!supabase) return { error: "No backend configured." };
+  const { data, error } = await supabase.auth.verifyOtp({ phone: normalizePhone(phone), token: String(token).trim(), type: "phone_change" });
+  return { data, error: friendly(error) };
+}
+
+// Password recovery via the verified phone: text a sign-in code…
+export async function sendPhoneCode(phone) {
+  if (!supabase) return { error: "No backend configured." };
+  const { error } = await supabase.auth.signInWithOtp({ phone: normalizePhone(phone) });
+  return { error: friendly(error) };
+}
+// …verify it (this signs them in), then they can set a new password.
+export async function verifyPhoneCode(phone, token) {
+  if (!supabase) return { error: "No backend configured." };
+  const { data, error } = await supabase.auth.verifyOtp({ phone: normalizePhone(phone), token: String(token).trim(), type: "sms" });
+  return { data, error: friendly(error) };
+}
+// Set a new password for the currently signed-in user.
+export async function updatePassword(password) {
+  if (!supabase) return { error: "No backend configured." };
+  const { error } = await supabase.auth.updateUser({ password });
+  return { error: friendly(error) };
+}
+
+// Has the signed-in user verified a phone yet? (the one-time gate)
+export async function isPhoneVerified() {
+  const u = await getUser();
+  return !!(u && u.phone && u.phone_confirmed_at);
+}
+
 // Current session's user (or null), read once at boot.
 export async function getUser() {
   if (!supabase) return null;

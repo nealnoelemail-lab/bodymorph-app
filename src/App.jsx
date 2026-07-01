@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
-import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
+import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth, startPhoneVerify, confirmPhoneVerify, sendPhoneCode, verifyPhoneCode, updatePassword, normalizePhone } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy } from "./aiproxy";
@@ -8529,10 +8529,11 @@ function migrateProfile(p) {
 // and there's no active session. Falls back to "Continue offline" so the app is
 // never a dead end during development. Successful auth flips the session, which
 // the onAuth listener in <BodyMorph> picks up to route into the app.
-function AuthScreen({ onSkip }) {
+function AuthScreen({ onSkip, onSignupPhone }) {
   const [mode, setMode]   = useState("signin");   // signin | signup
   const [email, setEmail] = useState("");
   const [pw, setPw]       = useState("");
+  const [phone, setPhone] = useState("");         // mobile — verified once at signup, used for password recovery
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo]   = useState("");         // success / "check your email" messages
@@ -8543,14 +8544,20 @@ function AuthScreen({ onSkip }) {
     const mail = email.trim();
     if (!mail || !pw) { setError("Enter your email and password."); return; }
     if (mode === "signup" && pw.length < 6) { setError("Password must be at least 6 characters."); return; }
-    setBusy(true);
     if (mode === "signup") {
+      const ph = normalizePhone(phone);
+      if (!ph || ph.replace(/\D/g, "").length < 11) { setError("Enter a valid mobile number (we'll text you a verification code)."); return; }
+      setBusy(true);
       const { needsConfirm, error } = await signUpEmail(mail, pw);
       setBusy(false);
       if (error) { setError(error); return; }
+      onSignupPhone?.(ph);   // stash the phone → the phone-verify gate sends + confirms the code
       if (needsConfirm) setInfo(`Account created. Check ${mail} for a confirmation link, then sign in.`);
-      // If confirmation is off, a session arrives and the listener routes us in.
-    } else {
+      // If confirmation is off, a session arrives → the phone-verify gate takes over.
+      return;
+    }
+    setBusy(true);
+    {
       const { error } = await signInEmail(mail, pw);
       setBusy(false);
       if (error) setError(error);
@@ -8589,6 +8596,15 @@ function AuthScreen({ onSkip }) {
               onChange={e=>setPw(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"••••••••"} style={S.input} />
           </div>
 
+          {mode === "signup" && (
+            <div>
+              <div style={S.inputLabel}>Mobile Number</div>
+              <input type="tel" autoComplete="tel" value={phone} onChange={e=>setPhone(e.target.value)}
+                placeholder="(555) 123-4567" style={S.input} />
+              <div style={{ fontSize:11.5, color:"#74748a", marginTop:5, lineHeight:1.5 }}>We'll text a one-time code to verify it. Used only for sign-in help — never shared.</div>
+            </div>
+          )}
+
           {error && <div style={{ color:C.red, fontSize:13, lineHeight:1.5 }}>{error}</div>}
           {info  && <div style={{ color:C.green, fontSize:13, lineHeight:1.5 }}>{info}</div>}
 
@@ -8614,6 +8630,88 @@ function AuthScreen({ onSkip }) {
         <button onClick={onSkip} style={{ ...S.btnSec, width:"100%", marginTop:6 }}>
           Continue offline
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── PHONE VERIFICATION (one-time) ─────────────────────────────────────────────
+// After signup we text a one-time code to the user's mobile and confirm it. Once
+// verified, sign-in is just email + password; the phone becomes the recovery channel.
+function PhoneVerify({ user, pendingPhone, onVerified, onSignOut }) {
+  const startNum = pendingPhone || (user?.phone ? ("+" + String(user.phone).replace(/^\+/, "")) : "");
+  const [phone, setPhone] = useState(startNum);
+  const [code, setCode]   = useState("");
+  const [stage, setStage] = useState(startNum ? "code" : "phone"); // phone | code
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo]   = useState("");
+  const sentRef = useRef(false);
+
+  const send = useCallback(async (num) => {
+    setError(""); setInfo("");
+    const ph = normalizePhone(num);
+    if (!ph || ph.replace(/\D/g, "").length < 11) { setError("Enter a valid mobile number."); setStage("phone"); return; }
+    setBusy(true);
+    const { error } = await startPhoneVerify(ph);
+    setBusy(false);
+    if (error) { setError(error); return; }
+    setPhone(ph); setStage("code"); setInfo(`Code texted to ${ph}.`);
+  }, []);
+
+  // Auto-send once when we already have the number (from signup).
+  useEffect(() => { if (startNum && !sentRef.current) { sentRef.current = true; send(startNum); } }, [startNum, send]);
+
+  const verify = async () => {
+    setError(""); setInfo("");
+    if (code.length < 4) { setError("Enter the code we texted you."); return; }
+    setBusy(true);
+    const { error } = await confirmPhoneVerify(phone, code);
+    setBusy(false);
+    if (error) { setError(error); return; }
+    onVerified?.();
+  };
+
+  return (
+    <div style={S.center}>
+      <style>{GLOBAL_CSS}</style>
+      <WatermarkPlain />
+      <div className="fade-in" style={{ width:"100%", maxWidth:360, display:"flex", flexDirection:"column", alignItems:"center", gap:18 }}>
+        <Logo small />
+        <div style={S.stepLabel}>VERIFY YOUR PHONE</div>
+        <div style={{ fontSize:14, color:"#9898b8", textAlign:"center", lineHeight:1.5 }}>
+          {stage === "code" ? "Enter the code we just texted you — this is a one-time step." : "Enter your mobile number and we'll text you a code."}
+        </div>
+
+        {stage === "phone" ? (
+          <div style={{ width:"100%" }}>
+            <div style={S.inputLabel}>Mobile Number</div>
+            <input type="tel" autoComplete="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(555) 123-4567" style={S.input} />
+          </div>
+        ) : (
+          <div style={{ width:"100%" }}>
+            <div style={S.inputLabel}>Verification Code</div>
+            <input type="text" inputMode="numeric" autoComplete="one-time-code" value={code}
+              onChange={e=>setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456"
+              style={{ ...S.input, letterSpacing:6, textAlign:"center", fontSize:20 }} />
+          </div>
+        )}
+
+        {error && <div style={{ color:C.red, fontSize:13, lineHeight:1.5 }}>{error}</div>}
+        {info  && <div style={{ color:C.green, fontSize:13, lineHeight:1.5 }}>{info}</div>}
+
+        {stage === "phone"
+          ? <button onClick={()=>send(phone)} disabled={busy} style={{ ...S.btnPri, width:"100%", borderColor:"#e8ff00", color:"#e8ff00", opacity:busy?0.6:1, cursor:busy?"default":"pointer" }}>{busy ? "Sending…" : "Text me a code"}</button>
+          : <button onClick={verify} disabled={busy} style={{ ...S.btnPri, width:"100%", borderColor:"#e8ff00", color:"#e8ff00", opacity:busy?0.6:1, cursor:busy?"default":"pointer" }}>{busy ? "Verifying…" : "Verify & Continue"}</button>}
+
+        {stage === "code" && (
+          <div style={{ display:"flex", gap:16 }}>
+            <button onClick={()=>send(phone)} disabled={busy} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer", textDecoration:"underline" }}>Resend code</button>
+            <button onClick={()=>{ setStage("phone"); setCode(""); setError(""); setInfo(""); }} style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:13, cursor:"pointer" }}>Change number</button>
+          </div>
+        )}
+
+        <button onClick={onSignOut} style={{ ...S.btnSec, width:"100%", marginTop:6 }}>Sign out</button>
       </div>
     </div>
   );
@@ -9788,6 +9886,7 @@ export default function BodyMorph() {
   const clearStretchProgress = useCallback(() => { setStretchProgress(null); try { localStorage.removeItem("bodymorph_stretchprogress"); } catch {} }, []);
   const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
   const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
+  const [pendingPhone, setPendingPhone] = useState(""); // phone captured at signup, awaiting one-time verification
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
   const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
@@ -9898,6 +9997,12 @@ export default function BodyMorph() {
             // Build a minimal safe program so the user lands on Home, not the wizard
             setProgram({ weeklySchedule:[], overview:"Tap TRAINING to rebuild your program.", stretching:"full", nutrition:macrosFor(migrated), progressMilestones:[] });
           }
+        }
+        // ONE-TIME PHONE VERIFICATION: every signed-in user verifies a mobile number
+        // once; afterward sign-in is just email + password (phone = recovery channel).
+        if (hasBackend && uid) {
+          const au = await getUser();
+          if (au && !(au.phone && au.phone_confirmed_at)) { setPhase("phoneverify"); setLoaded(true); return; }
         }
         // Routing: a coach goes to the dashboard (skips client wizard + paywall).
         // ACCESS GATE: the app is invite-only — every client must have redeemed a
@@ -10524,7 +10629,8 @@ export default function BodyMorph() {
 
   const screen = (() => {
   if (phase === "init")    return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
-  if (phase === "auth")    return <AuthScreen onSkip={hydrate} />;
+  if (phase === "auth")    return <AuthScreen onSkip={hydrate} onSignupPhone={setPendingPhone} />;
+  if (phase === "phoneverify") return <PhoneVerify user={user} pendingPhone={pendingPhone} onSignOut={handleSignOut} onVerified={()=>{ setPendingPhone(""); setLoaded(false); setPhase("init"); hydrate(); }} />;
   if (phase === "accesscode") return <AccessGate onLink={linkToCoach} onCoach={becomeCoach} onSignOut={handleSignOut} onLinked={()=>setPhase(profile ? "home" : "wizard")} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
