@@ -3748,6 +3748,8 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
+  const coachReplyRef = useRef(null);      // native askAndSpeak → the finished reply text (for logging)
+  const coachErrorRef = useRef(null);      // native askAndSpeak → brain-call failure (fall back to one-shot)
   const turnTimingRef = useRef({});        // DIAG: timestamps across one turn (STT → Claude → TTS)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
@@ -4427,6 +4429,8 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     VoiceCapture.addListener("speakDone", (info) => {
       speakDoneRef.current?.(info);              // native streaming TTS finished → resume the loop
     }).then(h => handles.push(h));
+    VoiceCapture.addListener("coachReply", (info) => { coachReplyRef.current?.(info); }).then(h => handles.push(h)); // finished brain text
+    VoiceCapture.addListener("coachError", (info) => { coachErrorRef.current?.(info); }).then(h => handles.push(h)); // brain-call failed
     return () => { handles.forEach(h => { try { h.remove(); } catch {} }); };
   }, [startListening]);
 
@@ -4448,75 +4452,47 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!isInit) messagesRef.current = msgs;
 
     const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
-    // DISABLED: piping Claude's stream through the WebView's fetch fails on iOS WKWebView
-    // ("bad response from the server" — WKWebView won't consume a streaming SSE body). The
-    // proper streaming fix has to run in NATIVE Swift (URLSession streams Claude → forwards
-    // to the Grok TTS socket), bypassing the WebView. Until then, use the reliable non-stream path.
-    const useNativeStream = false && IS_NATIVE && USE_GROK && !USE_GROK_LLM;
+    // Native streaming: the NATIVE side makes the Claude call and pipes its tokens straight
+    // into the Grok voice socket (WKWebView can't stream fetch; URLSession in Swift can).
+    const useNativeStream = IS_NATIVE && USE_GROK && USE_PROXY && !USE_GROK_LLM;
     const ac = new AbortController();
     try {
-      // ── Native streaming path: forward Claude's tokens into the Grok voice socket as
-      // they arrive, so the coach starts speaking BEFORE the full reply is written. ──
+      // ── Native streaming path: native makes the Claude call and pipes its tokens into
+      // the Grok voice socket, handing back the finished text for logging. ──
       if (useNativeStream) {
         speakingRef.current = true;
-        let fullText = "", sentUpto = 0, done = false, finalized = false;
-        const finalize = () => {
-          if (finalized) return; finalized = true;
-          const ft = fullText.trim() || "Okay.";
+        let done = false, logged = false;
+        const finishReply = (fullText) => {
+          if (logged) return; logged = true;
+          const ft = (fullText || "").trim() || "Okay.";
           const confirm = processActions(ft);
           if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
           setLastAI(cleanSpeak(ft));
           messagesRef.current = [...msgs, { role: "assistant", content: ft }];
           if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: ymdLocal(), messages: messagesRef.current.slice(-20) })); } catch {} }
         };
-        const endTurn = () => {
+        const goListen = () => {
           if (done) return; done = true;
           speakingRef.current = false;
-          if (!closedRef.current && turnRef.current === myTurn) { log("stream done → listen"); startListening(); }
+          if (!closedRef.current && turnRef.current === myTurn) { log("native turn done → listen"); startListening(); }
         };
-        speakDoneRef.current = (info) => { if (info && info.error) log("native TTS err: " + info.error); endTurn(); }; // native fires when audio finishes
-        // Forward only speakable text — never the hidden ||| action tags — to the socket.
-        const flushToTTS = (isFinal) => {
-          let region = fullText;
-          const tag = region.indexOf("|||");
-          if (tag >= 0) region = region.slice(0, tag);
-          else if (!isFinal) { let e = region.length; while (e > 0 && region[e - 1] === "|") e--; region = region.slice(0, e); }
-          const piece = region.slice(sentUpto);
-          if (!piece) return;
-          sentUpto += piece.length;
-          const spoken = cleanSpeak(piece);
-          if (spoken) VoiceCapture.speakChunk({ text: spoken }).catch(() => {});
+        coachReplyRef.current = (info) => { if (turnRef.current === myTurn) finishReply(info?.text); };   // finished brain text → log it
+        speakDoneRef.current = (info) => { if (info && info.error) log("native TTS err: " + info.error); goListen(); }; // audio finished → listen
+        coachErrorRef.current = async (info) => {   // brain call failed → reliable one-shot fallback
+          log("native brain err: " + (info?.error || "?") + " → one-shot fallback");
+          try {
+            const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: AbortSignal.timeout(15000) });
+            if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
+            const data = await res.json();
+            const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
+            finishReply(aiText);
+            speak(aiText, goListen);
+          } catch { goListen(); }
         };
-        try {
-          const [ttsTok, authTok] = USE_PROXY ? await Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : ["", null];
-          if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
-          await VoiceCapture.speakStream({ voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" });
-          const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true }, { signal: ac.signal });
-          const reader = res.body.getReader(); const decd = new TextDecoder(); let sbuf = "";
-          while (true) {
-            const { done: rdone, value } = await reader.read();
-            if (rdone) break;
-            if (closedRef.current || turnRef.current !== myTurn) { try { reader.cancel(); } catch {} try { ac.abort(); } catch {} try { await VoiceCapture.stopSpeaking(); } catch {} speakingRef.current = false; return; }
-            sbuf += decd.decode(value, { stream: true });
-            const lines = sbuf.split("\n"); sbuf = lines.pop();
-            for (const line of lines) {
-              const s = line.trim(); if (!s.startsWith("data:")) continue;
-              const js = s.slice(5).trim(); if (!js || js === "[DONE]") continue;
-              try { const ev = JSON.parse(js); if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") { fullText += ev.delta.text; flushToTTS(false); } } catch {}
-            }
-          }
-          if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
-          flushToTTS(true);
-          await VoiceCapture.speakEnd(); // no more text → Grok finishes, then fires speakDone
-          finalize();
-          log("native stream complete");
-        } catch (e) {
-          if (closedRef.current || e.name === "AbortError") { speakingRef.current = false; return; }
-          log("native stream error: " + e.message + " → one-shot fallback");
-          try { await VoiceCapture.stopSpeaking(); } catch {}
-          finalize();
-          speak(fullText.trim() || "Let's keep going.", () => { if (!closedRef.current) startListening(); });
-        }
+        const [ttsTok, authTok] = await Promise.all([grokEphemeralToken(), supabaseAccessToken()]);
+        if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
+        const body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true });
+        VoiceCapture.askAndSpeak({ endpoint: `${PROXY_BASE}/api/anthropic`, authToken: authTok || "", body, ttsToken: ttsTok || "", voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED }).catch(e => log("askAndSpeak err: " + (e?.message || e)));
         return;
       }
 

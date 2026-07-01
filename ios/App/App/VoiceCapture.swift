@@ -18,6 +18,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "askAndSpeak", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speakStream", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speakChunk", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speakEnd", returnType: CAPPluginReturnPromise),
@@ -188,6 +189,94 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     @objc func speakEnd(_ call: CAPPluginCall) {
         DispatchQueue.main.async { self.endTTSStream(); call.resolve() }
+    }
+
+    // Full native brain→voice pipeline. The native side makes the Claude call itself
+    // (URLSession CAN stream a response body, unlike WKWebView's fetch), parses the SSE
+    // token stream, and feeds each token straight into the Grok voice socket — so the
+    // coach starts talking within the first words instead of after the whole reply.
+    // The finished reply text goes back to JS via "coachReply" (for logging); "coachError"
+    // signals a failure so JS can fall back to the one-shot path.
+    private var claudeTask: Task<Void, Never>?
+    @objc func askAndSpeak(_ call: CAPPluginCall) {
+        let endpoint = call.getString("endpoint") ?? ""
+        let authTok = call.getString("authToken") ?? ""
+        let body = call.getString("body") ?? "{}"
+        let voice = call.getString("voiceId") ?? "eve"
+        let speed = max(0.7, min(1.5, call.getDouble("speed") ?? 1.0))
+        if let t = call.getString("ttsToken") { ttsToken = t }
+        if let a = call.getString("authToken"), !a.isEmpty { authToken = a }
+        guard !endpoint.isEmpty, let url = URL(string: endpoint) else {
+            notifyListeners("coachError", data: ["error": "bad endpoint"]); call.resolve(); return
+        }
+        guard !ttsToken.isEmpty || !xaiKey.isEmpty else {
+            notifyListeners("coachError", data: ["error": "no tts key"]); call.resolve(); return
+        }
+        call.resolve()   // results arrive via events, not the promise
+        DispatchQueue.main.async {
+            self.startTTSStream(voice: voice, speed: speed)   // opens the voice socket (also cancels any prior claudeTask)
+            self.claudeTask = Task { await self.streamClaude(url: url, authToken: authTok, body: body) }
+        }
+    }
+
+    // Speakable prefix of the reply so far — everything BEFORE the hidden ||| action tags
+    // (which must never be voiced). While mid-stream, also hold back a trailing partial "|".
+    private func cleanForTTS(_ full: String, final: Bool) -> String {
+        if let r = full.range(of: "|||") { return String(full[full.startIndex..<r.lowerBound]) }
+        if final { return full }
+        var s = full
+        while s.hasSuffix("|") { s = String(s.dropLast()) }
+        return s
+    }
+
+    private func streamClaude(url: URL, authToken: String, body: String) async {
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !authToken.isEmpty { req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = body.data(using: .utf8)
+        req.timeoutInterval = 30
+        var full = "", sent = ""
+        do {
+            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if status != 200 {
+                notifyListeners("coachError", data: ["error": "http \(status)"])
+                DispatchQueue.main.async { self.stopTTSInternal() }
+                return
+            }
+            for try await line in bytes.lines {
+                if Task.isCancelled { return }
+                guard line.hasPrefix("data:") else { continue }
+                let js = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                if js.isEmpty || js == "[DONE]" { continue }
+                guard let d = js.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                if (obj["type"] as? String) == "content_block_delta",
+                   let delta = obj["delta"] as? [String: Any],
+                   let text = delta["text"] as? String {
+                    full += text
+                    let clean = self.cleanForTTS(full, final: false)
+                    if clean.count > sent.count, clean.hasPrefix(sent) {
+                        let piece = String(clean.dropFirst(sent.count))
+                        sent = clean
+                        DispatchQueue.main.async { self.sendTTSDelta(piece) }
+                    }
+                }
+            }
+            if Task.isCancelled { return }
+            let finalClean = self.cleanForTTS(full, final: true)
+            if finalClean.count > sent.count, finalClean.hasPrefix(sent) {
+                let piece = String(finalClean.dropFirst(sent.count))
+                DispatchQueue.main.async { self.sendTTSDelta(piece) }
+            }
+            DispatchQueue.main.async { self.endTTSStream() }
+            notifyListeners("coachReply", data: ["text": full])
+        } catch {
+            if Task.isCancelled { return }
+            notifyListeners("coachError", data: ["error": error.localizedDescription])
+            DispatchQueue.main.async { self.stopTTSInternal() }
+        }
     }
 
     // Render an HTML document to a real PDF and present iOS's share sheet so the user
@@ -388,6 +477,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     private func stopTTSInternal() {
         ttsActive = false
+        claudeTask?.cancel(); claudeTask = nil   // stop any in-flight native Claude stream
         ttsWS?.cancel(with: .goingAway, reason: nil); ttsWS = nil
         ttsURLSession?.invalidateAndCancel(); ttsURLSession = nil
         if ttsPlayer.isPlaying { ttsPlayer.stop() }
