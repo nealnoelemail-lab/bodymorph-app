@@ -3747,6 +3747,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
+  const ttsTokenOkRef = useRef(true);      // does the native TTS socket accept the ephemeral token? (flips false on first failure)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -4259,17 +4260,32 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // ── NATIVE Grok streaming TTS — the plugin opens a WebSocket and plays audio
     // chunks as they arrive (first sound in ~0.5s). Fires "speakDone" when finished.
     const nativeStreamSpeak = () => {
+      let fallbackTried = false;
+      // withToken=true → secure ephemeral token; withToken=false → force the raw key
+      // (Grok cloned voice). Both fetch a fresh (cached) token + Supabase token, so
+      // latency is preserved when cached.
+      const speakOnce = (withToken) => {
+        const creds = USE_PROXY
+          ? Promise.all([ withToken ? grokEphemeralToken() : Promise.resolve(""), supabaseAccessToken() ])
+          : Promise.resolve(["", null]);
+        creds
+          .then(([ttsTok, authTok]) => VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" }))
+          .catch(e => { log("native speak err: " + (e?.message || e)); if (!done && !closedRef.current) browserSpeak(); else if (!done) finish(); });
+      };
       speakDoneRef.current = (info) => {
-        if (info && info.error && !done && !closedRef.current) { log("native TTS err: " + info.error); browserSpeak(); }
-        else finish();
+        if (info && info.error && !done && !closedRef.current) {
+          // If the ephemeral-token socket failed, fall back to the raw key (Grok voice) —
+          // NOT the browser voice — and remember not to try the token again this session.
+          if (USE_PROXY && ttsTokenOkRef.current && !fallbackTried) {
+            fallbackTried = true; ttsTokenOkRef.current = false;
+            log("TTS token socket failed → retry with key (Grok voice)");
+            speakOnce(false);
+          } else { log("native TTS err: " + info.error); browserSpeak(); }
+        } else finish();
       };
       const secs = Math.min(45, Math.max(6, (text.split(/\s+/).length / 2.4) + 6)); // safety cap
       capId = setTimeout(() => finish(), secs * 1000);
-      // Grab a fresh (cached) ephemeral TTS token + current Supabase token in proxy mode;
-      // both are instant when cached, so streaming latency is preserved.
-      (USE_PROXY ? Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : Promise.resolve([null, null]))
-        .then(([ttsTok, authTok]) => VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" }))
-        .catch(e => { log("native speak err: " + (e?.message || e)); if (!done && !closedRef.current) browserSpeak(); else if (!done) finish(); });
+      speakOnce(ttsTokenOkRef.current);
     };
 
     if (IS_NATIVE && USE_GROK) nativeStreamSpeak();

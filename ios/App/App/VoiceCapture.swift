@@ -231,15 +231,20 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             URLQueryItem(name: "speed", value: String(format: "%.2f", speed)),
         ]
         guard let url = comps.url else { finishTTS(error: "bad url"); return }
-        var req = URLRequest(url: url)
-        // NOTE: the xAI ephemeral token authenticates the /v1/tts *batch REST* endpoint
-        // but the streaming *WebSocket* rejected it — so streaming TTS stays on the raw
-        // key for now (STT is already proxied). Securing streaming TTS needs the
-        // sec-websocket-protocol token form or a proxied path — tracked as a follow-up.
-        req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
         let s = URLSession(configuration: .default)
         ttsURLSession = s
-        let ws = s.webSocketTask(with: req)
+        // Auth: PROXY mode hands the short-lived ephemeral token via xAI's documented
+        // WebSocket form — Sec-WebSocket-Protocol: xai-client-secret.<token> (a plain
+        // Bearer header didn't work for the socket). DIRECT mode uses the raw key. If the
+        // token socket fails, JS retries with the key (Grok voice) — never the browser voice.
+        let ws: URLSessionWebSocketTask
+        if !ttsToken.isEmpty {
+            ws = s.webSocketTask(with: url, protocols: ["xai-client-secret.\(ttsToken)"])
+        } else {
+            var req = URLRequest(url: url)
+            req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
+            ws = s.webSocketTask(with: req)
+        }
         ttsWS = ws
         ws.resume()
 
