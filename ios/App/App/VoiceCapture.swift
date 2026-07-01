@@ -66,7 +66,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     // Tuning (frames are ~100ms each via the meter timer).
     private let speechThreshold: Float = -38.0   // dBFS above which we treat sound as speech
-    private let silenceHang = 14                  // ~1.4s of silence ends a phrase — long enough to breathe / pause mid-sentence without being cut off
+    private let silenceHang = 11                  // ~1.1s of silence ends a phrase — still clears a breath/pause, but snappier than 1.4s
     private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
     private let maxFrames = 170                   // ~17s hard cap per phrase (room for a longer thought)
     private let idleFrames = 50                   // ~5s of no speech → give up, return empty

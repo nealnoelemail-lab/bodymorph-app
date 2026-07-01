@@ -3748,6 +3748,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
+  const ttsMintRef = useRef(null);         // in-flight fresh-TTS-token mint (started when listening begins → ready by speak time, no await)
   const coachReplyRef = useRef(null);      // native askAndSpeak → the finished reply text (for logging)
   const coachErrorRef = useRef(null);      // native askAndSpeak → brain-call failure (fall back to one-shot)
   const turnTimingRef = useRef({});        // DIAG: timestamps across one turn (STT → Claude → TTS)
@@ -4267,6 +4268,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // NATIVE: capture one phrase via the native plugin; the "utterance" listener
     // handles transcription. No WebView mic / analyser involved.
     if (IS_NATIVE) {
+      // Pre-mint a FRESH TTS token NOW, during the user's speech + STT, so it's ready by
+      // speak time with no await (and never reused across turns → no socket "bad response").
+      if (USE_GROK && USE_PROXY) ttsMintRef.current = grokEphemeralToken(true);
       setState("listening"); setInterim("🎙 Listening…");
       log("native listen…");
       VoiceCapture.listen().catch(e => log("native listen err: " + (e?.message||e)));
@@ -4439,11 +4443,6 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (closedRef.current) return;
     const myTurn = turnRef.current; // if a newer turn starts, this response is abandoned
     setState("processing");
-    // Refresh the ephemeral TTS token NOW (during Claude) so the voice socket gets a FRESH
-    // one at speak time — the reused/stale cached token is what Grok's socket intermittently
-    // rejects ("bad response from the server"). Fire-and-forget: the mint finishes well
-    // before TTS, so zero added latency; on failure it leaves the existing token untouched.
-    if (IS_NATIVE && USE_GROK && USE_PROXY) grokEphemeralToken(true).catch(() => {});
     if (!isInit && !idleNudge) setLastUser(userText);
 
     const prior = messagesRef.current;
@@ -4495,7 +4494,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
             speak(aiText, goListen);
           } catch { goListen(); }
         };
-        const [ttsTok, authTok] = await Promise.all([grokEphemeralToken(true), supabaseAccessToken()]); // FRESH token → socket won't "bad response"
+        // Use the fresh token already minting since listening began (no await); greeting has none yet → mint now.
+        const [minted, authTok] = await Promise.all([ttsMintRef.current || grokEphemeralToken(true), supabaseAccessToken()]);
+        const ttsTok = minted || await grokEphemeralToken(true);
         if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
         const body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true });
         VoiceCapture.askAndSpeak({ endpoint: `${PROXY_BASE}/api/anthropic`, authToken: authTok || "", body, ttsToken: ttsTok || "", voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED }).catch(e => log("askAndSpeak err: " + (e?.message || e)));
