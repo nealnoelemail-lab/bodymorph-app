@@ -3729,7 +3729,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, voiceId, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onStretchProgress, voiceId, stretchSession }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -3866,6 +3866,7 @@ ABSOLUTE RULES:
       // ── Guided stretch session ──
       const routineName = stretchSession.name || "stretch";
       const list = stretchSession.items.map((s, i) => `${i + 1}. ${s}`).join("\n");
+      const resumeAt = (stretchSession.startIndex && stretchSession.startIndex > 1) ? stretchSession.startIndex : 0;
       return `You are ${profile.name}'s personal stretch coach, guiding a calm, hands-free ${routineName} by voice.
 
 ${PERSONA}
@@ -3881,7 +3882,13 @@ HOW TO GUIDE THE SESSION:
 • After the LAST stretch, give a short cooldown and a warm closing word, and let them know the routine is complete.
 • Coaching on form only — never medical advice. If something hurts, tell them to ease off gently.
 
-Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, then immediately guide the very first stretch.`;
+TRACK PROGRESS — each time you BEGIN a stretch, append this tag at the very END of your response (after your spoken words), where N is that stretch's number from the list above (1-based):
+|||STRETCH:{"i":N}|||
+Never say or read the tag aloud — just guide the stretch naturally. (This is only so we can resume if the session gets paused.)
+
+${resumeAt
+  ? `RESUMING — ${profile.name} paused earlier and is picking back up where they left off. Give a brief, warm "welcome back", then resume RIGHT AT stretch ${resumeAt} — do NOT restart from the beginning. Begin guiding stretch ${resumeAt} now.`
+  : `Start by warmly welcoming ${profile.name} to the ${routineName} as their Coach, then immediately guide the very first stretch.`}`;
     }
 
     if (!isWorkout) {
@@ -4019,7 +4026,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
-    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO|SLEEP):(\{[^}]*\})\|\|\|/g;
+    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):(\{[^}]*\})\|\|\|/g;
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
@@ -4041,6 +4048,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       else if (m[1] === "STEPS" && onLogSteps) { onLogSteps(obj); confirm = (obj.set !== undefined) ? `✓ Steps set to ${Math.max(0, parseInt(obj.set)||0)}` : `✓ Steps updated`; }
       else if (m[1] === "SLEEP" && onLogSleep && obj.hours !== undefined) { onLogSleep(parseFloat(obj.hours)); confirm = `✓ Sleep logged: ${obj.hours}h`; }
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
+      else if (m[1] === "STRETCH" && onStretchProgress && obj.i !== undefined) { onStretchProgress(parseInt(obj.i)); } // silent resume-point tracking
     }
     return confirm;
   };
@@ -4062,7 +4070,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     } while (t && t !== prev);
     return t;
   };
-  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP):\{[^}]*\}\|\|\|/g, "").trim());
+  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):\{[^}]*\}\|\|\|/g, "").trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
@@ -6252,7 +6260,7 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
   );
 }
 
-function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch }) {
+function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch, activeStretch, stretchProgress, onStopStretch }) {
   const startGuided = (routineId, label) => {
     const ids = (routines && routines[routineId]) || DEFAULT_ROUTINES[routineId] || [];
     const items = ids.map(id => (STRETCH_TYPES.find(x=>x.id===id)||{}).label).filter(Boolean);
@@ -6318,7 +6326,13 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
                   </span>
                   <span style={{ fontSize:18 }}>{on ? "\u2713" : "+"}</span>
                 </button>
-                <button onClick={()=>startGuided(t.id, t.label)} title="Guided voice session" style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9654; Guide</button>
+                {(() => {
+                  const isActive = activeStretch && activeStretch.name === t.label;
+                  if (isActive) return (<button onClick={onStopStretch} title="Stop the guide" style={{ flexShrink:0, background:"rgba(255,90,90,0.10)", border:"1px solid rgba(255,90,90,0.55)", borderRadius:10, color:"#ff9a9a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9632; Stop</button>);
+                  const p = stretchProgress;
+                  const canResume = !!(p && p.name === t.label && p.index > 0 && p.index < count && (Date.now() - (p.at || 0) < 30 * 60 * 1000));
+                  return (<button onClick={()=>startGuided(t.id, t.label)} title={canResume ? `Resume at stretch ${p.index}` : "Guided voice session"} style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>{canResume ? "▶ Resume" : "▶ Guide"}</button>);
+                })()}
                 <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#3d8eff", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
             );
@@ -9694,7 +9708,14 @@ export default function BodyMorph() {
   const [hydration, setHydration] = useState({ date: ymdLocal(), cups: 0, goal: 8 });
   const [homeVoice, setHomeVoice] = useState(false); // voice coach launched from home
   const [voiceState, setVoiceState] = useState(null); // listening | processing | speaking — for the card indicator
-  const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items})
+  const [stretchSession, setStretchSession] = useState(null); // active guided stretch routine ({name, items, startIndex?})
+  const [stretchProgress, setStretchProgress] = useState(() => { try { return JSON.parse(localStorage.getItem("bodymorph_stretchprogress") || "null"); } catch { return null; } }); // {name, index} resume point
+  const stretchProgressUpdate = useCallback((name, index) => {
+    const next = { name, index, at: Date.now() };
+    setStretchProgress(next);
+    try { localStorage.setItem("bodymorph_stretchprogress", JSON.stringify(next)); } catch {}
+  }, []);
+  const clearStretchProgress = useCallback(() => { setStretchProgress(null); try { localStorage.removeItem("bodymorph_stretchprogress"); } catch {} }, []);
   const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
   const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
@@ -10423,6 +10444,7 @@ export default function BodyMorph() {
       onLogSteps={logStepsFromVoice}
       onLogSleep={logSleepFromVoice}
       onCheckTodo={checkTodo}
+      onStretchProgress={stretchSession ? (i) => stretchProgressUpdate(stretchSession.name, i) : undefined}
       voiceId={coachVoice?.id}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
@@ -10482,7 +10504,7 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} onGuidedStretch={(session)=>{ primeTTS(); setStretchSession(session); setHomeVoice(true); }} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session)=>{ primeTTS(); const p = stretchProgress; const recent = !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
