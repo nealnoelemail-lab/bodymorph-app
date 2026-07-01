@@ -3067,8 +3067,8 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
 
   const Row = ({label, value, color="#f0f0f8"}) => (
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid #2a2a3d", paddingBottom:10, marginBottom:10 }}>
-      <span style={{ color:"#9898b8", fontSize:13, fontFamily:"'Oswald',sans-serif", letterSpacing:1 }}>{label}</span>
-      <span style={{ color, fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:0.5, textAlign:"right", maxWidth:"60%" }}>{value}</span>
+      <span style={{ color:"#9898b8", fontSize:17, fontFamily:"'Oswald',sans-serif", letterSpacing:1 }}>{label}</span>
+      <span style={{ color, fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:0.5, textAlign:"right", maxWidth:"60%" }}>{value}</span>
     </div>
   );
 
@@ -3079,14 +3079,17 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
 
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 0 12px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>MY PROGRAM</div>
-        <button onClick={onReset} style={{ background:"rgba(255,61,61,0.12)", border:"1px solid rgba(255,61,61,0.4)", borderRadius:8, color:"#ff7070", padding:"7px 12px", cursor:"pointer", fontSize:13, fontFamily:"'DM Sans'", fontWeight:600 }}>RESET</button>
+        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:18 }}>&#8249; Home</button>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:29, letterSpacing:1 }}>MY PROGRAM</div>
+        <button onClick={onReset} style={{ background:"rgba(255,61,61,0.12)", border:"1px solid rgba(255,61,61,0.4)", borderRadius:8, color:"#ff7070", padding:"7px 12px", cursor:"pointer", fontSize:17, fontFamily:"'DM Sans'", fontWeight:600 }}>RESET</button>
       </div>
+
+      {/* Print / Save PDF — same native print sheet as the meal plan */}
+      <button onClick={()=>printProgramSummary(program, profile, mealPlan, dietPref || profile.dietPref)} style={{ width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:16, marginBottom:14 }}>🖨 Print / Save PDF</button>
 
       {/* Profile details */}
       <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:accent, marginBottom:12 }}>PROFILE</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:1, color:accent, marginBottom:12 }}>PROFILE</div>
         <Row label="NAME"           value={profile.name} />
         <Row label="GOAL"           value={profile.goal.split("(")[0].trim()} color={accent} />
         <Row label="FOCUS"          value={profile.focus.split("(")[0].trim()} />
@@ -3101,15 +3104,15 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
 
       {/* Weekly schedule */}
       <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:accent, marginBottom:12 }}>WEEKLY SCHEDULE</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:1, color:accent, marginBottom:12 }}>WEEKLY SCHEDULE</div>
         {sched.map((d,i) => (
           <div key={i} style={{ borderBottom:"1px solid #2a2a3d", paddingBottom:10, marginBottom:10 }}>
-            <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1 }}>{d.day}</div>
-            <div style={{ color:accent, fontSize:14, fontFamily:"'Bebas Neue'", letterSpacing:0.5 }}>{d.type}</div>
+            <div style={{ fontFamily:"'Bebas Neue'", fontSize:23, letterSpacing:1 }}>{d.day}</div>
+            <div style={{ color:accent, fontSize:18, fontFamily:"'Bebas Neue'", letterSpacing:0.5 }}>{d.type}</div>
             {d.workout && d.workout.length > 0 && (
               <div style={{ marginTop:4, display:"flex", flexWrap:"wrap", gap:4 }}>
                 {d.workout.map((ex,j) => (
-                  <span key={j} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:6, padding:"2px 8px", fontSize:11.5, color:"#c8c8e0", fontFamily:"'DM Sans'" }}>{ex.exercise}</span>
+                  <span key={j} style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:6, padding:"3px 9px", fontSize:15, color:"#c8c8e0", fontFamily:"'DM Sans'" }}>{ex.exercise}</span>
                 ))}
               </div>
             )}
@@ -3119,7 +3122,7 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
 
       {/* Nutrition + Meal Plan */}
       <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:accent, marginBottom:12 }}>NUTRITION</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:1, color:accent, marginBottom:12 }}>NUTRITION</div>
         <Row label="DIET STYLE"   value={(dietPref || profile.dietPref || "mediterranean")} color={accent} />
         <Row label="DAILY CALORIES" value={`${nMac.dailyCalories} cal`} />
         <Row label="PROTEIN"      value={nMac.protein} />
@@ -3130,17 +3133,17 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
         {mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length > 0 ? (
           <div style={{ marginTop:14 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:1, color:"#dcdcf0" }}>✨ AI MEAL PLAN</span>
-              {mealPlan.totals && <span style={{ fontSize:11.5, color:"#9898b8" }}>{mealPlan.totals.cal} cal · {mealPlan.totals.protein}p · {mealPlan.totals.carbs}c · {mealPlan.totals.fats}f</span>}
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1, color:"#dcdcf0" }}>✨ AI MEAL PLAN</span>
+              {mealPlan.totals && <span style={{ fontSize:15, color:"#9898b8" }}>{mealPlan.totals.cal} cal · {mealPlan.totals.protein}p · {mealPlan.totals.carbs}c · {mealPlan.totals.fats}f</span>}
             </div>
             {mealPlan.meals.map((ml,mi)=>(
               <div key={mi} style={{ marginBottom:10 }}>
                 <div style={{ marginBottom:4 }}>
-                  <div style={{ fontFamily:"'DM Sans'", fontSize:10.5, letterSpacing:1, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
-                  {ml.name && <div style={{ fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.5, color:accent }}>{ml.name}</div>}
+                  <div style={{ fontFamily:"'DM Sans'", fontSize:14, letterSpacing:1, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
+                  {ml.name && <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:0.5, color:accent }}>{ml.name}</div>}
                 </div>
                 {(ml.items||[]).map((it,ii)=>(
-                  <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, color:"#c8c8e0", padding:"2px 0" }}>
+                  <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:16, color:"#c8c8e0", padding:"2px 0" }}>
                     <span>{it.food} <span style={{color:"#74748a"}}>· {it.grams}g</span></span>
                     <span style={{ color:"#9898b8", whiteSpace:"nowrap", marginLeft:8 }}>{it.cal}c · {it.protein}p</span>
                   </div>
@@ -3149,13 +3152,13 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
             ))}
           </div>
         ) : (
-          <div style={{ marginTop:12, fontSize:12.5, color:"#74748a", lineHeight:1.5 }}>No AI meal plan saved yet — generate one in Nutrition → Generate Meal Plan, tap “Use This Plan,” and it'll appear here.</div>
+          <div style={{ marginTop:12, fontSize:16, color:"#74748a", lineHeight:1.5 }}>No AI meal plan saved yet — generate one in Nutrition → Generate Meal Plan, tap “Use This Plan,” and it'll appear here.</div>
         )}
       </div>
 
       {/* Reset notice */}
       <div style={{ background:"rgba(255,61,61,0.07)", border:"1px solid rgba(255,61,61,0.25)", borderRadius:12, padding:"12px 16px" }}>
-        <div style={{ color:"#ff7070", fontSize:12.5, lineHeight:1.6 }}>
+        <div style={{ color:"#ff7070", fontSize:16, lineHeight:1.6 }}>
           ⚠ Tap <strong>RESET</strong> to clear your profile and rebuild your program from scratch. Your workout history will be preserved.
         </div>
       </div>
@@ -9299,6 +9302,59 @@ ${meals}
 <p style="margin-top:24px;color:#888;font-size:12px">Macro estimates from USDA data. Portions in grams. Log each meal once eaten.</p>
 </body></html>`;
   printHtml(html, `Meal Plan${name ? " — " + name : ""}`);
+}
+
+// Print / Save-as-PDF the full Program Summary — profile, weekly schedule, nutrition
+// targets, and the saved AI meal plan — via the same native-safe print sheet as the meal plan.
+function printProgramSummary(program, profile, mealPlan, dietPref) {
+  if (!profile) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  const name = profile.name;
+  const levelMap = { "Beginner":"I", "Intermediate":"II", "Advanced":"III", "Pro":"IV" };
+  const nMac = macrosFor(profile, dietPref || profile.dietPref || "mediterranean");
+  const trainDays = (profile.trainingDays||[]).sort((a,b)=>a-b).map(d=>DAY_NAMES[d]).join(", ");
+  const rowsHtml = (pairs) => pairs.map(([l,v]) => `<tr><td>${esc(l)}</td><td class="n">${esc(v)}</td></tr>`).join("");
+  const profileRows = rowsHtml([
+    ["Name", profile.name], ["Goal", (profile.goal||"").split("(")[0].trim()], ["Focus", (profile.focus||"").split("(")[0].trim()],
+    ["Fitness Level", `Level ${levelMap[profile.fitnessLevel]||"I"} — ${profile.fitnessLevel||""}`],
+    ["Age", profile.age ? profile.age+" yrs" : "—"], ["Weight", profile.weight ? profile.weight+" lbs" : "—"],
+    ["Height", profile.heightFt ? `${profile.heightFt}' ${profile.heightIn||0}"` : "—"],
+    ["Activity Level", profile.activityLevel||"—"], ["Session Length", (profile.sessionTime||"")+" min"], ["Training Days", trainDays || "—"],
+  ]);
+  const nutrRows = rowsHtml([
+    ["Diet Style", dietPref || profile.dietPref || "mediterranean"], ["Daily Calories", `${nMac.dailyCalories} cal`],
+    ["Protein", nMac.protein], ["Carbs", nMac.carbs], ["Fats", nMac.fats],
+    ...(profile.bodyFat ? [["Body Fat", profile.bodyFat+"%"]] : []),
+  ]);
+  const days = ((program && program.weeklySchedule) || []).map(d => {
+    const ex = (d.workout||[]).map(e => esc(e.exercise)).join(", ");
+    return `<div class="day"><b>${esc(d.day)}</b> — <span class="type">${esc(d.type)}</span>${d.focus ? ` · ${esc(d.focus)}` : ""}${ex ? `<div class="ex">${ex}</div>` : ""}</div>`;
+  }).join("");
+  const meals = (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length)
+    ? mealPlan.meals.map(ml => {
+        const rows = (ml.items||[]).map(it => `<tr><td>${esc(it.food)} <span class="g">· ${esc(it.grams)}g</span></td><td class="n">${esc(it.cal)}c · ${esc(it.protein)}p</td></tr>`).join("");
+        return `<h3>${esc(ml.slot)}${ml.name ? ` — <span class="dish">${esc(ml.name)}</span>` : ""}</h3><table>${rows}</table>`;
+      }).join("")
+    : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Program${name ? " — " + esc(name) : ""}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
+h1{font-size:24px;margin:0 0 2px}.sub{color:#666;font-size:13px;margin-bottom:18px}
+h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#7a8a00;margin:22px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px}
+h3{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#7a8a00;margin:14px 0 4px}
+.dish{text-transform:none;letter-spacing:0;color:#222;font-size:15px}
+table{width:100%;border-collapse:collapse}td{padding:5px 0;border-bottom:1px solid #eee;font-size:14px;vertical-align:top}
+td.n{text-align:right;color:#555;white-space:nowrap}
+.day{padding:6px 0;border-bottom:1px solid #eee;font-size:14px}.type{color:#7a8a00}.ex{color:#666;font-size:13px;margin-top:2px}.g{color:#999}
+@media print{body{margin:0}h2,h3{page-break-after:avoid}}</style></head><body>
+<h1>My Program${name ? ` — ${esc(name)}` : ""}</h1>
+<div class="sub">${esc((profile.focus||"").split("(")[0].trim())} · ${esc((profile.goal||"").split("(")[0].trim())} · ${new Date().toLocaleDateString()}</div>
+<h2>Profile</h2><table>${profileRows}</table>
+${days ? `<h2>Weekly Schedule</h2>${days}` : ""}
+<h2>Nutrition</h2><table>${nutrRows}</table>
+${meals ? `<h2>AI Meal Plan${mealPlan.totals ? ` <span style="color:#999;font-weight:400;text-transform:none;letter-spacing:0">(${esc(mealPlan.totals.cal)} cal · ${esc(mealPlan.totals.protein)}p)</span>` : ""}</h2>${meals}` : ""}
+<p style="margin-top:24px;color:#888;font-size:12px">Fitness guidance, not medical advice. Warm up, use good form, and stop if anything hurts.</p>
+</body></html>`;
+  printHtml(html, `Program${name ? " — " + name : ""}`);
 }
 
 // Aggregate a day's meal plan into a 7-day shopping list: sum grams per unique
