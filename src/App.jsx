@@ -4445,7 +4445,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     setState("processing");
     if (!isInit && !idleNudge) setLastUser(userText);
 
-    const prior = messagesRef.current.slice(-16); // cap history sent to Claude → bounded input = faster first token + lower cost (recent-week memory is in the prompt separately)
+    // Cap only THIS SESSION's live turns sent to Claude (bounds input growth = speed + cost).
+    // Cross-day memory is untouched: the rolling 7-day daily summaries live in the prompt
+    // (recentSummaryRef), and the workout prompt shows each exercise's real logged "Last session".
+    const prior = messagesRef.current.slice(-28); // ~14 exchanges — plenty for a long workout session
     const msgs = isInit
       ? (prior.length
           ? [...prior, { role: "user", content: "(I just reopened the app a bit later in the day. Greet me briefly by name and pick up our conversation naturally — do not restart the check-in or re-ask what we already covered.)" }]
