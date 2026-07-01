@@ -3740,7 +3740,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const [micLevel, setMicLevel] = useState(0); // live input level for the meter
   const [lastTiming, setLastTiming] = useState(null); // DIAG: per-turn latency breakdown
   const [dbg, setDbg] = useState([]); // on-screen diagnostic log
-  const log = useCallback((m) => { setDbg(d => [...d.slice(-4), m]); if (IS_NATIVE) { try { VoiceCapture.nativeLog({ msg: m }); } catch {} } }, []);
+  const log = useCallback((m) => setDbg(d => [...d.slice(-4), m]), []); // (native-console bridge available via VoiceCapture.nativeLog if we need to debug again)
 
   const vsRef        = useRef("idle");
   const voiceIdRef   = useRef(null);
