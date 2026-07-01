@@ -4499,8 +4499,74 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!isInit) messagesRef.current = msgs;
 
     const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
+    const useNativeStream = IS_NATIVE && USE_GROK && !USE_GROK_LLM; // pipe Claude's tokens straight into Grok's TTS socket
     const ac = new AbortController();
     try {
+      // ── Native streaming path: forward Claude's tokens into the Grok voice socket as
+      // they arrive, so the coach starts speaking BEFORE the full reply is written. ──
+      if (useNativeStream) {
+        speakingRef.current = true;
+        let fullText = "", sentUpto = 0, done = false, finalized = false;
+        const finalize = () => {
+          if (finalized) return; finalized = true;
+          const ft = fullText.trim() || "Okay.";
+          const confirm = processActions(ft);
+          if (confirm) { setLogConfirm(confirm); setTimeout(() => setLogConfirm(null), 3500); }
+          setLastAI(cleanSpeak(ft));
+          messagesRef.current = [...msgs, { role: "assistant", content: ft }];
+          if (companion) { try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: ymdLocal(), messages: messagesRef.current.slice(-20) })); } catch {} }
+        };
+        const endTurn = () => {
+          if (done) return; done = true;
+          speakingRef.current = false;
+          if (!closedRef.current && turnRef.current === myTurn) { log("stream done → listen"); startListening(); }
+        };
+        speakDoneRef.current = (info) => { if (info && info.error) log("native TTS err: " + info.error); endTurn(); }; // native fires when audio finishes
+        // Forward only speakable text — never the hidden ||| action tags — to the socket.
+        const flushToTTS = (isFinal) => {
+          let region = fullText;
+          const tag = region.indexOf("|||");
+          if (tag >= 0) region = region.slice(0, tag);
+          else if (!isFinal) { let e = region.length; while (e > 0 && region[e - 1] === "|") e--; region = region.slice(0, e); }
+          const piece = region.slice(sentUpto);
+          if (!piece) return;
+          sentUpto += piece.length;
+          const spoken = cleanSpeak(piece);
+          if (spoken) VoiceCapture.speakChunk({ text: spoken }).catch(() => {});
+        };
+        try {
+          const [ttsTok, authTok] = USE_PROXY ? await Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : ["", null];
+          if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
+          await VoiceCapture.speakStream({ voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" });
+          const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true }, { signal: ac.signal });
+          const reader = res.body.getReader(); const decd = new TextDecoder(); let sbuf = "";
+          while (true) {
+            const { done: rdone, value } = await reader.read();
+            if (rdone) break;
+            if (closedRef.current || turnRef.current !== myTurn) { try { reader.cancel(); } catch {} try { ac.abort(); } catch {} try { await VoiceCapture.stopSpeaking(); } catch {} speakingRef.current = false; return; }
+            sbuf += decd.decode(value, { stream: true });
+            const lines = sbuf.split("\n"); sbuf = lines.pop();
+            for (const line of lines) {
+              const s = line.trim(); if (!s.startsWith("data:")) continue;
+              const js = s.slice(5).trim(); if (!js || js === "[DONE]") continue;
+              try { const ev = JSON.parse(js); if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") { fullText += ev.delta.text; flushToTTS(false); } } catch {}
+            }
+          }
+          if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
+          flushToTTS(true);
+          await VoiceCapture.speakEnd(); // no more text → Grok finishes, then fires speakDone
+          finalize();
+          log("native stream complete");
+        } catch (e) {
+          if (closedRef.current || e.name === "AbortError") { speakingRef.current = false; return; }
+          log("native stream error: " + e.message + " → one-shot fallback");
+          try { await VoiceCapture.stopSpeaking(); } catch {}
+          finalize();
+          speak(fullText.trim() || "Let's keep going.", () => { if (!closedRef.current) startListening(); });
+        }
+        return;
+      }
+
       // ── Non-streaming path (browser voice already starts instantly) ──
       if (!useStreaming) {
         let aiText;

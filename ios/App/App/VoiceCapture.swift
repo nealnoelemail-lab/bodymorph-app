@@ -18,6 +18,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speakStream", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speakChunk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speakEnd", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopSpeaking", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "printDoc", returnType: CAPPluginReturnPromise),
     ]
@@ -166,6 +169,27 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         call.resolve()
     }
 
+    // Streaming variant: open the socket NOW (speakStream), feed text as Claude generates
+    // it (speakChunk), then close it (speakEnd). Grok's TTS socket synthesizes as text
+    // arrives, so the coach starts talking before the full reply exists — the latency win.
+    @objc func speakStream(_ call: CAPPluginCall) {
+        let voice = call.getString("voiceId") ?? "eve"
+        let speed = max(0.7, min(1.5, call.getDouble("speed") ?? 1.0))
+        if let t = call.getString("ttsToken") { ttsToken = t }
+        if let a = call.getString("authToken"), !a.isEmpty { authToken = a }
+        guard !ttsToken.isEmpty || !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
+        DispatchQueue.main.async { self.startTTSStream(voice: voice, speed: speed); call.resolve() }
+    }
+
+    @objc func speakChunk(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        DispatchQueue.main.async { self.sendTTSDelta(text); call.resolve() }
+    }
+
+    @objc func speakEnd(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { self.endTTSStream(); call.resolve() }
+    }
+
     // Render an HTML document to a real PDF and present iOS's share sheet so the user
     // can Save to Files, Print (AirPrint), Mail, or AirDrop it. WKWebView's window.open
     // and window.print() don't surface any UI inside a Capacitor app, so we do it natively.
@@ -217,7 +241,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         ttsEngineReady = true
     }
 
-    private func startTTS(text: String, voice: String, speed: Double) {
+    // Shared: reset state + open the Grok TTS WebSocket. Auth: PROXY mode hands the
+    // short-lived ephemeral token via xAI's WebSocket form (Sec-WebSocket-Protocol:
+    // xai-client-secret.<token>); DIRECT mode uses the raw key. Returns the socket, or
+    // nil on a bad URL. Callers then either send the whole text at once (startTTS) or
+    // stream text deltas in as Claude generates them (startTTSStream).
+    private func prepAndOpenTTS(voice: String, speed: Double) -> URLSessionWebSocketTask? {
         stopTTSInternal()
         let session = AVAudioSession.sharedInstance()
         try? session.setActive(true)
@@ -235,13 +264,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             URLQueryItem(name: "optimize_streaming_latency", value: "2"),
             URLQueryItem(name: "speed", value: String(format: "%.2f", speed)),
         ]
-        guard let url = comps.url else { finishTTS(error: "bad url"); return }
+        guard let url = comps.url else { return nil }
         let s = URLSession(configuration: .default)
         ttsURLSession = s
-        // Auth: PROXY mode hands the short-lived ephemeral token via xAI's documented
-        // WebSocket form — Sec-WebSocket-Protocol: xai-client-secret.<token> (a plain
-        // Bearer header didn't work for the socket). DIRECT mode uses the raw key. If the
-        // token socket fails, JS retries with the key (Grok voice) — never the browser voice.
         let ws: URLSessionWebSocketTask
         if !ttsToken.isEmpty {
             ws = s.webSocketTask(with: url, protocols: ["xai-client-secret.\(ttsToken)"])
@@ -252,13 +277,38 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
         ttsWS = ws
         ws.resume()
+        return ws
+    }
 
+    // One-shot: send the whole reply at once. (Fallback path + non-streaming callers.)
+    private func startTTS(text: String, voice: String, speed: Double) {
+        guard let ws = prepAndOpenTTS(voice: voice, speed: speed) else { finishTTS(error: "bad url"); return }
         if let msg = try? JSONSerialization.data(withJSONObject: ["type": "text.delta", "delta": text]),
            let str = String(data: msg, encoding: .utf8) {
             ws.send(.string(str)) { _ in }
         }
         ws.send(.string("{\"type\":\"text.done\"}")) { _ in }
         receiveTTS()
+    }
+
+    // Streaming: open the socket now; text arrives via sendTTSDelta() and completes via
+    // endTTSStream(). Audio plays as it's synthesized so the coach starts talking early.
+    private func startTTSStream(voice: String, speed: Double) {
+        guard prepAndOpenTTS(voice: voice, speed: speed) != nil else { finishTTS(error: "bad url"); return }
+        receiveTTS()
+    }
+
+    private func sendTTSDelta(_ text: String) {
+        guard let ws = ttsWS, ttsActive, !text.isEmpty else { return }
+        if let msg = try? JSONSerialization.data(withJSONObject: ["type": "text.delta", "delta": text]),
+           let str = String(data: msg, encoding: .utf8) {
+            ws.send(.string(str)) { _ in }
+        }
+    }
+
+    private func endTTSStream() {
+        guard let ws = ttsWS, ttsActive else { return }
+        ws.send(.string("{\"type\":\"text.done\"}")) { _ in }
     }
 
     private func receiveTTS() {
