@@ -3,7 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY } from "./aiproxy";
+import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy } from "./aiproxy";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -3779,6 +3779,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   // parent's tap handler, so here we just grab the mic + start the greeting. ───
   const arm = useCallback(async () => {
     setError(null);
+    warmProxy(); // spin up the proxy functions NOW so the 1st real turn isn't a cold start
     // NATIVE (iOS/Android): the WebView mic is dead, so capture through the native
     // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
     if (IS_NATIVE) {
@@ -3819,6 +3820,16 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
       setError("Microphone blocked. In Safari, tap 'aA' in the address bar → Website Settings → Microphone → Allow, then reopen the coach.");
     }
   }, [requestWakeLock]);
+
+  // Keep the proxy's serverless functions hot for the whole session. Without this they
+  // idle out during a rest between sets and the next turn eats a cold start (the
+  // intermittent 10-20s lag). A cheap OPTIONS ping every 25s keeps them warm.
+  useEffect(() => {
+    if (!armed || !USE_PROXY) return;
+    warmProxy();
+    const id = setInterval(() => { if (!closedRef.current) warmProxy(); }, 25000);
+    return () => clearInterval(id);
+  }, [armed]);
 
   // ── System prompt ──────────────────────────────────────────────────────────
   const isStretch = !!(stretchSession && stretchSession.items && stretchSession.items.length);

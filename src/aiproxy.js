@@ -79,6 +79,18 @@ export async function grokTtsFetch(body, opts = {}) {
 
 export const PROXY_BASE = API_BASE;
 
+// Keep the proxy's serverless functions warm during a voice session so a turn never
+// pays a cold-start penalty. OPTIONS is a CORS preflight the functions answer instantly
+// (before any auth/work), so it spins the Node instance up cheaply. Each function is a
+// SEPARATE serverless function, so we ping all three the voice pipeline uses.
+// Fire-and-forget; errors are irrelevant (the point is just to wake the instance).
+export function warmProxy() {
+  if (!USE_PROXY) return;
+  for (const path of ["/api/anthropic", "/api/grok-stt", "/api/grok-token"]) {
+    fetch(`${API_BASE}${path}`, { method: "OPTIONS" }).catch(() => {});
+  }
+}
+
 // The user's Supabase access token — the native STT proxy uses it to authenticate.
 export async function supabaseAccessToken() {
   try {
