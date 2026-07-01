@@ -52,6 +52,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var ttsCompleted = 0
     private var ttsStreamDone = false
     private var ttsActive = false
+    private var ttsStartTime: CFAbsoluteTime = 0   // DIAG: TTS start → first audio out
+    private var ttsFirstAudio = false
     private var hasSpeech = false
     private var speechFrames = 0
     private var silenceFrames = 0
@@ -222,6 +224,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         applyOutputRoute()                       // keep playback on speaker / earbuds
         setupTTSEngine()
         ttsScheduled = 0; ttsCompleted = 0; ttsStreamDone = false; ttsActive = true
+        ttsStartTime = CFAbsoluteTimeGetCurrent(); ttsFirstAudio = false   // DIAG
 
         var comps = URLComponents(string: "wss://api.x.ai/v1/tts")!
         comps.queryItems = [
@@ -309,6 +312,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             guard self.ttsActive else { return }
             if !self.ttsEngine.isRunning { try? self.ttsEngine.start() }
             if !self.ttsPlayer.isPlaying { self.ttsPlayer.play() }
+            if !self.ttsFirstAudio {   // DIAG: first audio scheduled → report TTS latency once
+                self.ttsFirstAudio = true
+                let ms = Int((CFAbsoluteTimeGetCurrent() - self.ttsStartTime) * 1000)
+                self.notifyListeners("speakStart", data: ["ttsMs": ms])
+            }
             self.ttsScheduled += 1
             self.ttsPlayer.scheduleBuffer(buf) {
                 DispatchQueue.main.async { self.ttsCompleted += 1; self.checkTTSComplete() }
@@ -462,6 +470,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // then emit the resulting TEXT to JS. Routes to Cartesia (Ink-Whisper) or OpenAI
     // (Whisper) based on the provider passed from JS — both return JSON {"text": ...}.
     private func transcribe(_ url: URL) {
+        let sttT0 = CFAbsoluteTimeGetCurrent()   // DIAG: measure STT network round-trip
         let useProxy = !apiBase.isEmpty && !authToken.isEmpty
         let useGrok = (provider == "grok") && !xaiKey.isEmpty
         let useCartesia = (provider == "cartesia") && !cartesiaKey.isEmpty
@@ -516,7 +525,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             if status == 200, let data = data,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
-                self.notifyListeners("utterance", data: ["text": text])
+                let sttMs = Int((CFAbsoluteTimeGetCurrent() - sttT0) * 1000)   // DIAG
+                self.notifyListeners("utterance", data: ["text": text, "sttMs": sttMs])
             } else {
                 let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                 self.notifyListeners("empty", data: ["error": "http \(status): \(String(bodyStr.prefix(140)))"])

@@ -3738,6 +3738,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const [logConfirm, setLogConfirm] = useState(null);
   const [error, setError] = useState(null);
   const [micLevel, setMicLevel] = useState(0); // live input level for the meter
+  const [lastTiming, setLastTiming] = useState(null); // DIAG: per-turn latency breakdown
   const [dbg, setDbg] = useState([]); // on-screen diagnostic log
   const log = useCallback((m) => setDbg(d => [...d.slice(-4), m]), []);
 
@@ -3747,6 +3748,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
+  const turnTimingRef = useRef({});        // DIAG: timestamps across one turn (STT → Claude → TTS)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -4452,9 +4454,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   useEffect(() => {
     if (!IS_NATIVE) return;
     const handles = [];
-    VoiceCapture.addListener("utterance", ({ text }) => {
+    VoiceCapture.addListener("utterance", ({ text, sttMs }) => {
       if (closedRef.current) return;
+      turnTimingRef.current = { heard: sttMs || 0, tHeard: performance.now() }; // DIAG
       respondRef.current?.(text);
+    }).then(h => handles.push(h));
+    VoiceCapture.addListener("speakStart", ({ ttsMs }) => {  // DIAG: coach's first audio out
+      const t = turnTimingRef.current;
+      if (!t || !t.tHeard) return;
+      const afterTranscript = performance.now() - t.tHeard;   // Claude generate + TTS to first audio
+      const spoke = ttsMs || 0;
+      setLastTiming({ heard: t.heard, thought: Math.max(0, Math.round(afterTranscript - spoke)), spoke });
+      t.tHeard = 0; // one report per turn
     }).then(h => handles.push(h));
     VoiceCapture.addListener("empty", (info) => {
       if (info && info.error) log("transcribe: " + info.error);
@@ -4766,10 +4777,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // The coach runs hands-free in the BACKGROUND — no on-screen overlay. The only
   // visible indicator is the small animated bar inside the Voice Coach card on Home.
   // (The diagnostic strip below is kept for development; flip to `true` to show it.)
-  const SHOW_VOICE_DEBUG = false;
+  const SHOW_VOICE_DEBUG = true; // DIAG: temporarily ON to read the per-turn latency breakdown
   if (SHOW_VOICE_DEBUG) return (
     <div onClick={()=>setDbg([])} style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,22,0.94)", borderTop:"1px solid #2a2a3d", padding:"7px 12px 14px", fontFamily:"ui-monospace,Menlo,monospace", fontSize:10.5, color:"#9898b8", lineHeight:1.55 }}>
       <div style={{ color:"#e8ff00" }}>🎙 {vs}{interim ? " · " + interim.replace(/[🎙\s]+/g," ").trim() : ""} · mic {Math.round(micLevel)}</div>
+      {lastTiming && <div style={{ color:"#00e5ff", fontWeight:700, fontSize:13 }}>
+        ⏱ heard {(lastTiming.heard/1000).toFixed(1)}s · thought {(lastTiming.thought/1000).toFixed(1)}s · spoke {(lastTiming.spoke/1000).toFixed(1)}s
+        {"  = "}{((lastTiming.heard+lastTiming.thought+lastTiming.spoke)/1000).toFixed(1)}s total
+      </div>}
       {lastUser && <div style={{ color:"#c8c8e0" }}>heard: "{lastUser}"</div>}
       {dbg.slice(-4).map((m,i)=><div key={i}>· {m}</div>)}
     </div>
