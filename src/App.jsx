@@ -639,6 +639,7 @@ const STRETCH_TYPES = [
   { id:"cobra",         label:"Cobra Pose",            emoji:"\uD83D\uDC0D" },
   { id:"pigeon",        label:"Pigeon Pose",           emoji:"\uD83D\uDD4A\uFE0F" },
   { id:"warrior",       label:"Warrior Pose",          emoji:"\u2694\uFE0F" },
+  { id:"tree-pose",     label:"Tree Pose",             emoji:"\uD83C\uDF33" },
   { id:"triangle",      label:"Triangle Pose",         emoji:"\uD83D\uDD3A" },
   { id:"forward-fold",  label:"Forward Fold",          emoji:"\uD83E\uDD38" },
   { id:"seated-twist",  label:"Seated Spinal Twist",   emoji:"\uD83C\uDF00" },
