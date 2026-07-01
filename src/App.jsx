@@ -4452,9 +4452,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!isInit) messagesRef.current = msgs;
 
     const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
-    // Native streaming: the NATIVE side makes the Claude call and pipes its tokens straight
-    // into the Grok voice socket (WKWebView can't stream fetch; URLSession in Swift can).
-    const useNativeStream = IS_NATIVE && USE_GROK && USE_PROXY && !USE_GROK_LLM;
+    // Native streaming (VoiceCapture.askAndSpeak) is built + works, but proved flaky on
+    // device (intermittent Grok TTS-socket "bad response"). DISABLED for now — back on the
+    // reliable non-streaming one-shot path. Revisit with proper on-device logging.
+    const useNativeStream = false && IS_NATIVE && USE_GROK && USE_PROXY && !USE_GROK_LLM;
     const ac = new AbortController();
     try {
       // ── Native streaming path: native makes the Claude call and pipes its tokens into
@@ -4772,7 +4773,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // The coach runs hands-free in the BACKGROUND — no on-screen overlay. The only
   // visible indicator is the small animated bar inside the Voice Coach card on Home.
   // (The diagnostic strip below is kept for development; flip to `true` to show it.)
-  const SHOW_VOICE_DEBUG = true; // DIAG: ON to confirm the trimmed prompt drops the "thought" time
+  const SHOW_VOICE_DEBUG = false; // coach runs hands-free in the background — no on-screen strip
   if (SHOW_VOICE_DEBUG) return (
     <div onClick={()=>setDbg([])} style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,22,0.94)", borderTop:"1px solid #2a2a3d", padding:"7px 12px 14px", fontFamily:"ui-monospace,Menlo,monospace", fontSize:10.5, color:"#9898b8", lineHeight:1.55 }}>
       <div style={{ color:"#e8ff00" }}>🎙 {vs}{interim ? " · " + interim.replace(/[🎙\s]+/g," ").trim() : ""} · mic {Math.round(micLevel)}</div>
