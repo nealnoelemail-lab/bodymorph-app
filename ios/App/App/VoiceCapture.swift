@@ -15,6 +15,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     public let jsName = "VoiceCapture"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configure", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "nativeLog", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
@@ -125,8 +126,18 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     // Capture ONE phrase, then emit a `utterance` event with the audio (or an
     // `empty` event if nothing was said). JS calls this at the start of each turn.
+    // ── Debug logging bridge → Xcode console (real, copy-pasteable timestamps) ──
+    private let bootTime = CFAbsoluteTimeGetCurrent()
+    private func ts() -> String { String(format: "+%6.2fs", CFAbsoluteTimeGetCurrent() - bootTime) }
+    private func blog(_ m: String) { print("[BM \(ts())] \(m)") }
+    @objc func nativeLog(_ call: CAPPluginCall) {
+        blog("JS  " + (call.getString("msg") ?? ""))
+        call.resolve()
+    }
+
     @objc func listen(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
+            self.blog("listen() called  (ttsActive=\(self.ttsActive), recording=\(self.capturing))")
             self.beginRecording()
             call.resolve()
         }
@@ -407,6 +418,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     // One-shot: send the whole reply at once. (Fallback path + non-streaming callers.)
     private func startTTS(text: String, voice: String, speed: Double) {
+        blog("TTS start (one-shot, \(text.count) chars)")
         guard let ws = prepAndOpenTTS(voice: voice, speed: speed) else { finishTTS(error: "bad url"); return }
         if let msg = try? JSONSerialization.data(withJSONObject: ["type": "text.delta", "delta": text]),
            let str = String(data: msg, encoding: .utf8) {
@@ -490,6 +502,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             if !self.ttsFirstAudio {   // DIAG: first audio scheduled → report TTS latency once
                 self.ttsFirstAudio = true
                 let ms = Int((CFAbsoluteTimeGetCurrent() - self.ttsStartTime) * 1000)
+                self.blog("TTS first audio out (+\(ms)ms from socket open)")
                 self.notifyListeners("speakStart", data: ["ttsMs": ms])
             }
             self.ttsScheduled += 1
@@ -505,7 +518,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 
     private func finishTTS(error: String?) {
         guard ttsActive else { return }
-        if let error = error { print("[VoiceCapture] TTS: \(error)") }
+        blog("TTS done (err=\(error ?? "none"))")
         let hadError = error != nil
         stopTTSInternal()
         notifyListeners("speakDone", data: hadError ? ["error": error!] : [:])
@@ -693,8 +706,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
         try? FileManager.default.removeItem(at: url)
+        blog("STT POST → (\(body.count) bytes)")
         URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err = err {
+                self.blog("STT net err: \(err.localizedDescription)")
                 self.notifyListeners("empty", data: ["error": "net: \(err.localizedDescription)"]); return
             }
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -702,9 +717,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let text = json["text"] as? String {
                 let sttMs = Int((CFAbsoluteTimeGetCurrent() - sttT0) * 1000)   // DIAG
+                self.blog("STT done \(sttMs)ms: \"\(text)\"")
                 self.notifyListeners("utterance", data: ["text": text, "sttMs": sttMs])
             } else {
                 let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                self.blog("STT http \(status)")
                 self.notifyListeners("empty", data: ["error": "http \(status): \(String(bodyStr.prefix(140)))"])
             }
         }.resume()
