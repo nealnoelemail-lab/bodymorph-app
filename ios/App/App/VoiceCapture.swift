@@ -232,9 +232,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         ]
         guard let url = comps.url else { finishTTS(error: "bad url"); return }
         var req = URLRequest(url: url)
-        // Prefer the short-lived ephemeral token (keeps the real key off the device);
-        // fall back to the raw key only in direct mode.
-        req.setValue("Bearer \(ttsToken.isEmpty ? xaiKey : ttsToken)", forHTTPHeaderField: "Authorization")
+        // NOTE: the xAI ephemeral token authenticates the /v1/tts *batch REST* endpoint
+        // but the streaming *WebSocket* rejected it — so streaming TTS stays on the raw
+        // key for now (STT is already proxied). Securing streaming TTS needs the
+        // sec-websocket-protocol token form or a proxied path — tracked as a follow-up.
+        req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
         let s = URLSession(configuration: .default)
         ttsURLSession = s
         let ws = s.webSocketTask(with: req)
