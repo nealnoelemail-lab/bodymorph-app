@@ -4457,10 +4457,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!isInit) messagesRef.current = msgs;
 
     const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
-    // Native streaming (VoiceCapture.askAndSpeak) is built + works, but proved flaky on
-    // device (intermittent Grok TTS-socket "bad response"). DISABLED for now — back on the
-    // reliable non-streaming one-shot path. Revisit with proper on-device logging.
-    const useNativeStream = false && IS_NATIVE && USE_GROK && USE_PROXY && !USE_GROK_LLM;
+    // Native streaming (VoiceCapture.askAndSpeak): native makes the Claude call and pipes
+    // its tokens into the Grok voice socket so the coach starts talking at the first word.
+    // Re-enabled now that the fresh-token-per-turn fix stopped the socket "bad response".
+    const useNativeStream = IS_NATIVE && USE_GROK && USE_PROXY && !USE_GROK_LLM;
     const ac = new AbortController();
     try {
       // ── Native streaming path: native makes the Claude call and pipes its tokens into
@@ -4495,7 +4495,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
             speak(aiText, goListen);
           } catch { goListen(); }
         };
-        const [ttsTok, authTok] = await Promise.all([grokEphemeralToken(), supabaseAccessToken()]);
+        const [ttsTok, authTok] = await Promise.all([grokEphemeralToken(true), supabaseAccessToken()]); // FRESH token → socket won't "bad response"
         if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
         const body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true });
         VoiceCapture.askAndSpeak({ endpoint: `${PROXY_BASE}/api/anthropic`, authToken: authTok || "", body, ttsToken: ttsTok || "", voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED }).catch(e => log("askAndSpeak err: " + (e?.message || e)));
