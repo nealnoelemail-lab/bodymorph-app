@@ -4439,6 +4439,11 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (closedRef.current) return;
     const myTurn = turnRef.current; // if a newer turn starts, this response is abandoned
     setState("processing");
+    // Refresh the ephemeral TTS token NOW (during Claude) so the voice socket gets a FRESH
+    // one at speak time — the reused/stale cached token is what Grok's socket intermittently
+    // rejects ("bad response from the server"). Fire-and-forget: the mint finishes well
+    // before TTS, so zero added latency; on failure it leaves the existing token untouched.
+    if (IS_NATIVE && USE_GROK && USE_PROXY) grokEphemeralToken(true).catch(() => {});
     if (!isInit && !idleNudge) setLastUser(userText);
 
     const prior = messagesRef.current;
