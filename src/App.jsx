@@ -4499,7 +4499,11 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     if (!isInit) messagesRef.current = msgs;
 
     const useStreaming = !USE_CARTESIA && !USE_GROK && !USE_GROK_LLM && !!(ELEVEN_KEY && voiceIdRef.current); // stream only matters when TTS has network latency
-    const useNativeStream = IS_NATIVE && USE_GROK && !USE_GROK_LLM; // pipe Claude's tokens straight into Grok's TTS socket
+    // DISABLED: piping Claude's stream through the WebView's fetch fails on iOS WKWebView
+    // ("bad response from the server" — WKWebView won't consume a streaming SSE body). The
+    // proper streaming fix has to run in NATIVE Swift (URLSession streams Claude → forwards
+    // to the Grok TTS socket), bypassing the WebView. Until then, use the reliable non-stream path.
+    const useNativeStream = false && IS_NATIVE && USE_GROK && !USE_GROK_LLM;
     const ac = new AbortController();
     try {
       // ── Native streaming path: forward Claude's tokens into the Grok voice socket as
@@ -4843,7 +4847,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // The coach runs hands-free in the BACKGROUND — no on-screen overlay. The only
   // visible indicator is the small animated bar inside the Voice Coach card on Home.
   // (The diagnostic strip below is kept for development; flip to `true` to show it.)
-  const SHOW_VOICE_DEBUG = true; // DIAG: temporarily ON to read the per-turn latency breakdown
+  const SHOW_VOICE_DEBUG = false; // (was temporarily ON to read the per-turn latency breakdown)
   if (SHOW_VOICE_DEBUG) return (
     <div onClick={()=>setDbg([])} style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,22,0.94)", borderTop:"1px solid #2a2a3d", padding:"7px 12px 14px", fontFamily:"ui-monospace,Menlo,monospace", fontSize:10.5, color:"#9898b8", lineHeight:1.55 }}>
       <div style={{ color:"#e8ff00" }}>🎙 {vs}{interim ? " · " + interim.replace(/[🎙\s]+/g," ").trim() : ""} · mic {Math.round(micLevel)}</div>
