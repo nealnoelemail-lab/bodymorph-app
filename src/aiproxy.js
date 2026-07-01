@@ -77,18 +77,33 @@ export async function grokTtsFetch(body, opts = {}) {
   });
 }
 
-// Mint a short-lived xAI ephemeral token for the native streaming-TTS WebSocket.
-// Only meaningful when USE_PROXY is on; returns null otherwise (native uses the raw key).
+export const PROXY_BASE = API_BASE;
+
+// The user's Supabase access token — the native STT proxy uses it to authenticate.
+export async function supabaseAccessToken() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch { return null; }
+}
+
+// A CACHED short-lived xAI ephemeral token for the native streaming-TTS WebSocket.
+// The token expires in ~10 min, so we cache it and re-mint ~1 min before expiry —
+// JS hands the current one to native on every speak(). Returns null in direct mode.
+let _grokTok = null, _grokTokExp = 0;
 export async function grokEphemeralToken() {
   if (!USE_PROXY) return null;
+  const now = Date.now();
+  if (_grokTok && now < _grokTokExp - 60000) return _grokTok; // reuse while it has >1 min left
   try {
     const res = await fetch(`${API_BASE}/api/grok-token`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(await authHeader()) },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return _grokTok;
     const data = await res.json();
-    // xAI returns the secret under a couple of possible shapes — accept either.
-    return data?.client_secret?.value || data?.value || data?.token || null;
-  } catch { return null; }
+    const tok = data?.value || data?.client_secret?.value || data?.token || null;
+    if (tok) { _grokTok = tok; _grokTokExp = data?.expires_at ? data.expires_at * 1000 : now + 540000; }
+    return _grokTok;
+  } catch { return _grokTok; }
 }

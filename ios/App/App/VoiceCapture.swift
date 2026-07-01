@@ -28,8 +28,13 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var capturing = false
     private var openaiKey = ""   // passed from JS; used for native (CORS-free) transcription
     private var cartesiaKey = "" // passed from JS; used when provider == "cartesia"
-    private var xaiKey = ""       // passed from JS; used when provider == "grok"
+    private var xaiKey = ""       // passed from JS; DIRECT-mode fallback only
     private var provider = "legacy"   // "legacy" (OpenAI Whisper) | "cartesia" (Ink-Whisper) | "grok" (Grok STT)
+    // Proxy mode (keeps the real Grok key OFF the device): STT goes to our server with
+    // the user's Supabase token; streaming TTS uses a short-lived xAI ephemeral token.
+    private var apiBase = ""      // e.g. https://bodymorph-app.vercel.app (empty = direct mode)
+    private var authToken = ""    // the user's Supabase access token (for the STT proxy)
+    private var ttsToken = ""     // short-lived xAI ephemeral token (for the TTS WebSocket)
     private var keepAlive: AVAudioPlayer?   // looping silent audio → keeps the app alive with the screen off
 
     // ── Streaming TTS (Grok WebSocket → AVAudioEngine progressive playback) ──
@@ -66,6 +71,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         if let k = call.getString("cartesiaKey"), !k.isEmpty { cartesiaKey = k }
         if let k = call.getString("xaiKey"), !k.isEmpty { xaiKey = k }
         if let p = call.getString("provider"), !p.isEmpty { provider = p.lowercased() }
+        // Proxy-mode credentials (empty when running in direct mode).
+        if let b = call.getString("apiBase") { apiBase = b.hasSuffix("/") ? String(b.dropLast()) : b }
+        if let a = call.getString("authToken"), !a.isEmpty { authToken = a }
+        if let t = call.getString("ttsToken"), !t.isEmpty { ttsToken = t }
         let session = AVAudioSession.sharedInstance()
         // Set up the session BEST-EFFORT: recording works even if a routing call
         // throws, so we only fail when the mic permission is actually denied.
@@ -136,7 +145,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         let text = (call.getString("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let voice = call.getString("voiceId") ?? "eve"
         let speed = max(0.7, min(1.5, call.getDouble("speed") ?? 1.0))   // Grok allows 0.7–1.5
-        guard !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
+        // Fresh short-lived credentials each utterance (proxy mode): the ephemeral TTS
+        // token expires in minutes, so JS passes a current one on every speak.
+        if let t = call.getString("ttsToken"), !t.isEmpty { ttsToken = t }
+        if let a = call.getString("authToken"), !a.isEmpty { authToken = a }
+        guard !ttsToken.isEmpty || !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
         guard !text.isEmpty else { notifyListeners("speakDone", data: [:]); call.resolve(); return }
         DispatchQueue.main.async {
             self.startTTS(text: text, voice: voice, speed: speed)
@@ -219,7 +232,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         ]
         guard let url = comps.url else { finishTTS(error: "bad url"); return }
         var req = URLRequest(url: url)
-        req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
+        // Prefer the short-lived ephemeral token (keeps the real key off the device);
+        // fall back to the raw key only in direct mode.
+        req.setValue("Bearer \(ttsToken.isEmpty ? xaiKey : ttsToken)", forHTTPHeaderField: "Authorization")
         let s = URLSession(configuration: .default)
         ttsURLSession = s
         let ws = s.webSocketTask(with: req)
@@ -438,20 +453,29 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // then emit the resulting TEXT to JS. Routes to Cartesia (Ink-Whisper) or OpenAI
     // (Whisper) based on the provider passed from JS — both return JSON {"text": ...}.
     private func transcribe(_ url: URL) {
+        let useProxy = !apiBase.isEmpty && !authToken.isEmpty
         let useGrok = (provider == "grok") && !xaiKey.isEmpty
         let useCartesia = (provider == "cartesia") && !cartesiaKey.isEmpty
-        let key = useGrok ? xaiKey : (useCartesia ? cartesiaKey : openaiKey)
-        guard !key.isEmpty else {
+        // Proxy mode: send to OUR server with the Supabase token — the server holds the
+        // real Grok key. Otherwise call the vendor directly (direct-mode fallback).
+        let endpoint: String, bearer: String, inferModel: Bool
+        if useProxy {
+            endpoint = apiBase + "/api/grok-stt"; bearer = authToken; inferModel = true   // server forwards to Grok
+        } else if useGrok {
+            endpoint = "https://api.x.ai/v1/stt"; bearer = xaiKey; inferModel = true
+        } else if useCartesia {
+            endpoint = "https://api.cartesia.ai/stt"; bearer = cartesiaKey; inferModel = false
+        } else {
+            endpoint = "https://api.openai.com/v1/audio/transcriptions"; bearer = openaiKey; inferModel = false
+        }
+        guard !bearer.isEmpty else {
             try? FileManager.default.removeItem(at: url)
             notifyListeners("empty", data: ["error": "no key"]); return
         }
-        let endpoint = useGrok ? "https://api.x.ai/v1/stt"
-                     : useCartesia ? "https://api.cartesia.ai/stt"
-                     : "https://api.openai.com/v1/audio/transcriptions"
         var req = URLRequest(url: URL(string: endpoint)!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         if useCartesia { req.setValue("2026-03-01", forHTTPHeaderField: "Cartesia-Version") }
         let boundary = "Boundary-\(UUID().uuidString)"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -461,7 +485,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        if !useGrok {   // Grok /stt infers the model; OpenAI + Cartesia need it specified
+        if !inferModel {   // Grok (direct or via proxy) infers the model; OpenAI + Cartesia need it
             field("model", useCartesia ? "ink-whisper" : "gpt-4o-mini-transcribe")
             field("language", "en")
         }

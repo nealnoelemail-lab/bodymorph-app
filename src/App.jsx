@@ -3,7 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, USE_PROXY } from "./aiproxy";
+import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY } from "./aiproxy";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -3783,7 +3783,10 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
     // VoiceCapture plugin (record + speaker + background audio). No getUserMedia.
     if (IS_NATIVE) {
       try {
-        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, xaiKey: XAI_KEY, provider: VOICE_PROVIDER });
+        // Proxy mode: hand native a Supabase token (STT proxy) + an ephemeral xAI token
+        // (TTS) instead of relying on the raw key, so the Grok key can leave the device.
+        const [ttsTok, authTok] = USE_PROXY ? await Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : [null, null];
+        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, xaiKey: XAI_KEY, provider: VOICE_PROVIDER, apiBase: USE_PROXY ? PROXY_BASE : "", authToken: authTok || "", ttsToken: ttsTok || "" });
         lastTickRef.current = performance.now(); // seed the watchdog so it can't fire a spurious restart at startup
         setArmed(true);
         closedRef.current = false;
@@ -4262,7 +4265,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       };
       const secs = Math.min(45, Math.max(6, (text.split(/\s+/).length / 2.4) + 6)); // safety cap
       capId = setTimeout(() => finish(), secs * 1000);
-      VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED })
+      // Grab a fresh (cached) ephemeral TTS token + current Supabase token in proxy mode;
+      // both are instant when cached, so streaming latency is preserved.
+      (USE_PROXY ? Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : Promise.resolve([null, null]))
+        .then(([ttsTok, authTok]) => VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" }))
         .catch(e => { log("native speak err: " + (e?.message || e)); if (!done && !closedRef.current) browserSpeak(); else if (!done) finish(); });
     };
 
