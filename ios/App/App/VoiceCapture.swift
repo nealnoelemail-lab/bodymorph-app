@@ -214,9 +214,42 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
         call.resolve()   // results arrive via events, not the promise
         DispatchQueue.main.async {
-            self.startTTSStream(voice: voice, speed: speed)   // opens the voice socket (also cancels any prior claudeTask)
-            self.claudeTask = Task { await self.streamClaude(url: url, authToken: authTok, body: body) }
+            self.stopTTSInternal()   // clean any prior TTS + cancel any prior claudeTask
+            self.claudeTask = Task { await self.streamClaude(url: url, authToken: authTok, body: body, voice: voice, speed: speed) }
         }
+    }
+
+    // Open the Grok voice socket for a brain-stream. Does NOT call stopTTSInternal (that
+    // would cancel the claudeTask driving this stream — askAndSpeak already cleaned up).
+    // Called LAZILY on the first token so the socket never sits idle waiting for Claude
+    // (an idle socket gets closed by the server → "bad response from the server").
+    private func openStreamTTS(voice: String, speed: Double) {
+        try? AVAudioSession.sharedInstance().setActive(true)
+        applyOutputRoute()
+        setupTTSEngine()
+        ttsScheduled = 0; ttsCompleted = 0; ttsStreamDone = false; ttsActive = true
+        ttsStartTime = CFAbsoluteTimeGetCurrent(); ttsFirstAudio = false
+        var comps = URLComponents(string: "wss://api.x.ai/v1/tts")!
+        comps.queryItems = [
+            URLQueryItem(name: "language", value: "en"),
+            URLQueryItem(name: "voice", value: voice),
+            URLQueryItem(name: "codec", value: "pcm"),
+            URLQueryItem(name: "sample_rate", value: "24000"),
+            URLQueryItem(name: "optimize_streaming_latency", value: "2"),
+            URLQueryItem(name: "speed", value: String(format: "%.2f", speed)),
+        ]
+        guard let url = comps.url else { finishTTS(error: "bad url"); return }
+        let s = URLSession(configuration: .default)
+        ttsURLSession = s
+        let ws: URLSessionWebSocketTask
+        if !ttsToken.isEmpty {
+            ws = s.webSocketTask(with: url, protocols: ["xai-client-secret.\(ttsToken)"])
+        } else {
+            var req = URLRequest(url: url)
+            req.setValue("Bearer \(xaiKey)", forHTTPHeaderField: "Authorization")
+            ws = s.webSocketTask(with: req)
+        }
+        ttsWS = ws; ws.resume(); receiveTTS()
     }
 
     // Speakable prefix of the reply so far — everything BEFORE the hidden ||| action tags
@@ -229,22 +262,19 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         return s
     }
 
-    private func streamClaude(url: URL, authToken: String, body: String) async {
+    private func streamClaude(url: URL, authToken: String, body: String, voice: String, speed: Double) async {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !authToken.isEmpty { req.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization") }
         req.httpBody = body.data(using: .utf8)
         req.timeoutInterval = 30
-        var full = "", sent = ""
+        let session = URLSession(configuration: .default)   // dedicated — don't share with the STT session
+        var full = "", sent = "", opened = false
         do {
-            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+            let (bytes, resp) = try await session.bytes(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if status != 200 {
-                notifyListeners("coachError", data: ["error": "http \(status)"])
-                DispatchQueue.main.async { self.stopTTSInternal() }
-                return
-            }
+            if status != 200 { notifyListeners("coachError", data: ["error": "http \(status)"]); return }
             for try await line in bytes.lines {
                 if Task.isCancelled { return }
                 guard line.hasPrefix("data:") else { continue }
@@ -254,28 +284,34 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                       let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
                 if (obj["type"] as? String) == "content_block_delta",
                    let delta = obj["delta"] as? [String: Any],
-                   let text = delta["text"] as? String {
+                   let text = delta["text"] as? String, !text.isEmpty {
                     full += text
                     let clean = self.cleanForTTS(full, final: false)
                     if clean.count > sent.count, clean.hasPrefix(sent) {
                         let piece = String(clean.dropFirst(sent.count))
                         sent = clean
+                        if !opened { opened = true; DispatchQueue.main.async { self.openStreamTTS(voice: voice, speed: speed) } }
                         DispatchQueue.main.async { self.sendTTSDelta(piece) }
                     }
                 }
             }
             if Task.isCancelled { return }
-            let finalClean = self.cleanForTTS(full, final: true)
-            if finalClean.count > sent.count, finalClean.hasPrefix(sent) {
-                let piece = String(finalClean.dropFirst(sent.count))
+            let fin = self.cleanForTTS(full, final: true)
+            if fin.count > sent.count, fin.hasPrefix(sent) {
+                let piece = String(fin.dropFirst(sent.count))
                 DispatchQueue.main.async { self.sendTTSDelta(piece) }
             }
-            DispatchQueue.main.async { self.endTTSStream() }
             notifyListeners("coachReply", data: ["text": full])
+            if opened { DispatchQueue.main.async { self.endTTSStream() } }
+            else { notifyListeners("speakDone", data: [:]) }   // nothing speakable → let JS resume
         } catch {
             if Task.isCancelled { return }
-            notifyListeners("coachError", data: ["error": error.localizedDescription])
-            DispatchQueue.main.async { self.stopTTSInternal() }
+            if opened {   // already speaking — finish the partial audio + log it; no fallback
+                notifyListeners("coachReply", data: ["text": full])
+                DispatchQueue.main.async { self.endTTSStream() }
+            } else {
+                notifyListeners("coachError", data: ["error": error.localizedDescription])
+            }
         }
     }
 
