@@ -4445,7 +4445,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     setState("processing");
     if (!isInit && !idleNudge) setLastUser(userText);
 
-    const prior = messagesRef.current;
+    const prior = messagesRef.current.slice(-16); // cap history sent to Claude → bounded input = faster first token + lower cost (recent-week memory is in the prompt separately)
     const msgs = isInit
       ? (prior.length
           ? [...prior, { role: "user", content: "(I just reopened the app a bit later in the day. Greet me briefly by name and pick up our conversation naturally — do not restart the check-in or re-ask what we already covered.)" }]
@@ -4495,8 +4495,10 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           } catch { goListen(); }
         };
         // Use the fresh token already minting since listening began (no await); greeting has none yet → mint now.
+        const _tok0 = performance.now();
         const [minted, authTok] = await Promise.all([ttsMintRef.current || grokEphemeralToken(true), supabaseAccessToken()]);
         const ttsTok = minted || await grokEphemeralToken(true);
+        log("token ready in " + Math.round(performance.now() - _tok0) + "ms");
         if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
         const body = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, system: buildSysPrompt(), messages: msgs, stream: true });
         VoiceCapture.askAndSpeak({ endpoint: `${PROXY_BASE}/api/anthropic`, authToken: authTok || "", body, ttsToken: ttsTok || "", voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED }).catch(e => log("askAndSpeak err: " + (e?.message || e)));

@@ -281,6 +281,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         req.httpBody = body.data(using: .utf8)
         req.timeoutInterval = 30
         let session = URLSession(configuration: .default)   // dedicated — don't share with the STT session
+        let reqT0 = CFAbsoluteTimeGetCurrent()
+        blog("Claude request sent")
         var full = "", sent = "", opened = false
         do {
             let (bytes, resp) = try await session.bytes(for: req)
@@ -301,7 +303,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                     if clean.count > sent.count, clean.hasPrefix(sent) {
                         let piece = String(clean.dropFirst(sent.count))
                         sent = clean
-                        if !opened { opened = true; DispatchQueue.main.async { self.openStreamTTS(voice: voice, speed: speed) } }
+                        if !opened { opened = true; self.blog("Claude first token (+\(Int((CFAbsoluteTimeGetCurrent()-reqT0)*1000))ms)"); DispatchQueue.main.async { self.openStreamTTS(voice: voice, speed: speed) } }
                         DispatchQueue.main.async { self.sendTTSDelta(piece) }
                     }
                 }
