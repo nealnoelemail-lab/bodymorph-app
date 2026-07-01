@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { anthropicFetch, USE_PROXY } from "./aiproxy";
 
 const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 
@@ -139,17 +140,13 @@ function summarizeWeek(d) {
 
 // Generate a short coach-facing briefing with Claude (Haiku — cheap, plenty here).
 export async function generateClientSummary(detail) {
-  if (!ANTHROPIC_KEY) return { error: "No AI key configured." };
+  if (!USE_PROXY && !ANTHROPIC_KEY) return { error: "No AI key configured." };
   const w = summarizeWeek(detail);
   const prompt =
     "You are an assistant to a fitness coach. Write a SHORT briefing (2-3 sentences, plain prose — no greeting, no preamble, no bullet points) about this client's past 7 days, so the coach can skim it before a check-in. Use the actual numbers, note what's going well, and flag the one thing to address.\n\n" +
     `Client: ${detail.name}\nMetrics: ${JSON.stringify(w)}`;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 220, messages: [{ role: "user", content: prompt }] }),
-    });
+    const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 220, messages: [{ role: "user", content: prompt }] });
     if (!res.ok) return { error: `AI error (${res.status})` };
     const data = await res.json();
     const text = (data.content?.[0]?.text || "").trim();
@@ -372,7 +369,7 @@ export async function saveEvaluation(coachId, clientId, intake, evaluation) {
 // Guardrail: fitness-coaching scope only; respects allergies + injuries; flags
 // medical red flags for physician clearance; it's a coach-reviewed DRAFT.
 export async function generateEvaluation(intake) {
-  if (!ANTHROPIC_KEY) return { error: "No AI key configured." };
+  if (!USE_PROXY && !ANTHROPIC_KEY) return { error: "No AI key configured." };
   const prompt =
     "You are an experienced fitness coach's assistant producing a DRAFT evaluation for the COACH to review (not shown to the client, not medical advice). " +
     "Stay strictly within fitness-coaching scope. Respect the client's food allergies and dietary preferences in any diet guidance. Accommodate past/current injuries in the exercise plan. " +
@@ -381,11 +378,7 @@ export async function generateEvaluation(intake) {
     "{\"assessment\":\"2-3 sentence read on where the client is + any flags\",\"diet\":\"concise diet recommendation respecting allergies/preferences\",\"exercise\":\"concise exercise routine accommodating injuries\",\"timeline\":{\"recommended\":\"e.g. 3 months\",\"realistic\":true,\"desiredVerdict\":\"is the client's desired timeframe realistic? brief why\",\"milestones\":[{\"at\":\"6 weeks\",\"expect\":\"...\"},{\"at\":\"3 months\",\"expect\":\"...\"}]}}\n\n" +
     "Client intake:\n" + JSON.stringify(intake);
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1100, messages: [{ role: "user", content: prompt }] }),
-    });
+    const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 1100, messages: [{ role: "user", content: prompt }] });
     if (!res.ok) return { error: `AI error (${res.status})` };
     const data = await res.json();
     let text = (data.content?.[0]?.text || "").trim();
