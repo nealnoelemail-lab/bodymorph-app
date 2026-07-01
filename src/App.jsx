@@ -6261,10 +6261,10 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
 }
 
 function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch, activeStretch, stretchProgress, onStopStretch }) {
-  const startGuided = (routineId, label) => {
+  const startGuided = (routineId, label, fresh) => {
     const ids = (routines && routines[routineId]) || DEFAULT_ROUTINES[routineId] || [];
     const items = ids.map(id => (STRETCH_TYPES.find(x=>x.id===id)||{}).label).filter(Boolean);
-    if (items.length && onGuidedStretch) onGuidedStretch({ name: label, items });
+    if (items.length && onGuidedStretch) onGuidedStretch({ name: label, items }, fresh);
   };
   const [sel, setSel] = useState(new Date().getDay());
   const [editRoutine, setEditRoutine] = useState(null);
@@ -6331,7 +6331,11 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
                   if (isActive) return (<button onClick={onStopStretch} title="Stop the guide" style={{ flexShrink:0, background:"rgba(255,90,90,0.10)", border:"1px solid rgba(255,90,90,0.55)", borderRadius:10, color:"#ff9a9a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>&#9632; Stop</button>);
                   const p = stretchProgress;
                   const canResume = !!(p && p.name === t.label && p.index > 0 && p.index < count && (Date.now() - (p.at || 0) < 30 * 60 * 1000));
-                  return (<button onClick={()=>startGuided(t.id, t.label)} title={canResume ? `Resume at stretch ${p.index}` : "Guided voice session"} style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>{canResume ? "▶ Resume" : "▶ Guide"}</button>);
+                  if (canResume) return (<>
+                    <button onClick={()=>startGuided(t.id, t.label)} title={`Resume at stretch ${p.index}`} style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>▶ Resume</button>
+                    <button onClick={()=>startGuided(t.id, t.label, true)} title="Start over from the beginning" style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#8a8aa0", padding:"10px 11px", cursor:"pointer", fontSize:14, fontWeight:700 }}>↻</button>
+                  </>);
+                  return (<button onClick={()=>startGuided(t.id, t.label)} title="Guided voice session" style={{ flexShrink:0, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.45)", borderRadius:10, color:"#d9e07a", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>▶ Guide</button>);
                 })()}
                 <button onClick={()=>setEditRoutine(t.id)} style={{ flexShrink:0, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#3d8eff", padding:"10px 12px", cursor:"pointer", fontSize:12.5, fontWeight:600 }}>Edit</button>
               </div>
@@ -10504,7 +10508,7 @@ export default function BodyMorph() {
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session)=>{ primeTTS(); const p = stretchProgress; const recent = !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
