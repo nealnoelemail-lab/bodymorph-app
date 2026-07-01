@@ -23,13 +23,35 @@ function sb() {
 // True if the Supabase env needed to verify tokens is present.
 export const authConfigured = () => !!(SUPA_URL() && SUPA_ANON());
 
+// ── Local JWT verification (fast path) ──────────────────────────────────────
+// Supabase signs access tokens with ES256; the matching PUBLIC keys live at the
+// project's JWKS endpoint. Verifying the signature locally (JWKS cached in memory)
+// avoids a network round-trip to Supabase's auth server on EVERY proxy call — which
+// was both a per-call delay and rate-limited (the intermittent voice lag). jose is
+// imported dynamically inside try/catch: if it can't load or the token doesn't
+// verify, we fall back to getUser() below, so auth is never WORSE than before.
+let _jwks = null;
+async function verifyLocally(token) {
+  try {
+    const url = SUPA_URL();
+    if (!url) return null;
+    const { jwtVerify, createRemoteJWKSet } = await import("jose");
+    if (!_jwks) _jwks = createRemoteJWKSet(new URL(`${url}/auth/v1/.well-known/jwks.json`));
+    const { payload } = await jwtVerify(token, _jwks);   // checks signature + expiry
+    if (!payload?.sub) return null;
+    return { id: payload.sub, email: payload.email || null, role: payload.role || null };
+  } catch { return null; }
+}
+
 // Verify the caller's Supabase access token (Authorization: Bearer …). Returns the
 // user object, or null if the token is missing/invalid (or Supabase isn't configured).
 export async function authUser(req) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return null;
-  const client = sb();
+  const local = await verifyLocally(token);   // fast: local signature check, no round-trip
+  if (local) return local;
+  const client = sb();                         // fallback: ask Supabase (legacy path)
   if (!client) return null;
   try {
     const { data, error } = await client.auth.getUser(token);
