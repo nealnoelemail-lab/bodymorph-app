@@ -91,19 +91,22 @@ export async function supabaseAccessToken() {
 // The token expires in ~10 min, so we cache it and re-mint ~1 min before expiry —
 // JS hands the current one to native on every speak(). Returns null in direct mode.
 let _grokTok = null, _grokTokExp = 0;
-export async function grokEphemeralToken() {
+// forceRefresh=true bypasses the cache and mints a brand-new token — used to RECOVER
+// from a failed TTS socket (a stale/expired token re-mints cleanly). On a forced
+// mint failure we return null (NOT the stale token) so the caller can fall through.
+export async function grokEphemeralToken(forceRefresh = false) {
   if (!USE_PROXY) return null;
   const now = Date.now();
-  if (_grokTok && now < _grokTokExp - 60000) return _grokTok; // reuse while it has >1 min left
+  if (!forceRefresh && _grokTok && now < _grokTokExp - 60000) return _grokTok; // reuse while it has >1 min left
   try {
     const res = await fetch(`${API_BASE}/api/grok-token`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(await authHeader()) },
     });
-    if (!res.ok) return _grokTok;
+    if (!res.ok) return forceRefresh ? null : _grokTok;
     const data = await res.json();
     const tok = data?.value || data?.client_secret?.value || data?.token || null;
     if (tok) { _grokTok = tok; _grokTokExp = data?.expires_at ? data.expires_at * 1000 : now + 540000; }
     return _grokTok;
-  } catch { return _grokTok; }
+  } catch { return forceRefresh ? null : _grokTok; }
 }

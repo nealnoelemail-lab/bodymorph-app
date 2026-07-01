@@ -3747,7 +3747,6 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const cartesiaVoiceIdRef = useRef(null); // Cartesia voice id when USE_CARTESIA (null → CARTESIA_DEFAULT_VOICE; per-coach clone id later)
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
-  const ttsTokenOkRef = useRef(true);      // does the native TTS socket accept the ephemeral token? (flips false on first failure)
   const messagesRef  = useRef([]);
   const recogRef     = useRef(null);
   const speakingRef  = useRef(false);
@@ -4260,13 +4259,14 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // ── NATIVE Grok streaming TTS — the plugin opens a WebSocket and plays audio
     // chunks as they arrive (first sound in ~0.5s). Fires "speakDone" when finished.
     const nativeStreamSpeak = () => {
-      let fallbackTried = false;
-      // withToken=true → secure ephemeral token; withToken=false → force the raw key
-      // (Grok cloned voice). Both fetch a fresh (cached) token + Supabase token, so
-      // latency is preserved when cached.
-      const speakOnce = (withToken) => {
+      let retried = false;
+      // freshToken=true re-mints a brand-new ephemeral token (bypassing the cache) — used
+      // to recover from a failed TTS socket. Normal calls reuse the cached token, so
+      // streaming latency is preserved. If the mint returns null (proxy down), ttsToken=""
+      // makes native fall to the key while it still exists, or the browser voice after removal.
+      const speakOnce = (freshToken) => {
         const creds = USE_PROXY
-          ? Promise.all([ withToken ? grokEphemeralToken() : Promise.resolve(""), supabaseAccessToken() ])
+          ? Promise.all([ grokEphemeralToken(freshToken), supabaseAccessToken() ])
           : Promise.resolve(["", null]);
         creds
           .then(([ttsTok, authTok]) => VoiceCapture.speak({ text, voiceId: voiceIdRef.current || GROK_DEFAULT_VOICE, speed: GROK_TTS_SPEED, ttsToken: ttsTok || "", authToken: authTok || "" }))
@@ -4274,18 +4274,19 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       };
       speakDoneRef.current = (info) => {
         if (info && info.error && !done && !closedRef.current) {
-          // If the ephemeral-token socket failed, fall back to the raw key (Grok voice) —
-          // NOT the browser voice — and remember not to try the token again this session.
-          if (USE_PROXY && ttsTokenOkRef.current && !fallbackTried) {
-            fallbackTried = true; ttsTokenOkRef.current = false;
-            log("TTS token socket failed → retry with key (Grok voice)");
-            speakOnce(false);
+          // Transient token-socket failure → re-mint a FRESH token and retry ONCE. A stale
+          // or expired token re-mints cleanly; we DON'T permanently disable the token (that
+          // would drop to the browser voice for the rest of the session once the key is gone).
+          if (USE_PROXY && !retried) {
+            retried = true;
+            log("TTS socket failed → re-mint token + retry");
+            speakOnce(true);
           } else { log("native TTS err: " + info.error); browserSpeak(); }
         } else finish();
       };
       const secs = Math.min(45, Math.max(6, (text.split(/\s+/).length / 2.4) + 6)); // safety cap
       capId = setTimeout(() => finish(), secs * 1000);
-      speakOnce(ttsTokenOkRef.current);
+      speakOnce(false);
     };
 
     if (IS_NATIVE && USE_GROK) nativeStreamSpeak();
