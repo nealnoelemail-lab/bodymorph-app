@@ -146,8 +146,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         let voice = call.getString("voiceId") ?? "eve"
         let speed = max(0.7, min(1.5, call.getDouble("speed") ?? 1.0))   // Grok allows 0.7–1.5
         // Fresh short-lived credentials each utterance (proxy mode): the ephemeral TTS
-        // token expires in minutes, so JS passes a current one on every speak.
-        if let t = call.getString("ttsToken"), !t.isEmpty { ttsToken = t }
+        // token expires in minutes, so JS passes a current one on every speak. ALWAYS
+        // reflect the caller's ttsToken — an EMPTY string is meaningful: it's the retry
+        // saying "use the key (Grok voice)", so it must clear any stored token.
+        if let t = call.getString("ttsToken") { ttsToken = t }
         if let a = call.getString("authToken"), !a.isEmpty { authToken = a }
         guard !ttsToken.isEmpty || !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
         guard !text.isEmpty else { notifyListeners("speakDone", data: [:]); call.resolve(); return }
