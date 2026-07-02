@@ -7706,6 +7706,20 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
     }, 1100);
   };
 
+  // Servings stepper: scale all four macros together. Photograph/log ONE, then bump the
+  // count — two tacos, three egg rolls, etc. Scales relative to the current values, so it
+  // respects any manual edits and never drifts on whole-number bumps.
+  const qty = Number(it.qty) || 1;
+  const num = (v) => parseFloat(v) || 0;
+  const setQty = (nq) => {
+    nq = Math.max(1, Math.min(20, Math.round(nq)));
+    if (nq === qty) return;
+    const r = nq / qty;
+    onField("qty", nq);
+    ["cal","protein","carbs","fats"].forEach(k => { if (it[k] !== undefined && it[k] !== "") onField(k, String(Math.round(num(it[k]) * r))); });
+  };
+  const stepBtn = { width:38, height:38, flexShrink:0, background:"transparent", border:"none", color:"#e8ff00", fontSize:26, fontWeight:700, cursor:"pointer", lineHeight:1, display:"flex", alignItems:"center", justifyContent:"center" };
+
   return (
     <div style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
@@ -7713,7 +7727,19 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
         {canRemove && <button onClick={onRemove} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:32, cursor:"pointer", padding:0, lineHeight:1 }}>&times;</button>}
       </div>
       <input value={it.food||""} onChange={e=>onName(e.target.value)} placeholder="Type a food, e.g. boiled egg" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
-      <div style={{ display:"flex", gap:6, marginTop:6 }}>
+
+      {/* How many? — scales the macros below. */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8 }}>
+        <span style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1 }}>SERVINGS</span>
+        <div style={{ display:"flex", alignItems:"center", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:9, overflow:"hidden" }}>
+          <button onClick={()=>setQty(qty-1)} disabled={qty<=1} style={{ ...stepBtn, opacity: qty<=1 ? 0.35 : 1 }}>−</button>
+          <span style={{ minWidth:34, textAlign:"center", fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:17, color:"#f0f0f8" }}>{qty}</span>
+          <button onClick={()=>setQty(qty+1)} style={stepBtn}>+</button>
+        </div>
+        {qty>1 && <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>×{qty} · totals scaled</span>}
+      </div>
+
+      <div style={{ display:"flex", gap:6, marginTop:8 }}>
         {[["Cal","cal","#e8ff00"],["P g","protein","#3d8eff"],["C g","carbs","#9b5de5"],["F g","fats","#3ddc84"]].map(([label,id,col])=>(
           <div key={id} style={{ flex:1 }}>
             <div style={{ color:col, fontSize:12, fontWeight:600, marginBottom:2 }}>{label.toUpperCase()}</div>
@@ -7722,7 +7748,7 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
           </div>
         ))}
       </div>
-      <div style={{ color:"#9898b8", fontSize:12, marginTop:6, textAlign:"center" }}>Auto-filled estimate — edit any value (e.g. 2 eggs)</div>
+      <div style={{ color:"#9898b8", fontSize:12, marginTop:6, textAlign:"center" }}>Use −/+ for multiples (2 tacos, 3 rolls) · or edit any value directly</div>
     </div>
   );
 }
