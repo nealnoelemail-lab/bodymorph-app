@@ -8691,7 +8691,7 @@ function PhoneVerify({ user, pendingPhone, onVerified, onSignOut }) {
         ) : (
           <div style={{ width:"100%" }}>
             <div style={S.inputLabel}>Verification Code</div>
-            <input type="text" inputMode="numeric" autoComplete="one-time-code" value={code}
+            <input type="text" inputMode="numeric" autoComplete="one-time-code" name="otp" autoFocus value={code}
               onChange={e=>setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="123456"
               style={{ ...S.input, letterSpacing:6, textAlign:"center", fontSize:20 }} />
           </div>

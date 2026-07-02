@@ -279,9 +279,20 @@ export function pushDomainDebounced(name, userId, value, ms = 800) {
 // row with extra '{}', so empty extra is treated as "no profile yet" (-> wizard).
 export async function pushProfile(userId, profile) {
   if (!supabase || !userId || !profile) return { error: null };
+  // Copy the verified contact info from the auth session so the CRM has name+email+phone
+  // together (getSession is local — no network round-trip). Phone stored E.164 with a "+".
+  let email = null, phone = null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    const au = data?.session?.user;
+    email = au?.email || null;
+    phone = au?.phone ? (String(au.phone).startsWith("+") ? au.phone : "+" + au.phone) : null;
+  } catch {}
   const row = {
     id: userId,
     first_name: profile.name || null,
+    email,
+    phone,
     gender: profile.gender || null,
     goal: profile.goal || null,
     focus: profile.focus || null,
