@@ -55,6 +55,8 @@
 	<string>BodyMorph lets you pick a meal photo from your library so Macro AI can estimate its calories and macros.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>BodyMorph can save meal photos to your library.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>BodyMorph reads your steps and sleep from Apple Health so your coach can track your day automatically — no manual entry.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

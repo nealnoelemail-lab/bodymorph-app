@@ -25,6 +25,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         guard !didRegisterPlugins else { return }
         if let vc = window?.rootViewController as? CAPBridgeViewController, let bridge = vc.bridge {
             bridge.registerPluginInstance(VoiceCapturePlugin())
+            bridge.registerPluginInstance(HealthKitPlugin())
             didRegisterPlugins = true
             return
         }

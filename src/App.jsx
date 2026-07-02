@@ -12,6 +12,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
+import { syncHealth } from "./healthkit";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -10208,6 +10209,38 @@ export default function BodyMorph() {
   useEffect(() => { if (loaded) { Store.set(CARDIO_KEY, cardioSessions); cloudPush("cardio", cardioSessions); } }, [cardioSessions, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(STEPS_KEY, stepEntries); cloudPush("steps", stepEntries); } }, [stepEntries, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(SLEEP_KEY, sleepEntries); cloudPush("sleep", sleepEntries); } }, [sleepEntries, loaded, cloudPush]);
+
+  // ── Apple Health auto-sync (iOS) — pull today's steps + last night's sleep from
+  // Health (iPhone + Apple Watch) so the coach tracks them without manual entry.
+  // MERGE, never clobber: steps only ever RAISE today's count (Health is authoritative
+  // and won't undo a higher voice/manual entry); sleep fills in ONLY if nothing's logged
+  // for today yet (never overwrite a manual correction). Runs after load + on app resume.
+  const syncAppleHealth = useCallback(async () => {
+    const h = await syncHealth();
+    if (!h) return;
+    const today = ymdLocal();
+    if (h.steps > 0) {
+      setStepEntries(prev => {
+        const cur = prev.find(e => e.date === today)?.steps || 0;
+        if (h.steps <= cur) return prev;                       // never lower a higher existing count
+        const without = prev.filter(e => e.date !== today);
+        return [{ date: today, steps: h.steps }, ...without].sort((a,b)=> a.date < b.date ? 1 : -1);
+      });
+    }
+    if (h.hours > 0) {
+      setSleepEntries(prev => {
+        if ((prev || []).some(e => e.date === today)) return prev;   // don't touch a manual entry
+        return [{ date: today, hours: h.hours }, ...(prev || [])].sort((a,b)=> a.date < b.date ? 1 : -1);
+      });
+    }
+  }, []);
+  useEffect(() => {
+    if (!loaded || !IS_NATIVE) return;
+    syncAppleHealth();
+    const onVis = () => { if (document.visibilityState === "visible") syncAppleHealth(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [loaded, syncAppleHealth]);
   useEffect(() => { if (loaded) { Store.set(MEALPLAN_KEY, mealPlan); cloudPush("mealPlan", mealPlan); } }, [mealPlan, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(SUPP_KEY, supplements); cloudPush("supplements", supplements); } }, [supplements, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(PEPTIDE_KEY, peptides); cloudPush("peptides", peptides); } }, [peptides, loaded, cloudPush]);

@@ -800,3 +800,94 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }.resume()
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HealthKit plugin — reads STEPS + SLEEP from Apple Health (which aggregates the
+// iPhone's motion chip, Apple Watch, and any app that writes to Health). Read-only.
+// Lives in this file so it's already in the app target's Compile Sources (no separate
+// project-file surgery). Registered on the bridge in AppDelegate next to VoiceCapture.
+// ══════════════════════════════════════════════════════════════════════════════
+import HealthKit
+
+@objc(HealthKitPlugin)
+public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "HealthKitPlugin"
+    public let jsName = "HealthKit"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getTodaySteps", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getLastNightSleep", returnType: CAPPluginReturnPromise),
+    ]
+
+    private let store = HKHealthStore()
+
+    @objc func isAvailable(_ call: CAPPluginCall) {
+        call.resolve(["available": HKHealthStore.isHealthDataAvailable()])
+    }
+
+    private func readTypes() -> Set<HKObjectType> {
+        var s = Set<HKObjectType>()
+        if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { s.insert(steps) }
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { s.insert(sleep) }
+        return s
+    }
+
+    @objc func requestAuthorization(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else { call.resolve(["granted": false]); return }
+        store.requestAuthorization(toShare: nil, read: readTypes()) { ok, err in
+            // Apple deliberately never tells us WHICH read types the user allowed (privacy).
+            // `ok` just means the sheet completed without error — we treat that as "proceed
+            // and try to read"; a denied type simply returns zero samples.
+            call.resolve(["granted": ok, "error": err?.localizedDescription ?? ""])
+        }
+    }
+
+    // Total steps since local midnight today.
+    @objc func getTodaySteps(_ call: CAPPluginCall) {
+        guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else { call.resolve(["steps": 0]); return }
+        let start = Calendar.current.startOfDay(for: Date())
+        let pred = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+        let q = HKStatisticsQuery(quantityType: stepType, quantitySamplePredicate: pred, options: .cumulativeSum) { _, stats, _ in
+            let steps = stats?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+            call.resolve(["steps": Int(steps.rounded())])
+        }
+        store.execute(q)
+    }
+
+    // Hours ASLEEP for "last night" — samples overlapping the window from 6pm yesterday
+    // to 11am today, summing only the actually-asleep categories (not just "in bed").
+    @objc func getLastNightSleep(_ call: CAPPluginCall) {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { call.resolve(["hours": 0]); return }
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
+        let windowStart = cal.date(byAdding: .hour, value: -6, to: todayStart)!   // 6pm yesterday
+        let windowEnd = cal.date(byAdding: .hour, value: 11, to: todayStart)!     // 11am today
+        let pred = HKQuery.predicateForSamples(withStart: windowStart, end: windowEnd, options: [])
+        let q = HKSampleQuery(sampleType: sleepType, predicate: pred, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+            var seconds = 0.0
+            for s in (samples as? [HKCategorySample]) ?? [] {
+                if self.isAsleep(s.value) { seconds += s.endDate.timeIntervalSince(s.startDate) }
+            }
+            call.resolve(["hours": (seconds / 3600.0 * 10).rounded() / 10])   // one decimal
+        }
+        store.execute(q)
+    }
+
+    // "Asleep" across iOS versions: iOS 16+ splits core/deep/REM; older is a single
+    // .asleep value. Accept any asleep stage; exclude .inBed and .awake.
+    private func isAsleep(_ value: Int) -> Bool {
+        if #available(iOS 16.0, *) {
+            switch value {
+            case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                 HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                 HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+                 HKCategoryValueSleepAnalysis.asleepREM.rawValue:
+                return true
+            default: return false
+            }
+        } else {
+            return value == HKCategoryValueSleepAnalysis.asleep.rawValue
+        }
+    }
+}
