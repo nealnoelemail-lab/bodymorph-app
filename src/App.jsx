@@ -4085,7 +4085,13 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     } while (t && t !== prev);
     return t;
   };
-  const cleanSpeak = (text) => deGrovel(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):\{[^}]*\}\|\|\|/g, "").trim());
+  // Strip emoji before speaking — the model sometimes writes 👍/🤝/etc. and a TTS voice
+  // either garbles them or reads them aloud ("thumbs up emoji"). Targets the standard
+  // emoji/symbol Unicode blocks + variation selectors/ZWJ/keycap/skin-tone modifiers;
+  // deliberately does NOT touch plain digits, letters, or punctuation.
+  const EMOJI_STRIP_RE = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{2190}-\u{21FF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}〰〽㊗㊙]/gu;
+  const stripEmoji = (text) => (text || "").replace(EMOJI_STRIP_RE, "").replace(/[ \t]{2,}/g, " ");
+  const cleanSpeak = (text) => deGrovel(stripEmoji(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):\{[^}]*\}\|\|\|/g, "")).trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {

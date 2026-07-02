@@ -263,14 +263,33 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         ttsWS = ws; ws.resume(); receiveTTS()
     }
 
+    // Strip emoji before speaking — mirrors the JS stripEmoji() used on the other TTS
+    // paths. Filters specific emoji/symbol Unicode blocks + variation selectors/ZWJ/
+    // keycap so a TTS voice never garbles or reads out a 👍/🤝/etc.; plain digits,
+    // letters, and punctuation are untouched since they sit outside these ranges.
+    private func stripEmoji(_ s: String) -> String {
+        let ranges: [ClosedRange<UInt32>] = [
+            0x1F000...0x1FFFF, 0x2600...0x27BF, 0x2B00...0x2BFF, 0x2300...0x23FF, 0x2190...0x21FF,
+            0xFE00...0xFE0F, 0x200D...0x200D, 0x20E3...0x20E3, 0x3030...0x3030, 0x303D...0x303D, 0x3297...0x3297, 0x3299...0x3299,
+        ]
+        let filtered = s.unicodeScalars.filter { sc in !ranges.contains { $0.contains(sc.value) } }
+        var out = String(String.UnicodeScalarView(filtered))
+        while out.contains("  ") { out = out.replacingOccurrences(of: "  ", with: " ") }
+        return out
+    }
+
     // Speakable prefix of the reply so far — everything BEFORE the hidden ||| action tags
     // (which must never be voiced). While mid-stream, also hold back a trailing partial "|".
     private func cleanForTTS(_ full: String, final: Bool) -> String {
-        if let r = full.range(of: "|||") { return String(full[full.startIndex..<r.lowerBound]) }
-        if final { return full }
-        var s = full
-        while s.hasSuffix("|") { s = String(s.dropLast()) }
-        return s
+        let region: String
+        if let r = full.range(of: "|||") { region = String(full[full.startIndex..<r.lowerBound]) }
+        else if final { region = full }
+        else {
+            var s = full
+            while s.hasSuffix("|") { s = String(s.dropLast()) }
+            region = s
+        }
+        return stripEmoji(region)
     }
 
     private func streamClaude(url: URL, authToken: String, body: String, voice: String, speed: Double) async {
