@@ -4040,11 +4040,10 @@ TODAY: ${day.day} — ${day.type}${day.focus ? " | Focus: " + day.focus : ""}
 EXERCISES:
 ${exLines}
 
-COUNTING REPS — track each set, but let them lift in peace:
-• At the START of each exercise, confirm the working weight they're using, so you can pair it with their reps.
-• Have ${profile.name} COUNT THEIR REPS OUT LOUD as they perform them (works best with an earbud/headset in). You LISTEN and track the count SILENTLY — do NOT count along out loud or talk over their reps; that's the voice-in-the-ear they don't want mid-set.
-• The MOMENT the set ends — they stop counting, or say "done", "that's it", "last one" — THAT'S your cue to speak: LOG it right then with the weight and the rep count you heard, give your quick feedback, and call out the next set.
-• If they'd rather NOT count out loud, that's fine: tell them to just say "done with that set" when they finish — then YOU ask "how many reps did you get?", and log what they tell you.
+REPS — let them lift in peace:
+• ⛔ NEVER COUNT OUT LOUD. Never speak numbers in sequence ("one, two, three" / "8, 9, 10") — not to count with them, not to pace them, never. ${profile.name} counts their OWN reps; you stay SILENT through the set. (Their counting doesn't even reach you — the app handles it — so there is nothing for you to respond to mid-set.)
+• At the START of each exercise, confirm the working weight they're using.
+• When the set ENDS — they say "done", "that's it", "last one", or tell you they're finished — THEN you speak: ask "how many'd you get?" if you don't already know, LOG it, give quick feedback, and move on (rest timer or next set).
 
 LOG EACH SET THE INSTANT IT'S DONE — one finished set = one LOG tag immediately, in that very turn. NEVER hold logs and dump them at the end of the exercise or the workout. ${profile.name} wants to watch each set get logged as they go — it keeps them motivated.
 
@@ -4054,7 +4053,7 @@ REST TIMER — you run the rest periods:
 • After the LAST set of an exercise: NO rest tag. Celebrate the effort, name the NEXT exercise with its weight/rep target, and tell them to get set up and say when they're ready ("That's all 3 — great work. Next up: rows, 135 for 10. Get set and tell me when you're ready."). Wait for their go before coaching it.
 • After the last set of the FINAL exercise: no tag — wrap up the session warmly instead.
 
-LOGGING SETS — When ${profile.name} finishes a set (whether you counted their out-loud reps or they told you the number), append this tag on a new line at the very end of your response, after your coaching words:
+LOGGING SETS — When ${profile.name} finishes a set (they tell you the reps, or confirm the number when you ask), append this tag on a new line at the very end of your response, after your coaching words:
 |||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
 
@@ -4127,6 +4126,22 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // deliberately does NOT touch plain digits, letters, or punctuation.
   const EMOJI_STRIP_RE = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{2190}-\u{21FF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}〰〽㊗㊙]/gu;
   const stripEmoji = (text) => (text || "").replace(EMOJI_STRIP_RE, "").replace(/[ \t]{2,}/g, " ");
+  // Is this transcript just the client counting reps out loud ("one, two, three" / "4 5 6")?
+  // During a set that's NOT a turn for the coach — if we send it to Claude, Claude "helpfully"
+  // continues the count out loud (the annoying fast-counting bug). So in workout/stretch we
+  // detect a pure count and skip the coach's turn entirely (stay silent, keep listening).
+  const NUM_WORDS = new Set(["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"]);
+  const COUNT_FILLER = new Set(["and","uh","um","er","ah","ok","okay","come","on","lets","let","go","there","yeah","yep","yup","one's","more"]);
+  const isRepCounting = (text) => {
+    const toks = (text || "").toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter(Boolean);
+    if (toks.length < 2) return false;                       // "ten" alone still reaches the coach
+    let nums = 0;
+    for (const t of toks) {
+      if (/^\d+$/.test(t) || NUM_WORDS.has(t)) nums++;
+      else if (!COUNT_FILLER.has(t)) return false;           // any real word → it's a real message
+    }
+    return nums >= 2;                                        // ≥2 numbers and nothing but fillers = counting
+  };
   const cleanSpeak = (text) => deGrovel(stripEmoji(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH|REST):\{[^}]*\}\|\|\|/g, "")).trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
@@ -4397,6 +4412,8 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (!res.ok) { log("STT HTTP " + res.status); }
         const data = await res.json();
         const text = (data.text || "").trim();
+        // Workout/stretch: swallow rep-counting so the coach doesn't count back (see respondNative).
+        if (continuousListenRef.current && isRepCounting(text)) { log("ignored rep-count: " + text); if (!closedRef.current && turnRef.current === myTurn) setTimeout(startListening, 150); return; }
         // Reject silence/noise + Whisper's common hallucinations on quiet audio.
         const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
         const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
@@ -4427,6 +4444,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     const myTurn = ++turnRef.current;
     setState("processing"); setInterim("");
     const text = (rawText || "").trim();
+    // Workout/stretch: the client counting reps out loud is NOT the coach's turn — swallow
+    // it and keep listening, so the coach never counts back at them.
+    if (continuousListenRef.current && isRepCounting(text)) { log("ignored rep-count: " + text); setTimeout(startListening, 150); return; }
     const clean = text.replace(/[.!?…♪]/g, "").trim().toLowerCase();
     const NOISE = new Set(["", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm", "mm", "yeah", "okay", "ok"]);
     const isNoise = text.length < 2 || NOISE.has(clean) || /^[\[\(].*[\]\)]$/.test(text);
