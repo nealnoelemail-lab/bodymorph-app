@@ -278,6 +278,18 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         return out
     }
 
+    // How many leading Characters two strings share. Used to diff what's already been
+    // spoken (`sent`) against the latest cleaned text so we always send the true remaining
+    // tail — even when a transform (emoji removal + space-collapse in stripEmoji) retro-
+    // actively shifts earlier text. Relying on hasPrefix here would DROP the tail on any
+    // such shift → cut-off sentence endings.
+    private func commonPrefixCount(_ a: String, _ b: String) -> Int {
+        let ca = Array(a), cb = Array(b)
+        var i = 0
+        while i < ca.count, i < cb.count, ca[i] == cb[i] { i += 1 }
+        return i
+    }
+
     // Speakable prefix of the reply so far — everything BEFORE the hidden ||| action tags
     // (which must never be voiced). While mid-stream, also hold back a trailing partial "|".
     private func cleanForTTS(_ full: String, final: Bool) -> String {
@@ -319,8 +331,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
                    let text = delta["text"] as? String, !text.isEmpty {
                     full += text
                     let clean = self.cleanForTTS(full, final: false)
-                    if clean.count > sent.count, clean.hasPrefix(sent) {
-                        let piece = String(clean.dropFirst(sent.count))
+                    // Send the true remaining tail from the point where `clean` diverges
+                    // from what we've already spoken — never skip (which would cut the end).
+                    let common = self.commonPrefixCount(sent, clean)
+                    if clean.count > common {
+                        let piece = String(Array(clean).suffix(clean.count - common))
                         sent = clean
                         if !opened { opened = true; self.blog("Claude first token (+\(Int((CFAbsoluteTimeGetCurrent()-reqT0)*1000))ms)"); DispatchQueue.main.async { self.openStreamTTS(voice: voice, speed: speed) } }
                         DispatchQueue.main.async { self.sendTTSDelta(piece) }
@@ -329,8 +344,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             }
             if Task.isCancelled { return }
             let fin = self.cleanForTTS(full, final: true)
-            if fin.count > sent.count, fin.hasPrefix(sent) {
-                let piece = String(fin.dropFirst(sent.count))
+            // Final flush — always emit the remaining tail (from the divergence point),
+            // so the last words are spoken even if a late transform shifted the text.
+            let finCommon = self.commonPrefixCount(sent, fin)
+            if fin.count > finCommon {
+                let piece = String(Array(fin).suffix(fin.count - finCommon))
                 DispatchQueue.main.async { self.sendTTSDelta(piece) }
             }
             notifyListeners("coachReply", data: ["text": full])
