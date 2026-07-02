@@ -10,7 +10,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
   fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee, detectFollowups,
   listEvents, addEvent, deleteEvent,
-  listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues } from "./coach";
+  listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { syncHealth } from "./healthkit";
 
@@ -9751,30 +9751,78 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
     </div>
   );
 
-  // Compact inline weight trend (LineChart is nested elsewhere and not reusable).
+  // Compact inline weight trend — gradient area fill + a marker on the latest point.
   let chart = <div style={{ color:C.muted, fontSize:13 }}>Not enough weight data yet.</div>;
   if (pts.length >= 2) {
     const vs = pts.map(p => p.v), min = Math.min(...vs), max = Math.max(...vs), range = (max - min) || 1;
-    const W = 300, H = 90, pad = 8;
+    const W = 320, H = 110, pad = 10;
     const xy = pts.map((p, i) => [pad + i * (W - 2*pad) / (pts.length - 1), H - pad - ((p.v - min) / range) * (H - 2*pad)]);
     const down = pts[pts.length-1].v <= pts[0].v;
+    const color = down ? C.green : C.blue;
+    const line = xy.map(c => c.map(n => n.toFixed(1)).join(",")).join(" ");
+    const gid = "wtgrad";
     chart = (
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto" }}>
-        <polyline points={xy.map(c => c.join(",")).join(" ")} fill="none" stroke={down ? C.green : C.blue} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto" }} preserveAspectRatio="none">
+        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient></defs>
+        <polygon points={`${pad},${H-pad} ${line} ${W-pad},${H-pad}`} fill={`url(#${gid})`} />
+        <polyline points={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xy[xy.length-1][0]} cy={xy[xy.length-1][1]} r="4" fill={color} stroke="#0a0a0f" strokeWidth="1.5" />
       </svg>
     );
   }
 
+  // ── Hero header bits ──
+  const initials = (detail.name || "?").trim().split(/\s+/).map(s => s[0]).slice(0,2).join("").toUpperCase() || "?";
+  const daysSince = detail.lastActive ? Math.round((Date.now() - new Date(detail.lastActive + "T00:00:00").getTime()) / 86400000) : null;
+  const active = daysSince != null && daysSince <= 6;
+  const chip = { display:"inline-flex", alignItems:"center", gap:5, fontSize:12.5, color:"#3d8eff", textDecoration:"none", background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"4px 11px" };
+
+  // ── "This week" snapshot — the adherence numbers the coach never saw (they were
+  // only computed for the AI briefing). One glance = is this client on track. ──
+  const w = summarizeWeek(detail);
+  const targetWk = (detail.profile?.trainingDays || []).length || null;
+  const WeekTile = ({ value, label, sub, color }) => (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:11, padding:"12px 10px", textAlign:"center" }}>
+      <div style={{ fontFamily:"'Oswald'", fontWeight:700, fontSize:21, color: color || C.text, lineHeight:1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize:10.5, color: color || C.muted, marginTop:1 }}>{sub}</div>}
+      <div style={{ fontSize:10, color:C.muted, marginTop:4, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+    </div>
+  );
+  const wkDelta = w.weightChange7d;
+
   return wrap(
     <>
-      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
-      {(detail.email || detail.phone) && (
-        <div style={{ fontSize:13, marginBottom:2, display:"flex", gap:14, flexWrap:"wrap" }}>
-          {detail.phone && <a href={`tel:${detail.phone}`} style={{ color:"#3d8eff", textDecoration:"none" }}>📞 {detail.phone}</a>}
-          {detail.email && <a href={`mailto:${detail.email}`} style={{ color:"#3d8eff", textDecoration:"none" }}>✉️ {detail.email}</a>}
+      <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:16 }}>
+        <div style={{ width:56, height:56, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#0a0a0f" }}>{initials}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <span style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>{detail.name}</span>
+            <span style={{ fontSize:10.5, fontWeight:700, letterSpacing:0.5, padding:"3px 9px", borderRadius:20, textTransform:"uppercase",
+              ...(active ? { color:C.green, background:"rgba(61,209,132,0.12)", border:"1px solid rgba(61,209,132,0.3)" }
+                         : { color:C.red,   background:"rgba(255,96,96,0.10)", border:"1px solid rgba(255,96,96,0.3)" }) }}>
+              {active ? "● Active" : (daysSince != null ? `${daysSince}d inactive` : "No activity")}
+            </span>
+          </div>
+          <div style={{ display:"flex", gap:8, marginTop:7, flexWrap:"wrap" }}>
+            {detail.phone && <a href={`tel:${detail.phone}`} style={chip}>📞 {detail.phone}</a>}
+            {detail.email && <a href={`mailto:${detail.email}`} style={chip}>✉️ {detail.email}</a>}
+          </div>
         </div>
-      )}
-      <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
+      </div>
+
+      <div style={{ ...S.inputLabel, marginBottom:8 }}>This week</div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(92px, 1fr))", gap:8, marginBottom:18 }}>
+        <WeekTile value={`${w.workouts7d}${targetWk ? `/${targetWk}` : ""}`} label="Workouts"
+          color={targetWk ? (w.workouts7d >= targetWk ? C.green : w.workouts7d === 0 ? C.red : "#e8ff00") : "#e8ff00"} />
+        <WeekTile value={`${w.daysFoodLogged7d}/7`} label="Days logged" color={w.daysFoodLogged7d >= 5 ? C.green : w.daysFoodLogged7d <= 2 ? C.red : "#e8ff00"} />
+        <WeekTile value={w.avgSteps7d != null ? (w.avgSteps7d/1000).toFixed(1)+"k" : "—"} label="Avg steps" />
+        <WeekTile value={w.avgSleepHours7d != null ? w.avgSleepHours7d+"h" : "—"} label="Avg sleep" />
+        <WeekTile value={wkDelta == null ? "—" : `${wkDelta > 0 ? "▲" : "▼"} ${Math.abs(wkDelta)}`} sub={wkDelta != null ? "lb this wk" : null}
+          label="Weight" color={wkDelta == null ? C.muted : (wkDelta <= 0 ? C.green : C.blue)} />
+      </div>
 
       {/* What the client selected at signup — goal, targets, chosen pace + the
           realistic timeline they committed to, plus their generated program. */}

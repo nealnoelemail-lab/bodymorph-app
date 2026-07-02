@@ -127,7 +127,7 @@ export async function fetchClientDetail(clientId) {
 
 // ── AI weekly briefing ───────────────────────────────────────────────────────────
 // Distill the client's last 7 days into compact metrics for the prompt.
-function summarizeWeek(d) {
+export function summarizeWeek(d) {
   const cut = new Date(); cut.setDate(cut.getDate() - 6);
   const cutStr = ymdLocal(cut);
   const wk = (arr, key = "date") => (arr || []).filter(x => x[key] >= cutStr);
