@@ -3777,7 +3777,8 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
   const ttsMintRef = useRef(null);         // in-flight fresh-TTS-token mint (started when listening begins → ready by speak time, no await)
-  const restNudgeRef = useRef(null);       // pending rest-timer callback — when it fires, the coach barges back in ("rest's up")
+  const restNudgeRef = useRef(null);       // pending rest-timer fallback — fires the coach's "rest's up" barge-in
+  const restDoneUnsubRef = useRef(null);   // unsubscribe for the card's bm-rest-done listener (card owns the clock when mounted)
   const coachReplyRef = useRef(null);      // native askAndSpeak → the finished reply text (for logging)
   const coachErrorRef = useRef(null);      // native askAndSpeak → brain-call failure (fall back to one-shot)
   const turnTimingRef = useRef({});        // DIAG: timestamps across one turn (STT → Claude → TTS)
@@ -4041,6 +4042,7 @@ EXERCISES:
 ${exLines}
 
 REPS — let them lift in peace:
+• GROUND RULES, SPOKEN ONCE — right before the FIRST set of the day, tell them how this works, in your own words: "Count each rep out loud as you go. When you're finished, just say DONE — I'll log the set and start your rest timer." Don't repeat the full spiel at every exercise; a quick one-liner reminder only if they seem to forget.
 • ⛔ NEVER COUNT OUT LOUD. Never speak numbers in sequence ("one, two, three" / "8, 9, 10") — not to count with them, not to pace them, never. ${profile.name} counts their OWN reps; you stay SILENT through the set. (Their counting doesn't even reach you — the app handles it — so there is nothing for you to respond to mid-set.)
 • At the START of each exercise, confirm the working weight they're using.
 • When the set ENDS — they say "done", "that's it", "last one", or tell you they're finished — THEN you speak: ask "how many'd you get?" if you don't already know, LOG it, give quick feedback, and move on (rest timer or next set).
@@ -4050,6 +4052,7 @@ LOG EACH SET THE INSTANT IT'S DONE — one finished set = one LOG tag immediatel
 REST TIMER — you run the rest periods:
 • After you LOG a set and the exercise has MORE sets to go: tell them to rest ("Nice — take your 90, breathe") and append a REST tag with THAT exercise's rest seconds from the list above: |||REST:{"ex":INDEX,"secs":90}||| (same 0-based INDEX as the LOG tag; e.g. "rest 90s" → secs 90). The app runs the visible countdown and chimes when it's done. Never say the tag aloud.
 • When I tell you the rest timer finished, jump back in and call the next set ("Time's up — set 3, let's go").
+• While the rest countdown is RUNNING, do NOT start the next set early. If they chat mid-rest, chat back briefly — but hold the next set until the timer chimes, unless they explicitly say they want to skip the rest.
 • After the LAST set of an exercise: NO rest tag. Celebrate the effort, name the NEXT exercise with its weight/rep target, and tell them to get set up and say when they're ready ("That's all 3 — great work. Next up: rows, 135 for 10. Get set and tell me when you're ready."). Wait for their go before coaching it.
 • After the last set of the FINAL exercise: no tag — wrap up the session warmly instead.
 
@@ -4088,15 +4091,33 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
       else if (m[1] === "STRETCH" && onStretchProgress && obj.i !== undefined) { onStretchProgress(parseInt(obj.i)); } // silent resume-point tracking
       else if (m[1] === "REST") {
-        // Coach "presses the rest button": light up the exercise card's visible countdown
-        // (it chimes + vibrates on finish), and schedule the coach to barge back in.
+        // Coach "presses the rest button". ONE CLOCK: when the exercise card is on screen
+        // it OWNS the countdown (visible timer + chime) and tells us when it finishes via
+        // bm-rest-done — so the voice barge-in can never disagree with the on-screen timer.
+        // The plain setTimeout is only the fallback for when no card claimed the event.
         const secs = Math.max(10, Math.min(600, parseInt(obj.secs) || 90));
-        try { window.dispatchEvent(new CustomEvent("bm-rest-start", { detail: { ex: parseInt(obj.ex), secs } })); } catch {}
         clearTimeout(restNudgeRef.current);
-        restNudgeRef.current = setTimeout(() => {
+        restDoneUnsubRef.current?.();
+        const fire = () => {
           if (closedRef.current) return;
           askRef.current?.(`(The ${secs}-second rest timer just chimed — rest is over. Jump back in: tell me time's up and call the next set. If we already moved on, just keep coaching naturally — don't announce the timer.)`, false);
-        }, secs * 1000);
+        };
+        const detail = { ex: parseInt(obj.ex), secs, claimed: false };
+        try { window.dispatchEvent(new CustomEvent("bm-rest-start", { detail })); } catch {}
+        if (detail.claimed) {
+          const onDone = (e) => {
+            restDoneUnsubRef.current?.();
+            clearTimeout(restNudgeRef.current);
+            if (!(e.detail && e.detail.stopped)) fire();   // manually stopped early = they're moving on; stay quiet
+          };
+          window.addEventListener("bm-rest-done", onDone);
+          restDoneUnsubRef.current = () => { window.removeEventListener("bm-rest-done", onDone); restDoneUnsubRef.current = null; };
+          // Safety net: if the card unmounts mid-rest (screen change) its done-event never
+          // comes — still bring the coach back a bit after the expected finish.
+          restNudgeRef.current = setTimeout(() => { restDoneUnsubRef.current?.(); fire(); }, (secs + 15) * 1000);
+        } else {
+          restNudgeRef.current = setTimeout(fire, secs * 1000);
+        }
         confirm = `⏱ Rest ${secs}s`;
       }
     }
@@ -4657,6 +4678,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     return () => {
       closedRef.current = true;
       clearTimeout(restNudgeRef.current);   // no "rest's up" barge-in after the coach is closed
+      restDoneUnsubRef.current?.();
       document.removeEventListener("visibilitychange", onVis);
       try { wakeLockRef.current?.release(); wakeLockRef.current = null; } catch {}
       try { recogRef.current?.stop(); } catch {}
@@ -5038,22 +5060,38 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
         }
       } catch (e) {}
       try { if (navigator.vibrate) navigator.vibrate([200,100,200]); } catch (e) {}
+      // Coach-started rest: the chime IS the signal — tell the voice coach to jump back in.
+      if (coachRestRef.current) {
+        coachRestRef.current = false;
+        try { window.dispatchEvent(new CustomEvent("bm-rest-done", { detail: {} })); } catch {}
+      }
       return;
     }
     const t = setTimeout(()=>setRestLeft(s=>s-1), 1000);
     return () => clearTimeout(t);
   }, [resting, restLeft]);
 
+  const coachRestRef = useRef(false);   // this countdown was started by the voice coach → report back when it ends
   const startRest = () => { setRestLeft(restSecs); setResting(true); };
-  const stopRest = () => { setResting(false); setRestLeft(0); };
+  const stopRest = () => {
+    setResting(false); setRestLeft(0);
+    // Manually stopping a coach-started rest = "I'm moving early" — tell the voice
+    // coach so it cancels its barge-in instead of announcing a dead timer.
+    if (coachRestRef.current) {
+      coachRestRef.current = false;
+      try { window.dispatchEvent(new CustomEvent("bm-rest-done", { detail: { stopped: true } })); } catch {}
+    }
+  };
 
   // Voice coach "presses the rest button": after logging a set it emits a REST tag,
   // which dispatches this event — light up THIS exercise's visible countdown (same
-  // chime + vibration on finish as a manual tap).
+  // chime + vibration on finish as a manual tap). Claiming the event makes THIS
+  // countdown the single clock: the coach barges back in when WE chime (bm-rest-done),
+  // so the voice can never disagree with the numbers on screen.
   useEffect(() => {
     const onCoachRest = (e) => {
       const d = e.detail || {};
-      if (d.ex === index) { setRestLeft(d.secs || restSecs); setResting(true); }
+      if (d.ex === index) { d.claimed = true; coachRestRef.current = true; setRestLeft(d.secs || restSecs); setResting(true); }
     };
     window.addEventListener("bm-rest-start", onCoachRest);
     return () => window.removeEventListener("bm-rest-start", onCoachRest);
