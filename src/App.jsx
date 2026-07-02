@@ -3302,6 +3302,11 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
   const [customId, setCustomId] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  // Branded modal — replaces raw browser prompt()/alert() (unstyled OS dialogs that
+  // break the app's look, and behave inconsistently inside the native WKWebView).
+  const [modal, setModal] = useState(null); // {kind:"alert"|"input", title, message, placeholder, value, onSubmit}
+  const showAlert = (title, message) => setModal({ kind:"alert", title, message });
+  const showPrompt = (title, message, placeholder, onSubmit) => setModal({ kind:"input", title, message, placeholder, value:"", onSubmit });
   const isCustom = coachVoice && !COACH_VOICES.some(v => v.id === coachVoice.id);
   const currentVoiceName = coachVoice ? (isCustom ? "Coach (cloned voice)" : coachVoice.name) : "Not set";
   const previewVoice = (id) => {
@@ -3316,34 +3321,42 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
         headers: { "xi-api-key": ELEVEN_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg" },
         body: JSON.stringify({ text: sample, model_id: "eleven_turbo_v2_5" }),
       });
-    } else { alert("Add a voice API key to hear previews."); return; }
+    } else { showAlert("No Voice Key", "Add a voice API key to hear previews."); return; }
     setPreviewing(true);
     req
       .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
       .then(b => { const a = new Audio(URL.createObjectURL(b)); a.onended = () => setPreviewing(false); a.onerror = () => setPreviewing(false); return a.play(); })
-      .catch(e => { setPreviewing(false); alert("Couldn't play preview: " + e.message); });
+      .catch(e => { setPreviewing(false); showAlert("Preview Failed", "Couldn't play preview: " + e.message); });
   };
   const changePassword = async () => {
-    if (!user?.email) { alert("Coming soon."); return; }
+    if (!user?.email) { showAlert("Coming Soon", "Password reset requires an account — sign in first."); return; }
     const { error } = await sendPasswordReset(user.email);
-    alert(error ? ("Couldn't send reset email: " + error) : `Password-reset link sent to ${user.email}.`);
+    showAlert(error ? "Couldn't Send Reset" : "Reset Link Sent", error || `We emailed a password-reset link to ${user.email}.`);
   };
   const openBillingPortal = async () => {
-    if (!billingEnabled) { alert("Coming soon."); return; }
-    try { await openPortal(); } catch (e) { alert("Couldn't open billing portal: " + e.message); }
+    if (!billingEnabled) { showAlert("Coming Soon", "Billing isn't set up yet."); return; }
+    try { await openPortal(); } catch (e) { showAlert("Couldn't Open Billing", e.message); }
   };
   const subStatus = subscription?.status;
   const items = [
     { label:"Change Password", icon:"🔒", note: user?.email ? "Email yourself a reset link" : "Coming soon — requires account backend", action: changePassword },
     { label:"Update Payment", icon:"💳", note: billingEnabled ? "Manage your card in the billing portal" : "Coming soon — requires payment backend", action: openBillingPortal },
     { label:"Change Subscription", icon:"📋", note: billingEnabled ? (subStatus ? `Status: ${subStatus} — manage plan` : "Manage your plan") : "Coaching · App Only — coming soon", action: openBillingPortal },
-    { label:"Link to my coach", icon:"🔗", note:"Enter your coach's invite code", action: async ()=>{
-        const c = prompt("Enter your coach's invite code:"); if (!c) return;
-        const r = await onLinkCoach(c); alert(r?.ok ? "Linked to your coach!" : "Error: " + (r?.error || "failed")); } },
-    { label:"Become a coach", icon:"🧑‍🏫", note:"Enter your coach access code", action: async ()=>{
-        const c = prompt("Enter your coach access code:"); if (!c) return;
-        const r = await onBecomeCoach(c); if (!r?.ok) alert("Error: " + (r?.error || "failed")); } },
-    { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>alert("Coming soon.") },
+    { label:"Link to my coach", icon:"🔗", note:"Enter your coach's invite code", action: ()=>{
+        showPrompt("Link to My Coach", "Enter the invite code your coach gave you.", "e.g. COACH-1234", async (c) => {
+          if (!c) return;
+          const r = await onLinkCoach(c);
+          showAlert(r?.ok ? "Linked!" : "Couldn't Link", r?.ok ? "You're now linked to your coach." : (r?.error || "That code didn't work — check with your coach."));
+        });
+      } },
+    { label:"Become a coach", icon:"🧑‍🏫", note:"Enter your coach access code", action: ()=>{
+        showPrompt("Become a Coach", "Enter your BodyMorph coach access code.", "Access code", async (c) => {
+          if (!c) return;
+          const r = await onBecomeCoach(c);
+          if (!r?.ok) showAlert("Couldn't Activate", r?.error || "That code didn't work.");
+        });
+      } },
+    { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>showAlert("Coming Soon", "In-app support is coming soon.") },
   ];
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
@@ -3424,6 +3437,27 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
           </button>
         )}
       </div>
+
+      {modal && (
+        <div onClick={()=>setModal(null)} style={{ position:"fixed", inset:0, zIndex:300, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div onClick={e=>e.stopPropagation()} style={{ width:"100%", maxWidth:340, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:16, padding:22, boxShadow:"0 12px 40px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1, color:"#e8ff00", marginBottom:8 }}>{modal.title}</div>
+            {modal.message && <div style={{ fontSize:13.5, color:"#c8c8e0", lineHeight:1.5, marginBottom:16 }}>{modal.message}</div>}
+            {modal.kind === "input" && (
+              <input autoFocus value={modal.value} onChange={e=>setModal(m=>({ ...m, value:e.target.value }))}
+                onKeyDown={e=>{ if (e.key === "Enter" && modal.value.trim()) { modal.onSubmit(modal.value.trim()); setModal(null); } }}
+                placeholder={modal.placeholder} style={{ ...S.input, marginBottom:16 }} />
+            )}
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+              {modal.kind === "input" && <button onClick={()=>setModal(null)} style={S.btnSec}>Cancel</button>}
+              <button onClick={()=>{ if (modal.kind === "input") { if (modal.value.trim()) modal.onSubmit(modal.value.trim()); } setModal(null); }}
+                style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>
+                {modal.kind === "input" ? "Submit" : "OK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
