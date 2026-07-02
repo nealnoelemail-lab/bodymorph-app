@@ -8533,6 +8533,7 @@ function AuthScreen({ onSkip, onSignupPhone }) {
   const [mode, setMode]   = useState("signin");   // signin | signup
   const [email, setEmail] = useState("");
   const [pw, setPw]       = useState("");
+  const [showPw, setShowPw] = useState(false);    // toggle password visibility
   const [phone, setPhone] = useState("");         // mobile — verified once at signup, used for password recovery
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState("");
@@ -8592,8 +8593,14 @@ function AuthScreen({ onSkip, onSignupPhone }) {
           </div>
           <div>
             <div style={S.inputLabel}>Password</div>
-            <input type="password" autoComplete={mode==="signup"?"new-password":"current-password"} value={pw}
-              onChange={e=>setPw(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"••••••••"} style={S.input} />
+            <div style={{ position:"relative" }}>
+              <input type={showPw ? "text" : "password"} autoComplete={mode==="signup"?"new-password":"current-password"} value={pw}
+                onChange={e=>setPw(e.target.value)} placeholder={mode==="signup"?"At least 6 characters":"••••••••"} style={{ ...S.input, paddingRight:46 }} />
+              <button type="button" onClick={()=>setShowPw(s=>!s)} aria-label={showPw ? "Hide password" : "Show password"}
+                style={{ position:"absolute", right:4, top:0, bottom:0, background:"transparent", border:"none", color:"#9898b8", cursor:"pointer", padding:"0 12px", fontSize:11.5, fontWeight:700, letterSpacing:0.5, fontFamily:"'DM Sans'", display:"flex", alignItems:"center" }}>
+                {showPw ? "HIDE" : "SHOW"}
+              </button>
+            </div>
           </div>
 
           {mode === "signup" && (
