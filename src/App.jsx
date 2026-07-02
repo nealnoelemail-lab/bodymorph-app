@@ -9,7 +9,8 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
   fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee, detectFollowups,
-  listEvents, addEvent, deleteEvent } from "./coach";
+  listEvents, addEvent, deleteEvent,
+  listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 
 const C = {
@@ -3756,7 +3757,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onStretchProgress, voiceId, stretchSession }) {
+function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onStretchProgress, voiceId, stretchSession, coachCues }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -4016,8 +4017,10 @@ ${messagesRef.current.length
       const lastPerf   = lastEntry?.sets?.length
         ? "Last session: " + lastEntry.sets.slice(0, 3).map(s => `${s.weight||"?"}lbs×${s.reps||"?"}`).join(", ")
         : "No history yet";
-      const cues = formCuesRef.current[ex.exercise];
-      const cueLine = cues ? `\n   FORM CUES (from coach's video): ${cues}` : "";
+      // The coach's OWN written cues beat anything auto-extracted from a video.
+      const authored = coachCues && coachCues[(ex.exercise || "").trim().toLowerCase()];
+      const cues = authored || formCuesRef.current[ex.exercise];
+      const cueLine = cues ? `\n   FORM CUES (${authored ? "written by their coach — use these, they're the coach's own teaching" : "from coach's video"}): ${cues}` : "";
       return `${i + 1}. ${ex.exercise} — target ${ex.sets} sets × ${ex.reps} reps, rest ${ex.rest || "60s"} | Done today: ${doneSets}/${ex.sets} sets | ${lastPerf}${cueLine}`;
     }).join("\n");
 
@@ -4058,7 +4061,7 @@ Use the 0-based exercise number. Only include when you have all three values. Ne
 CORRECTING A SET — if ${profile.name} says they misspoke or wants to undo the set you just logged ("scratch that", "that was wrong", "I didn't do that set", "take that one off"), remove the last logged set for that exercise: |||LOG:{"ex":INDEX,"remove":true}|||  — then, if they give the corrected weight/reps, log the right set with a normal LOG tag. Confirm naturally; never read the tag aloud.
 
 Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright ${profile.name}, it's Coach — let's get to work"), naming today's session in one sentence, and easing into the first exercise with its weight target, rep goal, and a quick form cue.`;
-  }, [profile, day, logs, isWorkout, isStretch, stretchSession, PERSONA, companionData]);
+  }, [profile, day, logs, isWorkout, isStretch, stretchSession, PERSONA, companionData, coachCues]);
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
@@ -4586,13 +4589,15 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   useEffect(() => {
     if (!videoOverrides || !day || !day.workout) return;
     day.workout.forEach((ex) => {
+      // Coach-authored cues win — skip the video extraction (and its AI call) entirely.
+      if (coachCues && coachCues[(ex.exercise || "").trim().toLowerCase()]) return;
       const videoId = videoOverrides[ex.exercise];
       if (!videoId) return;
       fetchFormCues(videoId, ex.exercise).then(cues => {
         if (cues) formCuesRef.current[ex.exercise] = cues;
       });
     });
-  }, [day, videoOverrides]);
+  }, [day, videoOverrides, coachCues]);
 
   // ── Mount/unmount: auto-start coaching, tear down on close ──────────────────
   // The parent already called primeTTS() inside the tap, so we can arm immediately
@@ -9585,6 +9590,65 @@ function ClientEvaluation({ coachId, clientId, clientName }) {
 }
 
 // Read-only per-client view for a coach.
+// Coach-authored form cues: the coach writes the exact teaching points the client's
+// VOICE COACH speaks for an exercise (beats the auto-extracted video-description cues
+// on the client's device — the coach is the authority on their own teaching).
+function CoachCuesEditor({ coachId, clientId }) {
+  const [rows, setRows] = useState(null);      // [{ exercise, cues, updated_at }]
+  const [exName, setExName] = useState("");
+  const [cueText, setCueText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = async () => setRows(await listCoachCues(coachId, clientId));
+  useEffect(() => { setRows(null); load(); }, [coachId, clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    if (!exName.trim() || !cueText.trim() || busy) return;
+    setBusy(true); setErr("");
+    const r = await saveCoachCue(coachId, clientId, exName, cueText);
+    setBusy(false);
+    if (r.error) { setErr(r.error); return; }
+    setExName(""); setCueText(""); load();
+  };
+  const remove = async (exercise) => { await deleteCoachCue(coachId, clientId, exercise); load(); };
+  const edit = (r) => { setExName(r.exercise); setCueText(r.cues); };
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
+      <div style={{ ...S.inputLabel, marginBottom:4 }}>Form cues — spoken by the voice coach</div>
+      <div style={{ fontSize:12.5, color:C.muted, marginBottom:10, lineHeight:1.5 }}>
+        Write your own teaching points for an exercise — the voice coach says these to this client during their workout, in place of anything pulled from a video. Use the exercise's name as it appears in their program (e.g. "Hip Thrust").
+      </div>
+      {rows === null ? (
+        <div style={{ fontSize:13, color:C.muted }}>Loading…</div>
+      ) : rows.length ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:12 }}>
+          {rows.map(r => (
+            <div key={r.exercise} style={{ background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 12px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ flex:1, fontWeight:600, fontSize:14, color:C.text }}>{r.exercise}</div>
+                <button onClick={()=>edit(r)} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:6, color:C.muted, padding:"3px 9px", cursor:"pointer", fontSize:12 }}>Edit</button>
+                <button onClick={()=>remove(r.exercise)} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:6, color:"#ff6060", padding:"3px 9px", cursor:"pointer", fontSize:12 }}>Delete</button>
+              </div>
+              <div style={{ fontSize:13, color:C.muted, marginTop:5, lineHeight:1.5 }}>{r.cues}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>No cues yet — add your first below.</div>
+      )}
+      <input value={exName} onChange={e=>setExName(e.target.value)} placeholder="Exercise name (e.g. Hip Thrust)"
+        style={{ width:"100%", boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13.5, outline:"none", marginBottom:8 }} />
+      <textarea value={cueText} onChange={e=>setCueText(e.target.value)} rows={3}
+        placeholder={'Your cues, as you\'d say them — e.g. "Drive through the heels, chin tucked, full lockout at the top with a one-second squeeze."'}
+        style={{ width:"100%", boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13.5, outline:"none", resize:"vertical", fontFamily:"inherit", lineHeight:1.5 }} />
+      {err && <div style={{ color:C.red, fontSize:12.5, marginTop:6 }}>{err}</div>}
+      <button onClick={save} disabled={busy || !exName.trim() || !cueText.trim()}
+        style={{ ...S.btnSec, marginTop:8, padding:"7px 14px", fontSize:13, opacity: (busy || !exName.trim() || !cueText.trim()) ? 0.5 : 1 }}>
+        {busy ? "Saving…" : "Save cue"}
+      </button>
+    </div>
+  );
+}
+
 function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved }) {
   const [fee, setFee] = useState(clientFee == null ? "" : String(clientFee));
   const [feeSaved, setFeeSaved] = useState(false);
@@ -9729,6 +9793,8 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
 
       <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
 
+      <CoachCuesEditor coachId={coachId} clientId={clientId} />
+
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
         <div style={{ ...S.inputLabel, marginBottom:8 }}>Bodyweight trend</div>
         {chart}
@@ -9813,6 +9879,16 @@ export default function BodyMorph() {
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
   const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
   const [inviteSeed, setInviteSeed] = useState(null);     // intake from a coach invite, to pre-fill the wizard
+  const [coachCues, setCoachCues] = useState({});         // MY coach's authored form cues, keyed by lowercased exercise
+
+  // Load the coach's authored form cues for this client (voice coach prefers these
+  // over video-derived cues). Refreshes on sign-in; harmless {} offline.
+  useEffect(() => {
+    if (!hasBackend || !user?.id) { setCoachCues({}); return; }
+    let on = true;
+    fetchMyCoachCues(user.id).then(m => { if (on) setCoachCues(m || {}); });
+    return () => { on = false; };
+  }, [user?.id]);
 
   // Load all saved data from storage, then route to home (has profile) or wizard.
   // Extracted so it can run on first mount AND after a sign-in.
@@ -10512,6 +10588,7 @@ export default function BodyMorph() {
       companion={!inSession && !stretchSession}
       companionData={companionData}
       stretchSession={stretchSession}
+      coachCues={coachCues}
       onLogSet={(inSession && !stretchSession) ? handleVoiceSetLog : undefined}
       onRemoveSet={(inSession && !stretchSession) ? handleVoiceSetRemove : undefined}
       onLogFood={logFoodFromVoice}

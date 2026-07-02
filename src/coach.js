@@ -395,3 +395,48 @@ export async function generateEvaluation(intake) {
     return { evaluation };
   } catch (e) { return { error: "Couldn't parse evaluation: " + e.message }; }
 }
+
+// ── COACH-AUTHORED FORM CUES ────────────────────────────────────────────────────
+// The coach writes/edits the exact teaching points the client's VOICE COACH speaks
+// for a given exercise. On the client's device these BEAT the cues auto-extracted
+// from a pinned video's description — the coach is the authority on their teaching.
+
+// Coach side: all cues this coach has written for one client.
+export async function listCoachCues(coachId, clientId) {
+  if (!supabase || !coachId || !clientId) return [];
+  const { data, error } = await supabase.from("coach_cues")
+    .select("exercise, cues, updated_at")
+    .eq("coach_id", coachId).eq("client_id", clientId)
+    .order("exercise");
+  if (error) { console.warn("coach listCoachCues:", error.message); return []; }
+  return data || [];
+}
+
+export async function saveCoachCue(coachId, clientId, exercise, cues) {
+  if (!supabase) return { error: "No backend configured." };
+  const { error } = await supabase.from("coach_cues").upsert({
+    coach_id: coachId, client_id: clientId,
+    exercise: String(exercise || "").trim(),
+    cues: String(cues || "").trim(),
+    updated_at: new Date().toISOString(),
+  });
+  return { error: error?.message || null };
+}
+
+export async function deleteCoachCue(coachId, clientId, exercise) {
+  if (!supabase) return { error: "No backend configured." };
+  const { error } = await supabase.from("coach_cues").delete()
+    .eq("coach_id", coachId).eq("client_id", clientId).eq("exercise", exercise);
+  return { error: error?.message || null };
+}
+
+// Client side: my coach's cues for me, keyed by lowercased exercise name for the
+// voice coach's case-insensitive lookup. RLS only returns rows addressed to me.
+export async function fetchMyCoachCues(clientId) {
+  if (!supabase || !clientId) return {};
+  const { data, error } = await supabase.from("coach_cues").select("exercise, cues").eq("client_id", clientId);
+  if (error) { console.warn("coach fetchMyCoachCues:", error.message); return {}; }
+  const map = {};
+  for (const r of (data || [])) if (r.cues) map[String(r.exercise).trim().toLowerCase()] = r.cues;
+  return map;
+}
