@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- YouTube embed wrapper. The native app's WebView origin (capacitor://localhost) is not
+     a real web origin, so YouTube's embed player rejects it with error 153 ("Video player
+     configuration error"). Framing the player from THIS page — served from our real https
+     domain — gives YouTube a legitimate referrer, and the video plays. Used by the app's
+     VideoPanel/StretchVideoPanel when running natively; the browser build embeds directly. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Video</title>
+<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<script>
+  const p = new URLSearchParams(location.search);
+  const v = (p.get("v") || "").replace(/[^A-Za-z0-9_-]/g, "");   // sanitize: YouTube IDs only
+  const autoplay = p.get("autoplay") === "1" ? 1 : 0;
+  if (v) {
+    const f = document.createElement("iframe");
+    f.src = "https://www.youtube.com/embed/" + v + "?autoplay=" + autoplay + "&playsinline=1";
+    f.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+    f.allowFullscreen = true;
+    document.body.appendChild(f);
+  } else {
+    document.body.innerHTML = "<div style='color:#888;font-family:sans-serif;padding:20px'>No video specified.</div>";
+  }
+</script>
+</body>
+</html>

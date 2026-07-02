@@ -2069,6 +2069,17 @@ function demoSearchUrl(query, gender) {
   return "https://www.youtube.com/results?search_query=" + encodeURIComponent(q);
 }
 
+// YouTube embed URL that works everywhere. NATIVE: the WebView's capacitor://localhost
+// origin isn't a real web origin, so YouTube rejects direct embeds with error 153
+// ("Video player configuration error") — route through our hosted wrapper page
+// (public/yt.html on the production domain), which gives YouTube a legitimate https
+// referrer. BROWSER: embed directly as before.
+function ytEmbedSrc(videoId, autoplay = false) {
+  const ap = autoplay ? 1 : 0;
+  if (IS_NATIVE && PROXY_BASE) return `${PROXY_BASE}/yt.html?v=${encodeURIComponent(videoId)}&autoplay=${ap}`;
+  return `https://www.youtube.com/embed/${videoId}?autoplay=${ap}&playsinline=1`;
+}
+
 function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
   const vpAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   const pinnedId = videoOverrides && videoOverrides[exName];
@@ -2116,7 +2127,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
       {previewId && (
         <div style={{ marginBottom:10 }}>
           <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
-            <iframe src={"https://www.youtube.com/embed/" + previewId + "?autoplay=1"} title="Preview" frameBorder="0"
+            <iframe src={ytEmbedSrc(previewId, true)} title="Preview" frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
           </div>
@@ -2148,7 +2159,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
   if (pinnedId && showVideo) return (
     <div style={{ marginTop:10 }}>
       <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
-        <iframe src={"https://www.youtube.com/embed/" + pinnedId} title="Demo Video" frameBorder="0"
+        <iframe src={ytEmbedSrc(pinnedId)} title="Demo Video" frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
       </div>
@@ -6027,7 +6038,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
       {previewId && (
         <div style={{ marginBottom:10 }}>
           <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
-            <iframe src={"https://www.youtube.com/embed/" + previewId + "?autoplay=1"} title="Preview" frameBorder="0"
+            <iframe src={ytEmbedSrc(previewId, true)} title="Preview" frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
           </div>
@@ -6056,7 +6067,7 @@ function StretchVideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClos
   if (pinnedId && showVideo) return (
     <div style={{ marginTop:8 }}>
       <div style={{ position:"relative", paddingBottom:"56.25%", borderRadius:10, overflow:"hidden", background:"#000" }}>
-        <iframe src={"https://www.youtube.com/embed/" + pinnedId} title="Stretch Demo" frameBorder="0"
+        <iframe src={ytEmbedSrc(pinnedId)} title="Stretch Demo" frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%" }} />
       </div>
