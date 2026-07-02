@@ -65,7 +65,14 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var totalFrames = 0
 
     // Tuning (frames are ~100ms each via the meter timer).
-    private let speechThreshold: Float = -38.0   // dBFS above which we treat sound as speech
+    // dBFS above which we treat sound as speech. Sits in the GAP between the ambient
+    // noise floor and real speech: on-device logs showed background noise peaking near
+    // -37 dBFS while actual speech runs -10 to -18 dBFS. At the old -38 the noise floor
+    // touched the line, so stray noise kept registering as "speech" and resetting the
+    // silence counter → end-of-phrase never fired → mic stayed open, coach never heard.
+    // -30 clears the observed noise floor by ~7 dB while leaving ~15 dB of headroom for
+    // speech (even soft speech clears it).
+    private let speechThreshold: Float = -30.0
     private let silenceHang = 11                  // ~1.1s of silence ends a phrase — still clears a breath/pause, but snappier than 1.4s
     private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
     private let maxFrames = 170                   // ~17s hard cap per phrase (room for a longer thought)
