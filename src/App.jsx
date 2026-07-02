@@ -3384,16 +3384,21 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
           {voiceOpen && (
             <div style={{ marginTop:12 }}>
               <div style={{ fontSize:12, color:"#9898b8", marginBottom:10 }}>
-                The voice your coach speaks in.{(!ELEVEN_KEY && !USE_GROK) ? " (Add a voice API key to enable — using the basic phone voice until then.)" : ""}
+                The voice your coach speaks in. We recommend keeping your coach's own voice — it's how your coaching is meant to sound. You can preview the others below.{(!ELEVEN_KEY && !USE_GROK) ? " (Add a voice API key to enable — using the basic phone voice until then.)" : ""}
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
-                {COACH_VOICES.map(v => (
-                  <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: coachVoice?.id===v.id ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${coachVoice?.id===v.id ? "#e8ff00" : "#2a2a3d"}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
-                    <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{coachVoice?.id===v.id ? "✓" : ""}</span>
+                {COACH_VOICES.map((v, i) => {
+                  const isCoachVoice = i === 0;          // the coach's own (cloned) voice — the recommended default
+                  const selected = coachVoice?.id === v.id;
+                  return (
+                  <button key={v.id} onClick={()=>onSetVoice(v)} style={{ display:"flex", alignItems:"center", gap:10, background: selected ? "rgba(232,255,0,0.10)" : "#0e0e16", border:`1px solid ${selected ? "#e8ff00" : (isCoachVoice ? "rgba(232,255,0,0.30)" : "#2a2a3d")}`, borderRadius:9, padding:"10px 12px", cursor:"pointer", textAlign:"left", width:"100%" }}>
+                    <span style={{ width:16, color:"#e8ff00", fontWeight:700 }}>{selected ? "✓" : ""}</span>
                     <span style={{ flex:1, fontSize:14, color:"#f0f0f8" }}>{v.name}</span>
+                    {isCoachVoice && <span style={{ fontSize:10, fontWeight:700, color:"#e8ff00", background:"rgba(232,255,0,0.14)", border:"1px solid rgba(232,255,0,0.35)", borderRadius:20, padding:"2px 8px", letterSpacing:0.4, whiteSpace:"nowrap" }}>RECOMMENDED</span>}
                     <span onClick={(e)=>{ e.stopPropagation(); previewVoice(v.id); }} style={{ fontSize:12, color:"#9898b8", border:"1px solid #2a2a3d", borderRadius:6, padding:"3px 8px" }}>▶ Preview</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
               {/* Cloned coach voice: paste the ElevenLabs Voice ID */}
               <div style={{ marginTop:12, fontSize:12, color:"#9898b8", marginBottom:6 }}>Coach's cloned voice — paste its ElevenLabs Voice ID:</div>
