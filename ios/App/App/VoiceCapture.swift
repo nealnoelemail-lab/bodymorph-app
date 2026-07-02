@@ -183,6 +183,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         guard !ttsToken.isEmpty || !xaiKey.isEmpty else { notifyListeners("speakDone", data: ["error": "no key"]); call.resolve(); return }
         guard !text.isEmpty else { notifyListeners("speakDone", data: [:]); call.resolve(); return }
         DispatchQueue.main.async {
+            self.endRecording(emit: false)   // mic OFF while the coach talks (it must never hear itself)
             self.startTTS(text: text, voice: voice, speed: speed)
             call.resolve()
         }
@@ -237,6 +238,7 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
         call.resolve()   // results arrive via events, not the promise
         DispatchQueue.main.async {
+            self.endRecording(emit: false)   // mic OFF while the coach thinks/talks (a timer-initiated turn can arrive mid-listen)
             self.stopTTSInternal()   // clean any prior TTS + cancel any prior claudeTask
             self.claudeTask = Task { await self.streamClaude(url: url, authToken: authTok, body: body, voice: voice, speed: speed) }
         }

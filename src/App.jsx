@@ -3765,6 +3765,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   const grokVoiceIdRef = useRef(null);     // Grok voice id when USE_GROK (null → GROK_DEFAULT_VOICE; per-coach clone id later)
   const speakDoneRef = useRef(null);       // current speak()'s completion handler for native streaming TTS
   const ttsMintRef = useRef(null);         // in-flight fresh-TTS-token mint (started when listening begins → ready by speak time, no await)
+  const restNudgeRef = useRef(null);       // pending rest-timer callback — when it fires, the coach barges back in ("rest's up")
   const coachReplyRef = useRef(null);      // native askAndSpeak → the finished reply text (for logging)
   const coachErrorRef = useRef(null);      // native askAndSpeak → brain-call failure (fall back to one-shot)
   const turnTimingRef = useRef({});        // DIAG: timestamps across one turn (STT → Claude → TTS)
@@ -4006,7 +4007,7 @@ ${messagesRef.current.length
         : "No history yet";
       const cues = formCuesRef.current[ex.exercise];
       const cueLine = cues ? `\n   FORM CUES (from coach's video): ${cues}` : "";
-      return `${i + 1}. ${ex.exercise} — target ${ex.sets} sets × ${ex.reps} reps | Done today: ${doneSets}/${ex.sets} sets | ${lastPerf}${cueLine}`;
+      return `${i + 1}. ${ex.exercise} — target ${ex.sets} sets × ${ex.reps} reps, rest ${ex.rest || "60s"} | Done today: ${doneSets}/${ex.sets} sets | ${lastPerf}${cueLine}`;
     }).join("\n");
 
     return `You are ${profile.name}'s personal training coach, talking them through their workout in real time by voice.
@@ -4033,6 +4034,12 @@ COUNTING REPS — track each set, but let them lift in peace:
 
 LOG EACH SET THE INSTANT IT'S DONE — one finished set = one LOG tag immediately, in that very turn. NEVER hold logs and dump them at the end of the exercise or the workout. ${profile.name} wants to watch each set get logged as they go — it keeps them motivated.
 
+REST TIMER — you run the rest periods:
+• After you LOG a set and the exercise has MORE sets to go: tell them to rest ("Nice — take your 90, breathe") and append a REST tag with THAT exercise's rest seconds from the list above: |||REST:{"ex":INDEX,"secs":90}||| (same 0-based INDEX as the LOG tag; e.g. "rest 90s" → secs 90). The app runs the visible countdown and chimes when it's done. Never say the tag aloud.
+• When I tell you the rest timer finished, jump back in and call the next set ("Time's up — set 3, let's go").
+• After the LAST set of an exercise: NO rest tag. Celebrate the effort, name the NEXT exercise with its weight/rep target, and tell them to get set up and say when they're ready ("That's all 3 — great work. Next up: rows, 135 for 10. Get set and tell me when you're ready."). Wait for their go before coaching it.
+• After the last set of the FINAL exercise: no tag — wrap up the session warmly instead.
+
 LOGGING SETS — When ${profile.name} finishes a set (whether you counted their out-loud reps or they told you the number), append this tag on a new line at the very end of your response, after your coaching words:
 |||LOG:{"ex":INDEX,"weight":WEIGHT,"reps":REPS}|||
 Use the 0-based exercise number. Only include when you have all three values. Never speak or mention this tag.
@@ -4044,7 +4051,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 
   // ── Action-tag helpers — LOG (sets), FOOD, WATER ────────────────────────────
   const processActions = (text) => {
-    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):(\{[^}]*\})\|\|\|/g;
+    const re = /\|\|\|(LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH|REST):(\{[^}]*\})\|\|\|/g;
     let m, confirm = null;
     while ((m = re.exec(text))) {
       let obj; try { obj = JSON.parse(m[2]); } catch { continue; }
@@ -4067,6 +4074,18 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       else if (m[1] === "SLEEP" && onLogSleep && obj.hours !== undefined) { onLogSleep(parseFloat(obj.hours)); confirm = `✓ Sleep logged: ${obj.hours}h`; }
       else if (m[1] === "TODO" && onCheckTodo && obj.key) { onCheckTodo(obj.key); confirm = `✓ Checked off`; }
       else if (m[1] === "STRETCH" && onStretchProgress && obj.i !== undefined) { onStretchProgress(parseInt(obj.i)); } // silent resume-point tracking
+      else if (m[1] === "REST") {
+        // Coach "presses the rest button": light up the exercise card's visible countdown
+        // (it chimes + vibrates on finish), and schedule the coach to barge back in.
+        const secs = Math.max(10, Math.min(600, parseInt(obj.secs) || 90));
+        try { window.dispatchEvent(new CustomEvent("bm-rest-start", { detail: { ex: parseInt(obj.ex), secs } })); } catch {}
+        clearTimeout(restNudgeRef.current);
+        restNudgeRef.current = setTimeout(() => {
+          if (closedRef.current) return;
+          askRef.current?.(`(The ${secs}-second rest timer just chimed — rest is over. Jump back in: tell me time's up and call the next set. If we already moved on, just keep coaching naturally — don't announce the timer.)`, false);
+        }, secs * 1000);
+        confirm = `⏱ Rest ${secs}s`;
+      }
     }
     return confirm;
   };
@@ -4094,7 +4113,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // deliberately does NOT touch plain digits, letters, or punctuation.
   const EMOJI_STRIP_RE = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{2190}-\u{21FF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}〰〽㊗㊙]/gu;
   const stripEmoji = (text) => (text || "").replace(EMOJI_STRIP_RE, "").replace(/[ \t]{2,}/g, " ");
-  const cleanSpeak = (text) => deGrovel(stripEmoji(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH):\{[^}]*\}\|\|\|/g, "")).trim());
+  const cleanSpeak = (text) => deGrovel(stripEmoji(text.replace(/\|\|\|(?:LOG|FOOD|WATER|STEPS|TODO|SLEEP|STRETCH|REST):\{[^}]*\}\|\|\|/g, "")).trim());
 
   // ── TTS ───────────────────────────────────────────────────────────────────
   const speak = useCallback((raw, onDone) => {
@@ -4601,6 +4620,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     arm();
     return () => {
       closedRef.current = true;
+      clearTimeout(restNudgeRef.current);   // no "rest's up" barge-in after the coach is closed
       document.removeEventListener("visibilitychange", onVis);
       try { wakeLockRef.current?.release(); wakeLockRef.current = null; } catch {}
       try { recogRef.current?.stop(); } catch {}
@@ -4990,6 +5010,18 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
 
   const startRest = () => { setRestLeft(restSecs); setResting(true); };
   const stopRest = () => { setResting(false); setRestLeft(0); };
+
+  // Voice coach "presses the rest button": after logging a set it emits a REST tag,
+  // which dispatches this event — light up THIS exercise's visible countdown (same
+  // chime + vibration on finish as a manual tap).
+  useEffect(() => {
+    const onCoachRest = (e) => {
+      const d = e.detail || {};
+      if (d.ex === index) { setRestLeft(d.secs || restSecs); setResting(true); }
+    };
+    window.addEventListener("bm-rest-start", onCoachRest);
+    return () => window.removeEventListener("bm-rest-start", onCoachRest);
+  }, [index, restSecs]);
 
   const inputStyle = { width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 6px", fontSize:14.5, fontFamily:"'Oswald', sans-serif", fontWeight:600, textAlign:"center", outline:"none" };
 
