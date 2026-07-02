@@ -63,6 +63,9 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private var speechFrames = 0
     private var silenceFrames = 0
     private var totalFrames = 0
+    // Continuous-listen mode (workout/stretch): the mic stays ON through silence instead
+    // of stopping/re-listening every idle window — no flicker. Set per listen() call.
+    private var continuousListen = false
 
     // Tuning (frames are ~100ms each via the meter timer).
     // dBFS above which we treat sound as speech. Sits in the GAP between the ambient
@@ -143,8 +146,10 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     }
 
     @objc func listen(_ call: CAPPluginCall) {
+        let continuous = call.getBool("continuous") ?? false
         DispatchQueue.main.async {
-            self.blog("listen() called  (ttsActive=\(self.ttsActive), recording=\(self.capturing))")
+            self.continuousListen = continuous
+            self.blog("listen() called  (ttsActive=\(self.ttsActive), recording=\(self.capturing), continuous=\(continuous))")
             self.beginRecording()
             call.resolve()
         }
@@ -626,13 +631,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         if !hasExternal { try? session.overrideOutputAudioPort(.speaker) }
     }
 
-    private func beginRecording() {
-        endRecording(emit: false)   // ensure clean state
-        // Re-assert the route each turn (WebKit/interruptions can change it).
-        let session = AVAudioSession.sharedInstance()
-        try? session.setActive(true)
-        applyOutputRoute()
-
+    // Start a fresh recorder + reset the VAD counters. Returns false if it couldn't start.
+    private func startRecorder() -> Bool {
         hasSpeech = false; speechFrames = 0; silenceFrames = 0; totalFrames = 0
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("vc-\(UUID().uuidString).m4a")
@@ -643,19 +643,40 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             AVNumberOfChannelsKey: 1,
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
         ]
-        do {
-            let r = try AVAudioRecorder(url: url, settings: settings)
-            r.isMeteringEnabled = true
-            r.delegate = self
-            r.record()
-            recorder = r
-            capturing = true
+        guard let r = try? AVAudioRecorder(url: url, settings: settings) else { return false }
+        r.isMeteringEnabled = true
+        r.delegate = self
+        r.record()
+        recorder = r
+        capturing = true
+        return true
+    }
+
+    private func beginRecording() {
+        endRecording(emit: false)   // ensure clean state
+        // Re-assert the route each turn (WebKit/interruptions can change it).
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(true)
+        applyOutputRoute()
+
+        if startRecorder() {
             meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 self?.tick()
             }
-        } catch {
+        } else {
             notifyListeners("empty", data: [:])
         }
+    }
+
+    // Continuous-listen mode only: silently roll to a FRESH recording segment WITHOUT
+    // tearing down the meter timer or notifying JS — the mic stays "on" from the user's
+    // point of view (level events keep flowing, no re-listen round-trip), while the
+    // underlying file rolls so we never accumulate or send a long stretch of silence.
+    private func rollRecording() {
+        let old = recorder; recorder = nil
+        old?.stop()
+        if let u = fileURL { try? FileManager.default.removeItem(at: u) }
+        if !startRecorder() { notifyListeners("empty", data: [:]) }
     }
 
     private func tick() {
@@ -678,7 +699,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         } else if totalFrames >= maxFrames {
             endRecording(emit: hasSpeech)       // hard cap
         } else if !hasSpeech && totalFrames >= idleFrames {
-            endRecording(emit: false)           // nobody spoke → empty
+            // Nobody spoke this window. Continuous mode (workout/stretch): keep the mic ON
+            // and silently roll the file. Companion mode: stop → JS re-listens (idle-nudge
+            // logic lives up in JS and needs the empty signal).
+            if continuousListen { rollRecording() }
+            else { endRecording(emit: false) }
         }
     }
 

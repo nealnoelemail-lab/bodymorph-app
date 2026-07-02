@@ -3855,6 +3855,10 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
   // ── System prompt ──────────────────────────────────────────────────────────
   const isStretch = !!(stretchSession && stretchSession.items && stretchSession.items.length);
   const isWorkout = !companion && !isStretch && !!(day && day.workout && day.workout.length);
+  // Keep the native mic OPEN through silence during workout/stretch (no idle flicker).
+  // A ref (updated every render) avoids a stale value if the coach switches modes mid-session.
+  const continuousListenRef = useRef(false);
+  continuousListenRef.current = isWorkout || isStretch;
 
   const coachName = "Coach";
   const PERSONA = `YOU ARE ${coachName}. ${profile.name} calls you "${coachName}" — refer to yourself that way and gently get them used to it.
@@ -4010,10 +4014,10 @@ ${messagesRef.current.length
 ${PERSONA}
 
 YOUR JOB EACH EXERCISE:
-• BEFORE a set: give one short, useful form cue (use the coach's video cues below when available) and a word of encouragement.
-• DURING/BETWEEN sets: keep them focused, remind them of the target, and check in.
-• AFTER a set: acknowledge the effort, note progress vs. their target or last session, and set up the next one.
-• SAFETY/FORM: if ${profile.name} mentions pain, or describes something that sounds like bad form, calmly tell them to stop, reset, and fix the form cue — better to drop the weight than get hurt. (Coaching on form, NOT medical advice.)
+• BEFORE a set: give one short, useful form cue (use the coach's video cues below when available) and a quick word of encouragement — then get out of the way.
+• DURING a set: mostly STAY QUIET and let them work. A person mid-lift doesn't want a voice in their ear — silence during the effort IS good coaching. At most ONE or TWO very brief interjections for the ENTIRE set (a quick "there it is" or a form/safety fix if something sounds off) — never a running commentary, never counting along out loud.
+• AFTER the set ends: THIS is your moment to talk — acknowledge the effort, give the real constructive or encouraging feedback, note progress vs. their target or last session, log it, and set up the next one.
+• SAFETY/FORM: if ${profile.name} mentions pain, or describes something that sounds like bad form, interrupt right away — stop, reset, fix the form cue; better to drop the weight than get hurt. (Coaching on form, NOT medical advice.)
 
 CLIENT: ${profile.name} | Goal: ${profile.goal} | Fitness Level: ${profile.fitnessLevel}
 TODAY: ${day.day} — ${day.type}${day.focus ? " | Focus: " + day.focus : ""}
@@ -4021,10 +4025,10 @@ TODAY: ${day.day} — ${day.type}${day.focus ? " | Focus: " + day.focus : ""}
 EXERCISES:
 ${exLines}
 
-COUNTING REPS — work each set LIVE with them (this is the heart of great coaching):
+COUNTING REPS — track each set, but let them lift in peace:
 • At the START of each exercise, confirm the working weight they're using, so you can pair it with their reps.
-• Encourage ${profile.name} to COUNT THEIR REPS OUT LOUD as they perform them — tell them it works best with an earbud/headset in, and that you'll count right along with them ("count 'em out for me, I've got you"). Track the count as you hear it.
-• The MOMENT the set ends — they stop counting, or say "done", "that's it", "last one" — LOG it right then with the weight and the rep count you heard. Then call out the next set.
+• Have ${profile.name} COUNT THEIR REPS OUT LOUD as they perform them (works best with an earbud/headset in). You LISTEN and track the count SILENTLY — do NOT count along out loud or talk over their reps; that's the voice-in-the-ear they don't want mid-set.
+• The MOMENT the set ends — they stop counting, or say "done", "that's it", "last one" — THAT'S your cue to speak: LOG it right then with the weight and the rep count you heard, give your quick feedback, and call out the next set.
 • If they'd rather NOT count out loud, that's fine: tell them to just say "done with that set" when they finish — then YOU ask "how many reps did you get?", and log what they tell you.
 
 LOG EACH SET THE INSTANT IT'S DONE — one finished set = one LOG tag immediately, in that very turn. NEVER hold logs and dump them at the end of the exercise or the workout. ${profile.name} wants to watch each set get logged as they go — it keeps them motivated.
@@ -4267,7 +4271,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       if (USE_GROK && USE_PROXY) ttsMintRef.current = grokEphemeralToken(true);
       setState("listening"); setInterim("🎙 Listening…");
       log("native listen…");
-      VoiceCapture.listen().catch(e => log("native listen err: " + (e?.message||e)));
+      // Workout / stretch: hold the mic OPEN through silence (no idle flicker) — you're
+      // exercising, not in rapid back-and-forth. Companion stays cycle-per-phrase.
+      VoiceCapture.listen({ continuous: continuousListenRef.current }).catch(e => log("native listen err: " + (e?.message||e)));
       return;
     }
     const stream = micStreamRef.current;
