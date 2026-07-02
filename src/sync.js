@@ -290,7 +290,8 @@ export async function pushProfile(userId, profile) {
   } catch {}
   const row = {
     id: userId,
-    first_name: profile.name || null,
+    first_name: profile.firstName || profile.name || null,
+    last_name: profile.lastName || null,
     email,
     phone,
     gender: profile.gender || null,

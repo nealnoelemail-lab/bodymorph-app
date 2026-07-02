@@ -8,7 +8,11 @@ const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
 // coach-side reads of client data (allowed by the is_coach_of() RLS policies).
 // No backend / not signed in -> safe no-ops.
 
-const nameOf = (p) => (p?.extra?.name) || p?.first_name || "Client";
+const nameOf = (p) => {
+  const first = p?.first_name || p?.extra?.firstName || "";
+  const last  = p?.last_name  || p?.extra?.lastName  || "";
+  return `${first} ${last}`.trim() || p?.extra?.name || "Client";
+};
 const maxDay = (...days) => days.filter(Boolean).sort().slice(-1)[0] || null;
 // LOCAL calendar date as YYYY-MM-DD (UTC toISOString rolls over to tomorrow in the
 // evening for western timezones — keep day boundaries on the user's local clock).
@@ -67,7 +71,7 @@ export async function fetchRoster(coachId) {
   const feeOf = (id) => (rels.find(r => r.client_id === id) || {}).consulting_fee;
 
   const [profiles, body, steps] = await Promise.all([
-    supabase.from("profiles").select("id, first_name, extra").in("id", ids),
+    supabase.from("profiles").select("id, first_name, last_name, email, phone, extra").in("id", ids),
     supabase.from("body_entries").select("user_id, day, weight").in("user_id", ids),
     supabase.from("step_entries").select("user_id, day").in("user_id", ids),
   ]);
@@ -80,6 +84,8 @@ export async function fetchRoster(coachId) {
     return {
       id,
       name: nameOf(p),
+      email: p?.email || p?.extra?.email || null,
+      phone: p?.phone || p?.extra?.phone || null,
       weight: bw.length ? bw[bw.length - 1].weight : null,
       weightTrend: bw.length >= 2 ? +(bw[bw.length - 1].weight - bw[0].weight).toFixed(1) : null,
       lastActive,
@@ -93,7 +99,7 @@ export async function fetchRoster(coachId) {
 export async function fetchClientDetail(clientId) {
   if (!supabase || !clientId) return null;
   const [profile, body, steps, sleep, logs, food, rewards] = await Promise.all([
-    supabase.from("profiles").select("first_name, extra").eq("id", clientId).maybeSingle(),
+    supabase.from("profiles").select("first_name, last_name, email, phone, extra").eq("id", clientId).maybeSingle(),
     supabase.from("body_entries").select("*").eq("user_id", clientId),
     supabase.from("step_entries").select("*").eq("user_id", clientId),
     supabase.from("sleep_entries").select("*").eq("user_id", clientId),
@@ -110,6 +116,8 @@ export async function fetchClientDetail(clientId) {
   const foodDays = (food.data || []).map(r => ({ date: r.day, cal: r.cal, protein: r.protein, carbs: r.carbs, fats: r.fats }));
   return {
     name: nameOf(profile.data),
+    email: profile.data?.email || profile.data?.extra?.email || null,
+    phone: profile.data?.phone || profile.data?.extra?.phone || null,
     profile: (profile.data && profile.data.extra) || {},  // full signup profile: goal, targets, pace, program, timeline
     bodyEntries, stepEntries, sleepEntries, workoutDays, foodDays,
     rewards: rewards.data ? { coins: rewards.data.coins, stats: rewards.data.stats || {} } : null,

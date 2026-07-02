@@ -5,5 +5,6 @@
 -- Existing RLS on profiles (0001) already covers these columns — owner writes,
 -- linked coach reads via is_coach_of().
 
+alter table public.profiles add column if not exists last_name text;
 alter table public.profiles add column if not exists email text;
 alter table public.profiles add column if not exists phone text;

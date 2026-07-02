@@ -3090,7 +3090,7 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
       {/* Profile details */}
       <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:1, color:accent, marginBottom:12 }}>PROFILE</div>
-        <Row label="NAME"           value={profile.name} />
+        <Row label="NAME"           value={`${profile.firstName || profile.name || ""} ${profile.lastName || ""}`.trim() || "—"} />
         <Row label="GOAL"           value={profile.goal.split("(")[0].trim()} color={accent} />
         <Row label="FOCUS"          value={profile.focus.split("(")[0].trim()} />
         <Row label="FITNESS LEVEL"  value={`Level ${levelMap[profile.fitnessLevel]||"I"} — ${profile.fitnessLevel}`} />
@@ -9729,6 +9729,12 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
   return wrap(
     <>
       <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>{detail.name}</div>
+      {(detail.email || detail.phone) && (
+        <div style={{ fontSize:13, marginBottom:2, display:"flex", gap:14, flexWrap:"wrap" }}>
+          {detail.phone && <a href={`tel:${detail.phone}`} style={{ color:"#3d8eff", textDecoration:"none" }}>📞 {detail.phone}</a>}
+          {detail.email && <a href={`mailto:${detail.email}`} style={{ color:"#3d8eff", textDecoration:"none" }}>✉️ {detail.email}</a>}
+        </div>
+      )}
       <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{detail.lastActive ? `Last active ${detail.lastActive}` : "No activity yet"}</div>
 
       {/* What the client selected at signup — goal, targets, chosen pace + the
