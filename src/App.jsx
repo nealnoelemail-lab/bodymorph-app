@@ -10,7 +10,8 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
   fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee, detectFollowups,
   listEvents, addEvent, deleteEvent,
-  listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek } from "./coach";
+  listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
+  fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { syncHealth } from "./healthkit";
 
@@ -5379,6 +5380,20 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
   const [dateStr, setDateStr] = useState(ymdLocal());
   const [busy, setBusy]       = useState(false);
   const [viewer, setViewer]   = useState(null);    // { src } for fullscreen view
+  const [shareCoach, setShareCoach] = useState(null); // null = no coach (hide toggle) | true/false
+
+  useEffect(() => {
+    let on = true;
+    if (userId) getPhotoSharing(userId).then(v => { if (on) setShareCoach(v); });
+    return () => { on = false; };
+  }, [userId]);
+
+  const toggleShare = async () => {
+    const next = !shareCoach;
+    setShareCoach(next);                                  // optimistic
+    const ok = await setPhotoSharing(next);
+    if (!ok) setShareCoach(!next);                        // revert on failure
+  };
 
   const handlePhoto = async (angleId, file) => {
     if (!file) return;
@@ -5468,6 +5483,21 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
           ))}
         </div>
         <div style={{ color:"#c8c8e0", fontSize:12.5, marginTop:6 }}>Tap a box to take or choose a photo for that angle.</div>
+
+        {/* Coach photo-sharing consent — shown only when linked to a coach. Photos are
+            PRIVATE by default; the coach can't see them until this is turned on. */}
+        {shareCoach !== null && (
+          <div onClick={toggleShare} style={{ display:"flex", alignItems:"center", gap:12, marginTop:12, background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, padding:"11px 12px", cursor:"pointer" }}>
+            <div style={{ width:42, height:24, borderRadius:12, flexShrink:0, background: shareCoach ? "#e8ff00" : "#2a2a3d", position:"relative", transition:"background 0.2s" }}>
+              <div style={{ position:"absolute", top:2, left: shareCoach ? 20 : 2, width:20, height:20, borderRadius:"50%", background: shareCoach ? "#000" : "#8a8aa4", transition:"left 0.2s" }} />
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ color:"#f0f0f8", fontSize:13.5, fontWeight:600 }}>{shareCoach ? "Your coach can view your progress photos" : "Share progress photos with my coach"}</div>
+              <div style={{ color:"#8a8aa4", fontSize:11.5, marginTop:1 }}>{shareCoach ? "Tap to make them private again." : "Photos stay private unless you turn this on."}</div>
+            </div>
+            <span style={{ fontSize:15, flexShrink:0 }}>{shareCoach ? "\u{1F513}" : "\u{1F512}"}</span>
+          </div>
+        )}
 
         <button onClick={save} disabled={!canSave || busy} style={{ width:"100%", marginTop:14, background: canSave ? "#e8ff00" : "#2a2a3d", color: canSave ? "#000" : "#c8c8e0", border:"none", borderRadius:10, padding:"14px", cursor: canSave ? "pointer" : "not-allowed", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:18 }}>
           {busy ? "SAVED \u2713" : "SAVE ENTRY"}
@@ -8823,7 +8853,36 @@ function SubscribeScreen({ onSignOut, onRefresh }) {
 // ── COACH BUSINESS DASHBOARD (desktop) ────────────────────────────────────────
 const COACH_CSS = `
   .coach-shell{ display:flex; align-items:flex-start; min-height:100vh; }
-  .coach-side{ width:212px; flex-shrink:0; border-right:1px solid #2a2a3d; min-height:100vh; padding:18px 12px; position:sticky; top:0; }
+  .coach-side{ width:212px; flex-shrink:0; border-right:1px solid #2a2a3d; min-height:100vh; padding:18px 12px; position:sticky; top:0; background:#0a0a0f; z-index:1; }
+  /* Watermark silhouette — centered in the RIGHT pane only (offset past the 212px menu),
+     25% smaller than the app's full-bleed version, and behind everything. Menu stays clean. */
+  .coach-wm-base{ position:fixed; inset:0; background:#0a0a0f; z-index:-2; pointer-events:none; }
+  .coach-wm-img{ position:fixed; top:50%; left:calc(50% + 106px); transform:translate3d(-50%,-50%,0); width:48%; max-width:640px; height:auto; filter:brightness(0.35) saturate(0); opacity:0.25; z-index:-1; pointer-events:none; }
+  /* Big circle with the app's silver light running continuously around its edge. */
+  .dash-ring{ position:relative; border-radius:50%; }
+  .dash-ring::before{
+    content:""; position:absolute; inset:0; border-radius:50%; padding:3px;
+    background: conic-gradient(from var(--vc-angle), transparent 0%, transparent 50%, rgba(206,210,224,0.12) 63%, rgba(228,231,240,0.4) 74%, rgba(245,246,250,0.8) 82%, #ffffff 87%, rgba(245,246,250,0.8) 92%, rgba(228,231,240,0.4) 97%, transparent 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    animation: ringSweep 12s linear infinite; pointer-events:none;
+  }
+  /* Not perpetual: dark for 5s (0-41.7%), then ONE dim lap over 7s (41.7-100%), then dark again. */
+  @keyframes ringSweep{
+    0%    { --vc-angle: 0deg;   opacity: 0; }
+    41.7% { --vc-angle: 0deg;   opacity: 0; }
+    44%   { --vc-angle: 14deg;  opacity: 0.35; }
+    97%   { --vc-angle: 346deg; opacity: 0.35; }
+    100%  { --vc-angle: 360deg; opacity: 0; }
+  }
+  /* Each perimeter card catches a dim silver reflection as the light passes behind it —
+     synced to the 12s ring cycle (dark 0-5s, then the lap; cards 1.4s apart during the lap). */
+  .dash-card{ animation: cardGlow 12s linear infinite; }
+  @keyframes cardGlow{
+    0%,12%,100%{ box-shadow:0 8px 26px rgba(0,0,0,0.55); }
+    6%{ box-shadow:0 8px 26px rgba(0,0,0,0.55), 0 0 22px 4px rgba(245,246,250,0.20); }
+  }
   .coach-main{ flex:1; min-width:0; padding:24px 30px 70px; max-width:1080px; }
   .coach-nav{ display:flex; flex-direction:column; gap:4px; margin-top:16px; }
   .coach-navitem{ width:100%; text-align:left; background:transparent; border:none; color:#c8c8e0; padding:10px 12px; border-radius:8px; cursor:pointer; font-size:14.5px; font-family:'DM Sans'; }
@@ -9055,15 +9114,104 @@ function CalendarSection({ coachId, roster }) {
   );
 }
 
+// Coach's personal settings: identity, their voice, and their monthly financial goal.
+function CoachSettings({ coachId, email, coachName }) {
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [phone, setPhone] = useState("");
+  const [goal, setGoal] = useState("");
+  const [voiceId, setVoiceId] = useState(null);
+  const [savedInfo, setSavedInfo] = useState(false);
+  const [savedGoal, setSavedGoal] = useState(false);
+  const [voiceNote, setVoiceNote] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      const [p, s] = await Promise.all([fetchCoachProfile(coachId), fetchSettings(coachId)]);
+      if (!on) return;
+      const parts = (coachName || "").trim().split(/\s+/);
+      setFirst(p?.first_name || parts[0] || "");
+      setLast(p?.last_name || parts.slice(1).join(" ") || "");
+      setPhone(p?.phone || "");
+      setGoal(s?.monthly_goal ? String(s.monthly_goal) : "");
+      setVoiceId(s?.voice_id || null);
+    })();
+    return () => { on = false; };
+  }, [coachId, coachName]);
+
+  const saveInfo = async () => { await updateCoachProfile(coachId, { firstName:first, lastName:last, phone }); setSavedInfo(true); setTimeout(()=>setSavedInfo(false), 1500); };
+  const saveGoal = async () => { await saveSettings(coachId, { monthly_goal: parseFloat(goal) || 0 }); setSavedGoal(true); setTimeout(()=>setSavedGoal(false), 1500); };
+
+  const inp = { width:"100%", boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:14, outline:"none" };
+  const lbl = { fontSize:11.5, color:C.muted, marginBottom:4, textTransform:"uppercase", letterSpacing:0.5 };
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px", marginBottom:16, maxWidth:560 };
+
+  return (
+    <>
+      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>SETTINGS</div>
+
+      <div style={card}>
+        <div style={{ ...S.inputLabel, marginBottom:12 }}>Personal information</div>
+        <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+          <div style={{ flex:1 }}>
+            <div style={lbl}>First name</div>
+            <input value={first} onChange={e=>setFirst(e.target.value)} placeholder="First" style={inp} />
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={lbl}>Last name</div>
+            <input value={last} onChange={e=>setLast(e.target.value)} placeholder="Last" style={inp} />
+          </div>
+        </div>
+        <div style={{ marginBottom:10 }}>
+          <div style={lbl}>Email (your login)</div>
+          <input value={email || ""} readOnly style={{ ...inp, opacity:0.55, cursor:"not-allowed" }} />
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={lbl}>Phone</div>
+          <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+1 555 123 4567" style={inp} />
+        </div>
+        <button onClick={saveInfo} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>{savedInfo ? "Saved ✓" : "Save"}</button>
+      </div>
+
+      <div style={card}>
+        <div style={{ ...S.inputLabel, marginBottom:10 }}>Your voice</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.55, marginBottom:12 }}>
+          Record a short voice sample and your clients hear their coaching in <b style={{ color:C.text }}>your</b> voice — the heart of the personal-coach experience. {voiceId ? "Your voice is set ✓" : "No voice recorded yet."}
+        </div>
+        <button onClick={()=>setVoiceNote(true)} style={S.btnSec}>🎙 Record my voice</button>
+        {voiceNote && <div style={{ marginTop:10, fontSize:12.5, color:"#e8ff00" }}>Voice recording &amp; cloning is the next feature we're building — it'll live right here.</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{ ...S.inputLabel, marginBottom:10 }}>Monthly financial goal</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.55, marginBottom:12 }}>
+          Set the income target you're chasing this month. Change it anytime — your Financials page tracks progress toward it.
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ color:C.muted, fontSize:16 }}>$</span>
+          <input value={goal} onChange={e=>setGoal(e.target.value.replace(/[^\d.]/g,""))} placeholder="e.g. 6000" inputMode="numeric" style={{ ...inp, maxWidth:170 }} />
+          <span style={{ color:C.muted, fontSize:13 }}>/ month</span>
+          <button onClick={saveGoal} style={S.btnSec}>{savedGoal ? "Saved ✓" : "Save goal"}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CoachApp({ user, profile, onSignOut }) {
   const uid = user?.id;
   const coachName = (profile && profile.name) || (user?.email ? user.email.split("@")[0] : "Coach");
+  // Just the coach's FIRST name (strip a leading "Coach " title if their name already has one).
+  const coachFirst = ((coachName || "Coach").replace(/^coach\s+/i, "").trim().split(/\s+/)[0]) || "Coach";
   const [section, setSection] = useState("overview");
   const [roster, setRoster] = useState([]);
   const [prospects, setProspects] = useState([]);
   const [invites, setInvites] = useState([]);
   const [followups, setFollowups] = useState([]);
   const [fuDone, setFuDone] = useState({});   // locally dismissed follow-ups (key: clientId:key)
+  const [resolveFor, setResolveFor] = useState(null);  // at-risk client being resolved (modal)
+  const [resolveNote, setResolveNote] = useState("");
   const [fuMsg, setFuMsg] = useState({});     // coach-edited message overrides
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -9078,15 +9226,33 @@ function CoachApp({ user, profile, onSignOut }) {
   const [iProspectId, setIProspectId] = useState(null);
   // Prospect add form
   const [pForm, setPForm] = useState({ name:"", phone:"", email:"", source:"", notes:"" });
+  const [settings, setSettings] = useState({ inperson_rate:75, consulting_fee:105, monthly_goal:0 });
+  const [monthSessions, setMonthSessions] = useState([]);
 
   const load = useCallback(async () => {
     if (!uid) return;
-    const [ros, pros, inv, fu] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid), detectFollowups(uid)]);
-    setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setLoading(false);
+    const [ros, pros, inv, fu, st, sess] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid), detectFollowups(uid), fetchSettings(uid), listSessionsThisMonth(uid)]);
+    setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setSettings(st); setMonthSessions(sess); setLoading(false);
   }, [uid]);
   useEffect(() => { load(); }, [load]);
 
   const openClient = async (id) => { setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
+
+  // Resolve an at-risk client: record the outcome (+ note), update the roster locally so
+  // they fall off the queue immediately. 'lost' removes them from the roster entirely.
+  const doResolve = async (outcome) => {
+    const c = resolveFor; if (!c) return;
+    setResolveFor(null);
+    await resolveAtRisk(uid, c.id, outcome, resolveNote);
+    if (outcome === "lost") {
+      setRoster(r => r.filter(x => x.id !== c.id));
+    } else {
+      setRoster(r => r.map(x => x.id === c.id
+        ? { ...x, riskResolvedAt: new Date().toISOString(), ...(outcome === "app_only" ? { clientType: "app_only", consultingFee: 0 } : {}) }
+        : x));
+    }
+    setResolveNote("");
+  };
   const go = (s) => { setSelected(null); setSection(s); };
 
   const openInvite = (prefill, prospectId) => {
@@ -9115,18 +9281,56 @@ function CoachApp({ user, profile, onSignOut }) {
 
   const pendingInvites = invites.filter(i => i.status === "pending");
   const fin = computeFinancials(roster);
+  // Monthly-goal motivator (center of the command-center circle): real income so far
+  // this month (recurring consulting + logged in-person) vs the goal they set in Settings.
+  const baseFee = Number(settings.consulting_fee) || 105;
+  const currentMonthly = roster.reduce((s,c)=> s + (c.consultingFee != null ? Number(c.consultingFee) : baseFee), 0)
+                       + monthSessions.reduce((s,x)=> s + (Number(x.amount)||0), 0);
+  const monthlyGoal = Number(settings.monthly_goal) || 0;
+  const toGo = Math.max(0, monthlyGoal - currentMonthly);
+  const money = (n) => "$" + Math.round(n||0).toLocaleString();
+  // Are they ahead of or behind pace? Compare income-so-far to where it "should" be given
+  // how far through the month we are — the real "am I winning right now?" signal.
+  const _now = new Date();
+  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth()+1, 0).getDate();
+  const monthProgress = _now.getDate() / _daysInMonth;              // 0..1 through the month
+  const pace = monthlyGoal ? currentMonthly - monthlyGoal * monthProgress : 0;   // + ahead, − behind
+  // One-tap check-in text for an at-risk client (coach's device sends it, so no emoji rules).
+  const firstOf = (n) => (n || "").trim().split(/\s+/)[0] || "there";
+  const checkInMsg = (c) => `Hey ${firstOf(c.name)}, it's Coach — haven't seen you log in a few days. Everything good? Let's get a session in this week.`;
+  const messageHref = (c) => c.phone ? `sms:${c.phone}?&body=${encodeURIComponent(checkInMsg(c))}`
+                          : c.email ? `mailto:${c.email}?subject=${encodeURIComponent("Checking in")}&body=${encodeURIComponent(checkInMsg(c))}`
+                          : null;
   const filteredRoster = roster.filter(c => !search || (c.name||"").toLowerCase().includes(search.toLowerCase()));
-  const attention = roster.filter(c => { const d = daysSince(c.lastActive); return d == null || d >= 7; });
+  const attention = roster.filter(c => {
+    const d = daysSince(c.lastActive);
+    if (!(d == null || d >= 7)) return false;                 // still active — not at risk
+    // Resolved recently (coach contacted them + logged an outcome) → off the queue for
+    // 14 days. If they're STILL quiet after that, they resurface automatically.
+    if (c.riskResolvedAt && Date.now() - new Date(c.riskResolvedAt).getTime() < 14 * 864e5) return false;
+    return true;
+  });
+  // The five business-health headline numbers for the command-center ring.
+  const atRisk = attention.length;                                                    // going quiet → churn risk
+  // Leads waiting on the coach's next touch (contacted / on trial, not yet closed).
+  const leadFollowups = prospects.filter(p => p.stage === "contacted" || p.stage === "trial").length;
+  const appOnlyClients = roster.filter(c => c.clientType === "app_only").length;
+  // Network clients: clients under coaches THIS coach referred to BodyMorph (his referral
+  // network / downstream income). Real count arrives with the referral system; 0 until then.
+  const networkClients = 0;
 
   const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
-  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
+  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"],["settings","Settings"]];
 
   return (
     <div style={{ position:"relative" }}>
       <style>{GLOBAL_CSS + COACH_CSS}</style>
+      <div aria-hidden="true" className="coach-wm-base" />
+      <img aria-hidden="true" src={WATERMARK_SRC} className="coach-wm-img" alt="" />
       <div className="coach-shell">
         <aside className="coach-side">
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1, padding:"2px 4px" }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1, padding:"2px 4px 0" }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
+          <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", padding:"3px 4px 0" }}>High Paid Coaches</div>
           <div className="coach-nav">
             {NAV.map(([k,label]) => (
               <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
@@ -9143,24 +9347,119 @@ function CoachApp({ user, profile, onSignOut }) {
           {/* OVERVIEW */}
           {section==="overview" && (
             <>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>WELCOME BACK, COACH</div>
-              <div className="kpi-grid">
-                <KPI label="Active clients" value={loading?"—":roster.length} />
-                <KPI label="Prospects" value={loading?"—":prospects.length} />
-                <KPI label="Pending invites" value={loading?"—":pendingInvites.length} />
-                <KPI label="MRR estimate" value={`$${fin.mrrEstimate}`} sub={`${fin.activeClients} × $${fin.monthlyPrice}/mo`} />
-              </div>
-              <div style={{ ...S.sectionTitle, marginTop:24 }}>NEEDS ATTENTION</div>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
+              <div style={{ color:"#6a6a82", fontSize:13 }}>Command center — everything at a glance.</div>
+
+              {(() => {
+                const CIRCLE = 420;   // center circle diameter
+                // Left column = SALES & MARKETING (growing the business); right = CLIENTS
+                // (managing the roster); center circle = revenue. A clean 3×3 grid.
+                const sales = [
+                  { label:"Leads Pipeline",  value: loading?"—":prospects.length,   go:"prospects", color:"#3d8eff" },
+                  { label:"Appointments",    value: loading?"—":leadFollowups,      go:"calendar",  color:"#ff6b6b" },
+                  { label:"New Clients",     value: loading?"—":fin.newThisMonth,   go:"clients",   color:"#e8ff00" },
+                ];
+                const clients = [
+                  { label:"Active Clients",  value: loading?"—":roster.length,      go:"clients",    color:"#e8ff00" },
+                  { label:"Network Clients", value: loading?"—":networkClients,     go:"prospects",  color:"#9b5de5" },
+                  { label:"App Only Clients", value: loading?"—":appOnlyClients,    go:"clients",    color:"#3ddc84" },
+                ];
+                // Fixed-height value slot: numbers of any size sit in a 44px band, so EVERY
+                // label across all three columns lands on the same line (uniform grid rows).
+                const vslot = { height:44, display:"flex", alignItems:"center", justifyContent:"center" };
+                const Card = (c, key) => (
+                  <div key={key} onClick={()=>setSection(c.go)} style={{ cursor:"pointer", textAlign:"center", padding:"4px 8px" }}>
+                    <div style={vslot}><div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:33, color:c.color, lineHeight:1 }}>{c.value}</div></div>
+                    <div style={{ fontSize:12.5, color:"#f0f0f8", opacity:0.65, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>{c.label}</div>
+                  </div>
+                );
+                const colHead = { fontSize:11, color:"#f0f0f8", letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:4, paddingBottom:7, borderBottom:"1px solid rgba(255,255,255,0.09)" };
+                const column = { display:"flex", flexDirection:"column", justifyContent:"space-around", height:CIRCLE, minWidth:118, marginTop:-21 };
+                return (
+                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", margin:"26px auto 6px", maxWidth:"100%" }}>
+                    {/* LEFT — Sales & Marketing (nudged into the circle's empty corner) */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"stretch", marginRight:-46, zIndex:1 }}>
+                      <div style={colHead}>Sales &amp; Marketing</div>
+                      <div style={column}>{sales.map((c,i)=>Card(c,"s"+i))}</div>
+                    </div>
+
+                    {/* CENTER — the circle with the light framing the REVENUE column */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"stretch", flexShrink:0 }}>
+                      <div style={colHead}>Revenue</div>
+                      <div style={{ position:"relative", width:CIRCLE, height:CIRCLE }}>
+                        <div className="dash-ring" style={{ position:"absolute", inset:0, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.06)", background:"radial-gradient(circle at 50% 45%, rgba(232,255,0,0.05), rgba(10,10,15,0) 62%)", boxShadow:"0 0 70px rgba(232,255,0,0.05), inset 0 0 60px rgba(0,0,0,0.55)" }} />
+                        <div style={{ position:"absolute", inset:52, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.04)", pointerEvents:"none" }} />
+                        {/* Revenue spread over the same 3 rows as the side columns */}
+                        <div style={{ position:"relative", height:"100%", display:"flex", flexDirection:"column", justifyContent:"space-around", textAlign:"center", padding:"0 46px", boxSizing:"border-box", pointerEvents:"none", marginTop:-21 }}>
+                          <div>
+                            <div style={vslot}><div style={{ fontSize:33, fontFamily:"'Oswald', sans-serif", fontWeight:400, color:"#f0f0f8", lineHeight:1, opacity:0.65 }}>{money(currentMonthly)}</div></div>
+                            <div style={{ fontSize:12.5, color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>Current</div>
+                          </div>
+                          <div>
+                            <div style={vslot}><div style={{ fontSize:40, fontFamily:"'Oswald', sans-serif", fontWeight:700, color:"#e8ff00", lineHeight:1 }}>{monthlyGoal ? money(monthlyGoal) : "—"}</div></div>
+                            <div style={{ fontSize:12.5, color:"#e8ff00", marginTop:6, textTransform:"uppercase", letterSpacing:0.6, fontWeight:700 }}>Goal</div>
+                          </div>
+                          <div>
+                            <div style={vslot}><div style={{ fontSize:33, fontFamily:"'Oswald', sans-serif", fontWeight:400, color:"#f0f0f8", lineHeight:1, opacity:0.65 }}>{monthlyGoal ? money(toGo) : "Set a goal"}</div></div>
+                            <div style={{ fontSize:12.5, color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>To Go</div>
+                            {monthlyGoal ? (
+                              <div style={{ marginTop:5, fontSize:11, fontWeight:700, letterSpacing:0.3, color: pace >= 0 ? "#3ddc84" : "#ff9d5c", position:"absolute", left:0, right:0 }}>
+                                {pace >= 0 ? `▲ ${money(pace)} ahead of pace` : `▼ ${money(-pace)} behind pace`}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RIGHT — Clients (nudged into the circle's empty corner) */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"stretch", marginLeft:-46, zIndex:1 }}>
+                      <div style={colHead}>Clients</div>
+                      <div style={column}>{clients.map((c,i)=>Card(c,"c"+i))}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ ...S.sectionTitle, marginTop:14, textAlign:"center" }}><span style={{ color:"#ff2d2d" }}>({atRisk}) AT RISK</span> NEEDS ATTENTION</div>
               {attention.length === 0 ? (
-                <div style={{ color:C.muted, fontSize:13 }}>Everyone's been active in the last week. 💪</div>
+                <div style={{ color:C.muted, fontSize:13, textAlign:"center" }}>Everyone's been active in the last week — nothing needs you right now. 💪</div>
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {attention.map(c => (
-                    <button key={c.id} onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 14px", cursor:"pointer", textAlign:"left" }}>
-                      <span style={{ color:C.text, fontWeight:600, fontSize:14 }}>{c.name}</span>
-                      <span style={{ color:C.red, fontSize:12.5 }}>{c.lastActive ? `${daysSince(c.lastActive)}d inactive` : "never active"}</span>
-                    </button>
-                  ))}
+                  {attention.map(c => {
+                    const href = messageHref(c);
+                    return (
+                      <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px 9px 14px" }}>
+                        <div onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flex:1, minWidth:0, cursor:"pointer" }}>
+                          <span style={{ color:C.text, fontWeight:600, fontSize:14 }}>{c.name}</span>
+                          <span style={{ color:C.red, fontSize:12.5, marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
+                        </div>
+                        {href && (
+                          <a href={href} style={{ flexShrink:0, textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"6px 13px", fontSize:12.5, fontWeight:700 }}>
+                            {c.phone ? "💬 Text" : "✉ Email"}
+                          </a>
+                        )}
+                        <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flexShrink:0, background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"6px 11px", fontSize:12.5, cursor:"pointer" }}>Open</button>
+                        <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ flexShrink:0, background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"6px 11px", fontSize:12.5, fontWeight:700, cursor:"pointer" }}>Resolve</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {resolveFor && (
+                <div onClick={()=>setResolveFor(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.72)", zIndex:60, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+                  <div onClick={e=>e.stopPropagation()} style={{ background:"#12121a", border:`1px solid ${C.border}`, borderRadius:14, padding:"22px 22px 18px", width:420, maxWidth:"100%" }}>
+                    <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1, marginBottom:2 }}>RESOLVE — {resolveFor.name}</div>
+                    <div style={{ color:C.muted, fontSize:13, marginBottom:12 }}>You reached out. Where did it land?</div>
+                    <textarea value={resolveNote} onChange={e=>setResolveNote(e.target.value)} placeholder="Notes (what happened, what you agreed on)…"
+                      style={{ width:"100%", minHeight:70, background:"#0a0a0f", border:`1px solid ${C.border}`, borderRadius:9, color:C.text, fontSize:13.5, fontFamily:"'DM Sans'", padding:"9px 11px", resize:"vertical", boxSizing:"border-box", marginBottom:12 }} />
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <button onClick={()=>doResolve("back_on_track")} style={{ background:"rgba(61,220,132,0.12)", border:"1px solid rgba(61,220,132,0.5)", color:"#3ddc84", borderRadius:9, padding:"10px 12px", fontSize:13.5, fontWeight:700, cursor:"pointer", textAlign:"left" }}>✓ Back on track — they're good, note it and clear the flag</button>
+                      <button onClick={()=>doResolve("app_only")} style={{ background:"rgba(155,93,229,0.12)", border:"1px solid rgba(155,93,229,0.5)", color:"#c9a6f5", borderRadius:9, padding:"10px 12px", fontSize:13.5, fontWeight:700, cursor:"pointer", textAlign:"left" }}>↓ Downgrade to app-only — keeps the app, drops consulting</button>
+                      <button onClick={()=>doResolve("lost")} style={{ background:"rgba(255,45,45,0.10)", border:"1px solid rgba(255,45,45,0.45)", color:"#ff6b6b", borderRadius:9, padding:"10px 12px", fontSize:13.5, fontWeight:700, cursor:"pointer", textAlign:"left" }}>✕ Gone for good — end the relationship, off the roster</button>
+                      <button onClick={()=>setResolveFor(null)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:9, padding:"9px 12px", fontSize:13, cursor:"pointer" }}>Cancel</button>
+                    </div>
+                  </div>
                 </div>
               )}
             </>
@@ -9272,6 +9571,9 @@ function CoachApp({ user, profile, onSignOut }) {
 
           {/* FINANCIALS */}
           {section==="financials" && <FinancialsSection coachId={uid} roster={roster} />}
+
+          {/* SETTINGS */}
+          {section==="settings" && <CoachSettings coachId={uid} email={user?.email} coachName={coachName} />}
         </main>
       </div>
 
@@ -9940,18 +10242,37 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
       </div>
 
       {(() => {
-        const pe = [...(detail.bodyEntries || [])].reverse().find(e => e.photos && Object.keys(e.photos).length);
-        if (!pe) return null;
+        // Weekly progress photos — every entry that has photos, newest first (up to 8 weeks).
+        // GATED on client consent: photos render only when the client turned sharing on
+        // (and storage RLS enforces the same rule server-side even if the UI is bypassed).
+        const weeks = [...(detail.bodyEntries || [])].reverse().filter(e => e.photos && Object.keys(e.photos).length).slice(0, 8);
+        if (!weeks.length) return null;
+        if (!detail.sharePhotos) return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16, display:"flex", alignItems:"center", gap:12 }}>
+            <span style={{ fontSize:20 }}>{"\u{1F512}"}</span>
+            <div>
+              <div style={{ ...S.inputLabel, marginBottom:2 }}>Progress photos</div>
+              <div style={{ color:C.muted, fontSize:13, lineHeight:1.5 }}>{detail.name?.split(" ")[0] || "This client"} has photos logged but hasn't shared them with you. They can enable sharing from their Body Progress page.</div>
+            </div>
+          </div>
+        );
         return (
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
-            <div style={{ ...S.inputLabel, marginBottom:8 }}>Progress photos · {pe.date}</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:6 }}>
-              {ANGLES.map(a => pe.photos[a.id] ? (
-                <div key={a.id} style={{ position:"relative", aspectRatio:"3/4", borderRadius:8, overflow:"hidden" }}>
-                  <ProgressImg value={pe.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+            <div style={{ ...S.inputLabel, marginBottom:10 }}>Weekly progress photos</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              {weeks.map(e => (
+                <div key={e.date}>
+                  <div style={{ color:C.muted, fontSize:12, marginBottom:5 }}>{e.date}{e.weight ? ` · ${e.weight} lb` : ""}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:6 }}>
+                    {ANGLES.map(a => e.photos[a.id] ? (
+                      <div key={a.id} style={{ position:"relative", aspectRatio:"3/4", borderRadius:8, overflow:"hidden" }}>
+                        <ProgressImg value={e.photos[a.id]} alt={a.label} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      </div>
+                    ) : (
+                      <div key={a.id} style={{ aspectRatio:"3/4", borderRadius:8, background:"#0e0e16", border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", color:"#3a3a52", fontSize:11 }}>{a.label}</div>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                <div key={a.id} style={{ aspectRatio:"3/4", borderRadius:8, background:"#0e0e16", border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", color:"#3a3a52", fontSize:11 }}>{a.label}</div>
               ))}
             </div>
           </div>

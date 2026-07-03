@@ -64,11 +64,11 @@ export async function fetchMyInvite(coachId) {
 export async function fetchRoster(coachId) {
   if (!supabase || !coachId) return [];
   const { data: rels, error } = await supabase
-    .from("relationships").select("client_id, consulting_fee").eq("coach_id", coachId).eq("status", "active");
+    .from("relationships").select("client_id, consulting_fee, client_type, risk_resolved_at").eq("coach_id", coachId).eq("status", "active");
   if (error) { console.warn("coach fetchRoster:", error.message); return []; }
   const ids = (rels || []).map(r => r.client_id);
   if (!ids.length) return [];
-  const feeOf = (id) => (rels.find(r => r.client_id === id) || {}).consulting_fee;
+  const relOf = (id) => rels.find(r => r.client_id === id) || {};
 
   const [profiles, body, steps] = await Promise.all([
     supabase.from("profiles").select("id, first_name, last_name, email, phone, extra").in("id", ids),
@@ -89,16 +89,33 @@ export async function fetchRoster(coachId) {
       weight: bw.length ? bw[bw.length - 1].weight : null,
       weightTrend: bw.length >= 2 ? +(bw[bw.length - 1].weight - bw[0].weight).toFixed(1) : null,
       lastActive,
-      consultingFee: feeOf(id),   // per-client override (null = use coach base fee)
+      consultingFee: relOf(id).consulting_fee,        // per-client override (null = use coach base fee)
+      clientType: relOf(id).client_type || "consulting", // 'consulting' | 'app_only'
+      riskResolvedAt: relOf(id).risk_resolved_at,     // suppresses the at-risk flag for 14 days
     };
   });
+}
+
+// Resolve an at-risk client from the Overview queue. Outcomes:
+//   'back_on_track' — contacted, they're fine; note saved for the record.
+//   'app_only'      — downgrade: they keep the app but drop consulting (fee → 0).
+//   'lost'          — gone for good: relationship ended, off the roster.
+export async function resolveAtRisk(coachId, clientId, outcome, note) {
+  if (!supabase || !coachId || !clientId) return false;
+  const patch = { risk_resolved_at: new Date().toISOString(), risk_outcome: outcome, risk_note: note || null };
+  if (outcome === "app_only") { patch.client_type = "app_only"; patch.consulting_fee = 0; }
+  if (outcome === "lost") patch.status = "ended";
+  const { error } = await supabase.from("relationships").update(patch)
+    .eq("coach_id", coachId).eq("client_id", clientId);
+  if (error) { console.warn("resolveAtRisk:", error.message); return false; }
+  return true;
 }
 
 // Full per-client read for the detail view + weekly summary. Returns app-shaped
 // data so the existing chart transforms apply directly.
 export async function fetchClientDetail(clientId) {
   if (!supabase || !clientId) return null;
-  const [profile, body, steps, sleep, logs, food, rewards] = await Promise.all([
+  const [profile, body, steps, sleep, logs, food, rewards, rel] = await Promise.all([
     supabase.from("profiles").select("first_name, last_name, email, phone, extra").eq("id", clientId).maybeSingle(),
     supabase.from("body_entries").select("*").eq("user_id", clientId),
     supabase.from("step_entries").select("*").eq("user_id", clientId),
@@ -106,6 +123,7 @@ export async function fetchClientDetail(clientId) {
     supabase.from("workout_logs").select("day").eq("user_id", clientId),
     supabase.from("food_log_days").select("day, cal, protein, carbs, fats").eq("user_id", clientId),
     supabase.from("rewards").select("*").eq("user_id", clientId).maybeSingle(),
+    supabase.from("relationships").select("share_photos").eq("client_id", clientId).maybeSingle(), // RLS scopes to this coach's row
   ]);
   const bodyEntries = (body.data || [])
     .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat, photos: r.photos || {} }))
@@ -122,7 +140,28 @@ export async function fetchClientDetail(clientId) {
     bodyEntries, stepEntries, sleepEntries, workoutDays, foodDays,
     rewards: rewards.data ? { coins: rewards.data.coins, stats: rewards.data.stats || {} } : null,
     lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0], workoutDays.slice(-1)[0]),
+    sharePhotos: !!rel.data?.share_photos,  // client consent — photos render only when true
   };
+}
+
+// ── Progress-photo sharing consent (client side) ─────────────────────────────────
+// Whether this client has allowed their coach to view progress photos.
+// Returns null when the client has no coach relationship (toggle hidden).
+export async function getPhotoSharing(clientId) {
+  if (!supabase || !clientId) return null;
+  const { data, error } = await supabase.from("relationships")
+    .select("share_photos").eq("client_id", clientId).eq("status", "active").maybeSingle();
+  if (error) { console.warn("getPhotoSharing:", error.message); return null; }
+  return data ? !!data.share_photos : null;
+}
+
+// Flip the consent flag. Goes through the set_photo_sharing RPC because table RLS
+// (correctly) doesn't let clients update relationship rows directly.
+export async function setPhotoSharing(share) {
+  if (!supabase) return false;
+  const { error } = await supabase.rpc("set_photo_sharing", { p_share: !!share });
+  if (error) { console.warn("setPhotoSharing:", error.message); return false; }
+  return true;
 }
 
 // ── AI weekly briefing ───────────────────────────────────────────────────────────
@@ -251,12 +290,28 @@ export function computeFinancials(roster, monthlyPrice = 105) {  // coach net pe
 }
 
 // ── COACH SETTINGS / SESSIONS / PER-CLIENT FEES ──────────────────────────────────
-const DEFAULT_SETTINGS = { inperson_rate: 75, consulting_fee: 105 };
+const DEFAULT_SETTINGS = { inperson_rate: 75, consulting_fee: 105, monthly_goal: 0, voice_id: null };
 
 export async function fetchSettings(coachId) {
   if (!supabase || !coachId) return { ...DEFAULT_SETTINGS };
-  const { data } = await supabase.from("coach_settings").select("inperson_rate, consulting_fee").eq("coach_id", coachId).maybeSingle();
+  const { data } = await supabase.from("coach_settings").select("inperson_rate, consulting_fee, monthly_goal, voice_id").eq("coach_id", coachId).maybeSingle();
   return { ...DEFAULT_SETTINGS, ...(data || {}) };
+}
+
+// The coach's own identity, read from + written to their profiles row (existing owner RLS).
+export async function fetchCoachProfile(coachId) {
+  if (!supabase || !coachId) return null;
+  const { data } = await supabase.from("profiles").select("first_name, last_name, phone, email").eq("id", coachId).maybeSingle();
+  return data || null;
+}
+export async function updateCoachProfile(coachId, { firstName, lastName, phone }) {
+  if (!supabase || !coachId) return { error: "No backend configured." };
+  const patch = {};
+  if (firstName !== undefined) patch.first_name = firstName;
+  if (lastName  !== undefined) patch.last_name  = lastName;
+  if (phone     !== undefined) patch.phone      = phone;
+  const { error } = await supabase.from("profiles").update(patch).eq("id", coachId);
+  return { error: error?.message || null };
 }
 export async function saveSettings(coachId, patch) {
   if (!supabase || !coachId) return;
