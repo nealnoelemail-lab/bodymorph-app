@@ -3309,7 +3309,7 @@ const IconProgramSummary = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut, subscription, onBecomeCoach, onLinkCoach }) {
+function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, user, onSignOut, subscription, onBecomeCoach, onLinkCoach, onCoachDashboard }) {
   const [previewing, setPreviewing] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   // Branded modal — replaces raw browser prompt()/alert() (unstyled OS dialogs that
@@ -3345,20 +3345,25 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
     { label:"Change Password", icon:"🔒", note: user?.email ? "Email yourself a reset link" : "Coming soon — requires account backend", action: changePassword },
     { label:"Update Payment", icon:"💳", note: billingEnabled ? "Manage your card in the billing portal" : "Coming soon — requires payment backend", action: openBillingPortal },
     { label:"Change Subscription", icon:"📋", note: billingEnabled ? (subStatus ? `Status: ${subStatus} — manage plan` : "Manage your plan") : "Coaching · App Only — coming soon", action: openBillingPortal },
-    { label:"Link to my coach", icon:"🔗", note:"Enter your coach's invite code", action: ()=>{
-        showPrompt("Link to My Coach", "Enter the invite code your coach gave you.", "e.g. COACH-1234", async (c) => {
-          if (!c) return;
-          const r = await onLinkCoach(c);
-          showAlert(r?.ok ? "Linked!" : "Couldn't Link", r?.ok ? "You're now linked to your coach." : (r?.error || "That code didn't work — check with your coach."));
-        });
-      } },
-    { label:"Become a coach", icon:"🧑‍🏫", note:"Enter your coach access code", action: ()=>{
-        showPrompt("Become a Coach", "Enter your BodyMorph coach access code.", "Access code", async (c) => {
-          if (!c) return;
-          const r = await onBecomeCoach(c);
-          if (!r?.ok) showAlert("Couldn't Activate", r?.error || "That code didn't work.");
-        });
-      } },
+    // Already a coach → one-tap back to the business side. Otherwise: client linking + coach signup.
+    ...(onCoachDashboard
+      ? [{ label:"Coach Dashboard", icon:"📊", note:"Back to your coaching business", action: onCoachDashboard }]
+      : [
+        { label:"Link to my coach", icon:"🔗", note:"Enter your coach's invite code", action: ()=>{
+            showPrompt("Link to My Coach", "Enter the invite code your coach gave you.", "e.g. COACH-1234", async (c) => {
+              if (!c) return;
+              const r = await onLinkCoach(c);
+              showAlert(r?.ok ? "Linked!" : "Couldn't Link", r?.ok ? "You're now linked to your coach." : (r?.error || "That code didn't work — check with your coach."));
+            });
+          } },
+        { label:"Become a coach", icon:"🧑‍🏫", note:"Enter your coach access code", action: ()=>{
+            showPrompt("Become a Coach", "Enter your BodyMorph coach access code.", "Access code", async (c) => {
+              if (!c) return;
+              const r = await onBecomeCoach(c);
+              if (!r?.ok) showAlert("Couldn't Activate", r?.error || "That code didn't work.");
+            });
+          } },
+      ]),
     { label:"Contact Us", icon:"✉️", note:"Coming soon", action: ()=>showAlert("Coming Soon", "In-app support is coming soon.") },
   ];
   return (
@@ -9208,7 +9213,7 @@ function CoachSettings({ coachId, email, coachName }) {
   );
 }
 
-function CoachApp({ user, profile, onSignOut }) {
+function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   const uid = user?.id;
   const coachName = (profile && profile.name) || (user?.email ? user.email.split("@")[0] : "Coach");
   // Just the coach's FIRST name (strip a leading "Coach " title if their name already has one).
@@ -9345,6 +9350,10 @@ function CoachApp({ user, profile, onSignOut }) {
               <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
             ))}
             <button className="coach-navitem" style={{ marginTop:8, background:"#e8ff00", color:"#000", fontWeight:700, textAlign:"center" }} onClick={()=>openInvite()}>+ Invite client</button>
+            {/* Coaches train too: flip to their own client-side app (same account, same data). */}
+            {onMyTraining && (
+              <button className="coach-navitem" style={{ marginTop:4, border:"1px solid #2a2a3d", textAlign:"center" }} onClick={onMyTraining}>🏋️ My Training</button>
+            )}
           </div>
           <div style={{ position:"absolute", bottom:16, left:12, right:12 }}>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Coach · {coachName}</div>
@@ -10779,6 +10788,15 @@ export default function BodyMorph() {
   // Client links to their coach via the coach's invite code.
   const linkToCoach = useCallback(async (code) => redeemCoachInvite(code), []);
 
+  // Coach ⇄ personal toggle: coaches train too. "My Training" drops them into their own
+  // client-side app (same account, same data; no wizard done yet → wizard first). Coaches
+  // skip the client paywall/access gates — being the trainer IS the access. The way back
+  // ("Coach Dashboard") shows in the client Settings whenever role === 'coach'.
+  const goMyTraining = useCallback(() => {
+    setPhase(profile && Object.keys(profile).length ? "home" : "wizard");
+  }, [profile]);
+  const backToDashboard = useCallback(() => setPhase("dashboard"), []);
+
   const saveTrainingDays = async (days) => {
     const updated = { ...profile, trainingDays: days };
     setProfile(updated);
@@ -11107,7 +11125,7 @@ export default function BodyMorph() {
   if (phase === "phoneverify") return <PhoneVerify user={user} pendingPhone={pendingPhone} onSignOut={handleSignOut} onVerified={()=>{ setPendingPhone(""); setLoaded(false); setPhase("init"); hydrate(); }} />;
   if (phase === "accesscode") return <AccessGate onLink={linkToCoach} onCoach={becomeCoach} onSignOut={handleSignOut} onLinked={()=>setPhase(profile ? "home" : "wizard")} />;
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
-  if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} />;
+  if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} onMyTraining={goMyTraining} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} initial={editProfile} startStep={editProfile ? 8 : 0} /></>;
   if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d)=>{ saveDeficit(d); setPhase("home"); }} onEdit={()=>{ setEditProfile(profile); setPhase("wizard"); }} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
@@ -11150,7 +11168,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
