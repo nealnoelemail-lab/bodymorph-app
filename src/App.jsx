@@ -166,6 +166,15 @@ const GROK_LLM_MODEL = import.meta.env.VITE_GROK_LLM_MODEL || "grok-4.3"; // con
 // so the voice coach captures audio through the native VoiceCapture plugin instead.
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
 const VoiceCapture = registerPlugin("VoiceCapture");
+// AbortSignal.timeout() only exists on iOS/Safari 16+ — on older iPhones it's undefined,
+// which made EVERY voice-coach fetch (brain, STT, TTS) throw instantly: the coach could
+// only speak canned fallback lines while the mic loop kept running. This works everywhere.
+const signalTimeout = (ms) => {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+};
 // base64 (m4a from native) → Blob for the existing Whisper upload.
 function b64ToBlob(b64, mime) {
   const bin = atob(b64); const len = bin.length; const bytes = new Uint8Array(len);
@@ -3679,7 +3688,7 @@ async function fetchFormCues(videoId, exerciseName) {
   try {
     const ttRes = await fetch(
       `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`,
-      { signal: AbortSignal.timeout(5000) }
+      { signal: signalTimeout(5000) }
     );
     if (ttRes.ok) {
       const ttData = await ttRes.json();
@@ -4239,7 +4248,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       try {
         const res = await fetch("https://api.cartesia.ai/tts/bytes", {
           method: "POST",
-          signal: AbortSignal.timeout(12000),
+          signal: signalTimeout(12000),
           headers: { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION, "Content-Type": "application/json" },
           body: JSON.stringify({
             model_id: CARTESIA_TTS_MODEL,
@@ -4271,7 +4280,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // ── xAI Grok Sonic-class TTS (single-vendor, ~10x cheaper) — same playback path ──
     const grokSpeak = async () => {
       try {
-        const res = await grokTtsFetch({ text, voice_id: voiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }, { signal: AbortSignal.timeout(12000) });
+        const res = await grokTtsFetch({ text, voice_id: voiceIdRef.current || GROK_DEFAULT_VOICE, language: "en" }, { signal: signalTimeout(12000) });
         if (!res.ok || closedRef.current || done) { if (!res.ok) log("Grok HTTP " + res.status); throw new Error("tts " + res.status); }
         const blob = await res.blob();
         if (closedRef.current || done) return;
@@ -4426,11 +4435,11 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       try {
         let res;
         if (USE_GROK) {
-          res = await grokSttFetch(formData, { signal: AbortSignal.timeout(15000) });
+          res = await grokSttFetch(formData, { signal: signalTimeout(15000) });
         } else {
           const sttUrl = USE_CARTESIA ? "https://api.cartesia.ai/stt" : "https://api.openai.com/v1/audio/transcriptions";
           const sttHeaders = USE_CARTESIA ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION } : { "Authorization": `Bearer ${OPENAI_KEY}` };
-          res = await fetch(sttUrl, { signal: AbortSignal.timeout(15000), method: "POST", headers: sttHeaders, body: formData });
+          res = await fetch(sttUrl, { signal: signalTimeout(15000), method: "POST", headers: sttHeaders, body: formData });
         }
         if (!res.ok) { log("STT HTTP " + res.status); }
         const data = await res.json();
@@ -4564,7 +4573,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         coachErrorRef.current = async (info) => {   // brain call failed → reliable one-shot fallback
           log("native brain err: " + (info?.error || "?") + " → one-shot fallback");
           try {
-            const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: AbortSignal.timeout(15000) });
+            const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: signalTimeout(15000) });
             if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
             const data = await res.json();
             const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
@@ -4589,7 +4598,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         if (USE_GROK_LLM) {
           // xAI Grok brain (OpenAI-compatible: system goes in as the first message).
           const res = await fetch("https://api.x.ai/v1/chat/completions", {
-            signal: AbortSignal.timeout(15000),
+            signal: signalTimeout(15000),
             method: "POST",
             headers: { "Authorization": `Bearer ${XAI_KEY}`, "content-type": "application/json" },
             body: JSON.stringify({ model: GROK_LLM_MODEL, max_tokens: 140, messages: [{ role: "system", content: buildSysPrompt() }, ...msgs] }),
@@ -4599,7 +4608,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           const data = await res.json();
           aiText = data.choices?.[0]?.message?.content || "Keep going — you've got this.";
         } else {
-          const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: AbortSignal.timeout(15000) });
+          const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: signalTimeout(15000) });
           if (closedRef.current || turnRef.current !== myTurn) return;
           const data = await res.json();
           aiText = data.content?.[0]?.text || "Keep going — you've got this.";
