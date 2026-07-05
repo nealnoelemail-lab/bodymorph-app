@@ -9396,7 +9396,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"2px 4px 8px" }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1, lineHeight:1 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
               <button onClick={()=>go("settings")} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2, flexShrink:0 }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={section==="settings" ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="29" height="29" viewBox="0 0 24 24" fill="none" stroke={section==="settings" ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
@@ -9424,7 +9424,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           </div>
           {/* Phone: ONE collapsible MENU bar; the yellow invite bar lives OUTSIDE it (always visible). */}
           <div className="coach-mobilebar">
-            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"13px", fontSize:18, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
+            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"14px", fontSize:23, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
               {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
             </button>
             {mobileMenu && (
@@ -9437,7 +9437,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 ))}
               </div>
             )}
-            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"13px", fontSize:18, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"14px", fontSize:23, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
             {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
             <div style={{ textAlign:"center", marginTop:16 }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
@@ -9556,18 +9556,21 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                   {attention.map(c => {
                     const href = messageHref(c);
                     return (
-                      <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px 9px 14px" }}>
+                      <div key={c.id} style={{ display:"flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding: isMobile ? "12px 12px" : "9px 12px 9px 14px" }}>
+                        {/* Row 1 (phone): name + status. Row 2: the actions, full width. Desktop: one line. */}
                         <div onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flex:1, minWidth:0, cursor:"pointer" }}>
                           <span style={{ color:C.text, fontWeight:600, fontSize:F(14) }}>{c.name}</span>
                           <span style={{ color:C.red, fontSize:F(12.5), marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
                         </div>
-                        {href && (
-                          <a href={href} style={{ flexShrink:0, textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"6px 13px", fontSize:F(12.5), fontWeight:700 }}>
-                            {c.phone ? "💬 Text" : "✉ Email"}
-                          </a>
-                        )}
-                        <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flexShrink:0, background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"6px 11px", fontSize:F(12.5), cursor:"pointer" }}>Open</button>
-                        <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ flexShrink:0, background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"6px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer" }}>Resolve</button>
+                        <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                          {href && (
+                            <a href={href} style={{ textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"7px 13px", fontSize:F(12.5), fontWeight:700, textAlign:"center", ...(isMobile ? { flex:1 } : {}) }}>
+                              {c.phone ? "💬 Text" : "✉ Email"}
+                            </a>
+                          )}
+                          <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"7px 11px", fontSize:F(12.5), cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Open</button>
+                          <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"7px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Resolve</button>
+                        </div>
                       </div>
                     );
                   })}
