@@ -749,10 +749,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         if power > speechGate() {
             hasSpeech = true; speechFrames += 1; silenceFrames = 0
         } else {
-            // Non-speech frame → teach the noise floor. Snap DOWN instantly on quieter
-            // readings; drift UP slowly (EMA) so a loudening room raises the gate without
-            // one cough poisoning it. Speech frames never touch the floor.
-            if power < noiseFloor { noiseFloor = power }
+            // Non-speech frame → teach the noise floor. Fall FASTER than we rise, but never
+            // instantly: TV/gym noise fluctuates, and snapping to the quietest split-second
+            // (a pause between TV words) dropped the gate under the babble — then chatter
+            // read as endless "speech" and phrase-end never fired (Neal's TV log: 3 turns
+            // swallowed into "you good?" nudges). 20%/frame ≈ settles in ~1s, immune to blips.
+            if power < noiseFloor { noiseFloor = 0.8 * noiseFloor + 0.2 * power }
             else { noiseFloor = 0.95 * noiseFloor + 0.05 * power }
             if hasSpeech { silenceFrames += 1 }
         }
