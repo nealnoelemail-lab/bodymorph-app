@@ -73,10 +73,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // -37 dBFS while actual speech runs -10 to -18 dBFS. At the old -38 the noise floor
     // touched the line, so stray noise kept registering as "speech" and resetting the
     // silence counter → end-of-phrase never fired → mic stayed open, coach never heard.
-    // -30 cleared the observed noise floor (~-37) by ~7 dB but forced Neal to raise his
-    // voice; -33 doubles sensitivity to speech (3 dB = 2x energy) while still clearing
-    // ambient by ~4 dB. If the open-mic bug ever returns in quiet rooms, nudge back up.
-    private let speechThreshold: Float = -33.0
+    // RETUNED for .voiceChat voice processing (its AGC hands us much quieter readings):
+    // silent-room floor now measures < -46 dB (was ~-37 unprocessed), Neal's speech onset
+    // -43…-38, peaks -32…-27 (device log 2026-07-04). -42 clears the processed floor by
+    // ~4 dB and catches normal speech from the first syllable. History: -38 (open-mic bug)
+    // → -30 (fixed it, unprocessed scale) → -33 (sensitivity) → -42 (processed scale).
+    private let speechThreshold: Float = -42.0
     private let silenceHang = 11                  // ~1.1s of silence ends a phrase — still clears a breath/pause, but snappier than 1.4s
     private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
     private let maxFrames = 170                   // ~17s hard cap per phrase (room for a longer thought)
