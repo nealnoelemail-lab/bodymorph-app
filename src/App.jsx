@@ -4577,10 +4577,13 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         speakDoneRef.current = (info) => { if (info && info.error) log("native TTS err: " + info.error); goListen(); }; // audio finished → listen
         coachErrorRef.current = async (info) => {   // brain call failed → reliable one-shot fallback
           log("native brain err: " + (info?.error || "?") + " → one-shot fallback");
+          console.log("BM native brain err:", info?.error || "?");
           try {
             const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: signalTimeout(15000) });
             if (closedRef.current || turnRef.current !== myTurn) { speakingRef.current = false; return; }
             const data = await res.json();
+            // Surface the API's actual rejection reason in the Xcode console (Capacitor echoes console.log).
+            if (!data.content?.[0]?.text) console.log("BM brain error body:", res.status, JSON.stringify(data).slice(0, 400), "| sys len:", buildSysPrompt().length, "| msgs:", JSON.stringify(msgs).slice(0, 200));
             const aiText = data.content?.[0]?.text || "Keep going — you've got this.";
             finishReply(aiText);
             speak(aiText, goListen);
@@ -4616,6 +4619,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 140, system: buildSysPrompt(), messages: msgs }, { signal: signalTimeout(15000) });
           if (closedRef.current || turnRef.current !== myTurn) return;
           const data = await res.json();
+          if (!data.content?.[0]?.text) console.log("BM brain error body:", res.status, JSON.stringify(data).slice(0, 400));
           aiText = data.content?.[0]?.text || "Keep going — you've got this.";
         }
         const confirm = processActions(aiText);
