@@ -9334,13 +9334,34 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   const networkClients = 0;
 
   const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
-  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"],["settings","Settings"]];
+  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
+  const [gearOpen, setGearOpen] = useState(false); // top-right gear menu (Settings + My Training App)
 
   return (
     <div style={{ position:"relative" }}>
       <style>{GLOBAL_CSS + COACH_CSS}</style>
       <div aria-hidden="true" className="coach-wm-base" />
       <img aria-hidden="true" src={WATERMARK_SRC} className="coach-wm-img" alt="" />
+
+      {/* Top-right gear — same icon as the training app. Opens Settings + the My Training App toggle. */}
+      <button onClick={()=>setGearOpen(o=>!o)} aria-label="Settings" style={{ position:"fixed", top:16, right:20, zIndex:70, background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:4 }}>
+        <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke={gearOpen ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+      {gearOpen && (
+        <>
+          <div onClick={()=>setGearOpen(false)} style={{ position:"fixed", inset:0, zIndex:68 }} />
+          <div style={{ position:"fixed", top:52, right:20, zIndex:69, background:"#12121a", border:`1px solid ${C.border}`, borderRadius:12, padding:6, minWidth:210, boxShadow:"0 14px 40px rgba(0,0,0,0.6)" }}>
+            <button onClick={()=>{ setGearOpen(false); go("settings"); }} style={{ display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:C.text, fontSize:14, fontFamily:"'DM Sans'", padding:"11px 12px", borderRadius:8, cursor:"pointer" }}>⚙️ Settings</button>
+            {onMyTraining && (
+              <button onClick={()=>{ setGearOpen(false); onMyTraining(); }} style={{ display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:C.text, fontSize:14, fontFamily:"'DM Sans'", padding:"11px 12px", borderRadius:8, cursor:"pointer" }}>🏋️ My Training App</button>
+            )}
+          </div>
+        </>
+      )}
+
       <div className="coach-shell">
         <aside className="coach-side">
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1, padding:"2px 4px 0" }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
@@ -9350,10 +9371,6 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
             ))}
             <button className="coach-navitem" style={{ marginTop:8, background:"#e8ff00", color:"#000", fontWeight:700, textAlign:"center" }} onClick={()=>openInvite()}>+ Invite client</button>
-            {/* Coaches train too: flip to their own client-side app (same account, same data). */}
-            {onMyTraining && (
-              <button className="coach-navitem" style={{ marginTop:4, border:"1px solid #2a2a3d", textAlign:"center" }} onClick={onMyTraining}>🏋️ My Training</button>
-            )}
           </div>
           <div style={{ position:"absolute", bottom:16, left:12, right:12 }}>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Coach · {coachName}</div>
