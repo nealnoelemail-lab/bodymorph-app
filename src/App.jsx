@@ -8920,7 +8920,9 @@ const COACH_CSS = `
     .coach-shell{ align-items:stretch; }
     .coach-desknav{ display:none; }
     .coach-side-bottom{ display:none; }
-    .coach-mobilebar{ display:block; margin-top:12px; }
+    .coach-deskbrand{ display:none; }  /* brand header moves BELOW the invite bar on phone */
+    .coach-deskhead{ display:none; }   /* main's welcome heading — phone shows it up top instead */
+    .coach-mobilebar{ display:block; margin-top:2px; }
     .coach-mobileonly{ display:block; }
     .coach-wm-img{ left:50%; width:92%; max-width:460px; }
   }
@@ -9384,7 +9386,21 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
 
       <div className="coach-shell">
         <aside className="coach-side">
-          {/* Header row: wordmark + gear on the SAME line (gear matches the training app's icon). */}
+          {/* PHONE header order (Neal's spec): WELCOME BACK on top (gear beside it), then MENU,
+              then Invite, with the BODYMORPH brand plate below — rendered further down. */}
+          <div className="coach-mobileonly">
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"2px 4px 8px" }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, lineHeight:1 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
+              <button onClick={()=>go("settings")} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2, flexShrink:0 }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={section==="settings" ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {/* Desktop header: wordmark + gear on the SAME line (gear matches the training app's icon). */}
+          <div className="coach-deskbrand">
           <div style={{ position:"relative", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"2px 4px 0" }}>
             <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
             <button onClick={()=>go("settings")} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2 }}>
@@ -9395,6 +9411,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
             </button>
           </div>
           <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", padding:"3px 4px 0" }}>High Paid Coaches</div>
+          </div>
           <div className="coach-nav coach-desknav">
             {NAV.map(([k,label]) => (
               <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
@@ -9417,6 +9434,11 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               </div>
             )}
             <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
+            {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
+            <div style={{ textAlign:"center", marginTop:16 }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
+              <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", marginTop:3 }}>High Paid Coaches</div>
+            </div>
           </div>
           <div className="coach-side-bottom" style={{ position:"absolute", bottom:16, left:12, right:12 }}>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Coach · {coachName}</div>
@@ -9428,8 +9450,10 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           {/* OVERVIEW */}
           {section==="overview" && (
             <>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
-              <div style={{ color:"#6a6a82", fontSize:13 }}>High Paid Coaches — everything in one place.</div>
+              <div className="coach-deskhead">
+                <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
+                <div style={{ color:"#6a6a82", fontSize:13 }}>High Paid Coaches — everything in one place.</div>
+              </div>
 
               {(() => {
                 const CIRCLE = 420;   // center circle diameter
