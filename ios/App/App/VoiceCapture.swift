@@ -558,7 +558,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
         DispatchQueue.main.async {
             guard self.ttsActive else { return }
-            if !self.ttsEngine.isRunning { try? self.ttsEngine.start() }
+            if !self.ttsEngine.isRunning {
+                try? self.ttsEngine.start()
+                // .voiceChat's processing unit resets the output to the quiet RECEIVER when
+                // the engine spins up — re-assert speaker/earbuds AFTER the engine is live.
+                self.applyOutputRoute()
+            }
             if !self.ttsPlayer.isPlaying { self.ttsPlayer.play() }
             if !self.ttsFirstAudio {   // DIAG: first audio scheduled → report TTS latency once
                 self.ttsFirstAudio = true
@@ -628,7 +633,25 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // Route audio to connected earbuds/Bluetooth/headphones when present (the gym
     // case: coach in your ear, mic from the earbud). Only force the loud speaker on
     // a bare phone — never the quiet earpiece.
+    private var routeObserved = false
+    private func observeRouteChanges() {
+        if routeObserved { return }
+        routeObserved = true
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            // Re-apply our routing policy whenever devices come/go (AirPods in/out).
+            self.applyOutputRoute()
+            // AVAudioEngine can stall across a route swap mid-playback (the 26s freeze
+            // in Neal's log when he inserted AirPods) — kick it back to life on the new route.
+            if self.ttsActive {
+                if !self.ttsEngine.isRunning { try? self.ttsEngine.start() }
+                if !self.ttsPlayer.isPlaying { self.ttsPlayer.play() }
+            }
+        }
+    }
+
     private func applyOutputRoute() {
+        observeRouteChanges()
         let session = AVAudioSession.sharedInstance()
         // Clear any prior forced-speaker override FIRST, otherwise a newly-connected
         // headset stays masked (currentRoute keeps reporting the speaker) and audio
