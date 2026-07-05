@@ -9377,6 +9377,10 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
     window.addEventListener("resize", f);
     return () => window.removeEventListener("resize", f);
   }, []);
+  const isMobile = vw <= 760;
+  // Phone font boost (Neal): the fit-to-screen grid transform shrinks its text ~40%, so on
+  // mobile all console text gets ×1.3 — EXCEPT the big numbers inside the nine cards.
+  const F = (n) => isMobile ? Math.round(n * 1.3 * 10) / 10 : n;
 
   return (
     <div style={{ position:"relative" }}>
@@ -9390,7 +9394,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               then Invite, with the BODYMORPH brand plate below — rendered further down. */}
           <div className="coach-mobileonly">
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"2px 4px 8px" }}>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, lineHeight:1 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1, lineHeight:1 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
               <button onClick={()=>go("settings")} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2, flexShrink:0 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={section==="settings" ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
@@ -9420,24 +9424,24 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           </div>
           {/* Phone: ONE collapsible MENU bar; the yellow invite bar lives OUTSIDE it (always visible). */}
           <div className="coach-mobilebar">
-            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
+            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"13px", fontSize:18, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
               {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
             </button>
             {mobileMenu && (
               <div style={{ background:"#12121a", border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, overflow:"hidden" }}>
                 {NAV.map(([k,label]) => (
                   <button key={k} onClick={()=>{ go(k); setMobileMenu(false); }}
-                    style={{ display:"block", width:"100%", textAlign:"left", background: section===k && !selected ? "rgba(232,255,0,0.10)" : "transparent", border:"none", borderBottom:"1px solid #1f1f2e", color: section===k && !selected ? "#e8ff00" : C.text, fontWeight: section===k && !selected ? 700 : 400, fontSize:14.5, fontFamily:"'DM Sans'", padding:"13px 14px", cursor:"pointer" }}>
+                    style={{ display:"block", width:"100%", textAlign:"left", background: section===k && !selected ? "rgba(232,255,0,0.10)" : "transparent", border:"none", borderBottom:"1px solid #1f1f2e", color: section===k && !selected ? "#e8ff00" : C.text, fontWeight: section===k && !selected ? 700 : 400, fontSize:19, fontFamily:"'DM Sans'", padding:"14px 15px", cursor:"pointer" }}>
                     {label}
                   </button>
                 ))}
               </div>
             )}
-            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"13px", fontSize:18, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
             {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
             <div style={{ textAlign:"center", marginTop:16 }}>
-              <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
-              <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", marginTop:3 }}>High Paid Coaches</div>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
+              <div style={{ fontSize:12.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", marginTop:3 }}>High Paid Coaches</div>
             </div>
           </div>
           <div className="coach-side-bottom" style={{ position:"absolute", bottom:16, left:12, right:12 }}>
@@ -9481,10 +9485,10 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 const Card = (c, key) => (
                   <div key={key} onClick={()=>setSection(c.go)} style={{ cursor:"pointer", textAlign:"center", padding:"4px 8px" }}>
                     <div style={vslot}><div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:33, color:c.color, lineHeight:1 }}>{c.value}</div></div>
-                    <div style={{ fontSize:12.5, color:"#f0f0f8", opacity:0.65, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>{c.label}</div>
+                    <div style={{ fontSize:F(12.5), color:"#f0f0f8", opacity:0.65, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>{c.label}</div>
                   </div>
                 );
-                const colHead = { fontSize:11, color:"#f0f0f8", letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:4, paddingBottom:7, borderBottom:"1px solid rgba(255,255,255,0.09)" };
+                const colHead = { fontSize:F(11), color:"#f0f0f8", letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:4, paddingBottom:7, borderBottom:"1px solid rgba(255,255,255,0.09)" };
                 const column = { display:"flex", flexDirection:"column", justifyContent:"space-around", height:CIRCLE, minWidth:118, marginTop:-21 };
                 // Phone: scale the WHOLE grid to the screen width so all nine cards + the circle
                 // are visible at once (same layout, just sized to fit). Desktop renders at 1:1.
@@ -9492,7 +9496,8 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 // margin — flex-centering an overflowing box clips one side (the bug Neal saw).
                 const GRID_W = 564, GRID_H = 452;
                 const avail = Math.max(260, vw - 32);          // coach-main mobile padding = 16+16
-                const scale = vw <= 760 ? Math.min(1, avail / GRID_W) : 1;
+                // -10: boosted labels overhang their columns a few px — keep them off the clip edge.
+                const scale = vw <= 760 ? Math.min(1, (avail - 10) / GRID_W) : 1;
                 return (
                   <div style={ scale < 1
                     ? { width:"100%", overflow:"hidden", height: GRID_H * scale + 10, marginTop:14 }
@@ -9514,17 +9519,17 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                         <div style={{ position:"relative", height:"100%", display:"flex", flexDirection:"column", justifyContent:"space-around", textAlign:"center", padding:"0 46px", boxSizing:"border-box", pointerEvents:"none", marginTop:-21 }}>
                           <div>
                             <div style={vslot}><div style={{ fontSize:33, fontFamily:"'Oswald', sans-serif", fontWeight:400, color:"#f0f0f8", lineHeight:1, opacity:0.65 }}>{money(currentMonthly)}</div></div>
-                            <div style={{ fontSize:12.5, color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>Current</div>
+                            <div style={{ fontSize:F(12.5), color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>Current</div>
                           </div>
                           <div>
                             <div style={vslot}><div style={{ fontSize:40, fontFamily:"'Oswald', sans-serif", fontWeight:700, color:"#e8ff00", lineHeight:1 }}>{monthlyGoal ? money(monthlyGoal) : "—"}</div></div>
-                            <div style={{ fontSize:12.5, color:"#e8ff00", marginTop:6, textTransform:"uppercase", letterSpacing:0.6, fontWeight:700 }}>Goal</div>
+                            <div style={{ fontSize:F(12.5), color:"#e8ff00", marginTop:6, textTransform:"uppercase", letterSpacing:0.6, fontWeight:700 }}>Goal</div>
                           </div>
                           <div>
                             <div style={vslot}><div style={{ fontSize:33, fontFamily:"'Oswald', sans-serif", fontWeight:400, color:"#f0f0f8", lineHeight:1, opacity:0.65 }}>{monthlyGoal ? money(toGo) : "Set a goal"}</div></div>
-                            <div style={{ fontSize:12.5, color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>To Go</div>
+                            <div style={{ fontSize:F(12.5), color:C.muted, marginTop:6, textTransform:"uppercase", letterSpacing:0.6 }}>To Go</div>
                             {monthlyGoal ? (
-                              <div style={{ marginTop:5, fontSize:11, fontWeight:700, letterSpacing:0.3, color: pace >= 0 ? "#3ddc84" : "#ff9d5c", position:"absolute", left:0, right:0 }}>
+                              <div style={{ marginTop:5, fontSize:F(11), fontWeight:700, letterSpacing:0.3, color: pace >= 0 ? "#3ddc84" : "#ff9d5c", position:"absolute", left:0, right:0 }}>
                                 {pace >= 0 ? `▲ ${money(pace)} ahead of pace` : `▼ ${money(-pace)} behind pace`}
                               </div>
                             ) : null}
@@ -9543,9 +9548,9 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 );
               })()}
 
-              <div style={{ ...S.sectionTitle, marginTop:14, textAlign:"center" }}><span style={{ color:"#ff2d2d" }}>({atRisk}) AT RISK</span> NEEDS ATTENTION</div>
+              <div style={{ ...S.sectionTitle, fontSize:F(17), marginTop:14, textAlign:"center" }}><span style={{ color:"#ff2d2d" }}>({atRisk}) AT RISK</span> NEEDS ATTENTION</div>
               {attention.length === 0 ? (
-                <div style={{ color:C.muted, fontSize:13, textAlign:"center" }}>Everyone's been active in the last week — nothing needs you right now. 💪</div>
+                <div style={{ color:C.muted, fontSize:F(13), textAlign:"center" }}>Everyone's been active in the last week — nothing needs you right now. 💪</div>
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {attention.map(c => {
@@ -9553,16 +9558,16 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                     return (
                       <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px 9px 14px" }}>
                         <div onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flex:1, minWidth:0, cursor:"pointer" }}>
-                          <span style={{ color:C.text, fontWeight:600, fontSize:14 }}>{c.name}</span>
-                          <span style={{ color:C.red, fontSize:12.5, marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
+                          <span style={{ color:C.text, fontWeight:600, fontSize:F(14) }}>{c.name}</span>
+                          <span style={{ color:C.red, fontSize:F(12.5), marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
                         </div>
                         {href && (
-                          <a href={href} style={{ flexShrink:0, textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"6px 13px", fontSize:12.5, fontWeight:700 }}>
+                          <a href={href} style={{ flexShrink:0, textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"6px 13px", fontSize:F(12.5), fontWeight:700 }}>
                             {c.phone ? "💬 Text" : "✉ Email"}
                           </a>
                         )}
-                        <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flexShrink:0, background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"6px 11px", fontSize:12.5, cursor:"pointer" }}>Open</button>
-                        <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ flexShrink:0, background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"6px 11px", fontSize:12.5, fontWeight:700, cursor:"pointer" }}>Resolve</button>
+                        <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ flexShrink:0, background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"6px 11px", fontSize:F(12.5), cursor:"pointer" }}>Open</button>
+                        <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ flexShrink:0, background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"6px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer" }}>Resolve</button>
                       </div>
                     );
                   })}
@@ -9699,8 +9704,8 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
 
           {/* Phone: sign-out lives at the very bottom of the page (the sidebar bottom block is desktop-only). */}
           <div className="coach-mobileonly" style={{ marginTop:30, textAlign:"center" }}>
-            <div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Coach · {coachName}</div>
-            <button onClick={onSignOut} style={{ ...S.btnSec, padding:"9px 26px" }}>Sign out</button>
+            <div style={{ fontSize:15.5, color:C.muted, marginBottom:8 }}>Coach · {coachName}</div>
+            <button onClick={onSignOut} style={{ ...S.btnSec, padding:"10px 30px", fontSize:17 }}>Sign out</button>
           </div>
         </main>
       </div>
