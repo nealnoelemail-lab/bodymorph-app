@@ -9446,7 +9446,13 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           </div>
         </aside>
 
-        <main className="coach-main">
+        <main className="coach-main" style={{ position:"relative" }}>
+          {/* Phone: big ✕ across from every section's title — one tap back to the home page.
+              (Settings has its own ✕; Overview IS home.) */}
+          {section !== "overview" && section !== "settings" && (
+            <button className="coach-mobileonly" onClick={()=>go("overview")} aria-label="Back to home"
+              style={{ position:"absolute", top:14, right:14, zIndex:5, background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>✕</button>
+          )}
           {/* OVERVIEW */}
           {section==="overview" && (
             <>
