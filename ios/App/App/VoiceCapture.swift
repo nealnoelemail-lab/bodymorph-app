@@ -551,8 +551,11 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         pcm.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             let samples = raw.bindMemory(to: Int16.self)
             if let ch = buf.floatChannelData {
+                // 1.7x gain: .voiceChat's processing plays output noticeably quieter than
+                // .default did ("on the speaker, just very quiet") — compensate in software.
+                // Hard clamp keeps peaks safe; speech rarely brushes it.
                 for i in 0..<frames {
-                    ch[0][i] = max(-1.0, min(1.0, Float(Int16(littleEndian: samples[i])) / 32768.0))
+                    ch[0][i] = max(-1.0, min(1.0, (Float(Int16(littleEndian: samples[i])) / 32768.0) * 1.7))
                 }
             }
         }
@@ -637,12 +640,18 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private func observeRouteChanges() {
         if routeObserved { return }
         routeObserved = true
-        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
-            // Re-apply our routing policy whenever devices come/go (AirPods in/out).
+            // ONLY react to real device plug/unplug. Our own overrideOutputAudioPort calls
+            // fire this same notification (reason .override) — reacting to those looped the
+            // handler into a receiver↔speaker ping-pong that knocked out the voice-processing
+            // unit mid-session (Neal's quiet-start-then-suddenly-loud log).
+            guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+                  reason == .newDeviceAvailable || reason == .oldDeviceUnavailable else { return }
             self.applyOutputRoute()
             // AVAudioEngine can stall across a route swap mid-playback (the 26s freeze
-            // in Neal's log when he inserted AirPods) — kick it back to life on the new route.
+            // when AirPods were inserted) — kick it back to life on the new route.
             if self.ttsActive {
                 if !self.ttsEngine.isRunning { try? self.ttsEngine.start() }
                 if !self.ttsPlayer.isPlaying { self.ttsPlayer.play() }
@@ -653,15 +662,20 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     private func applyOutputRoute() {
         observeRouteChanges()
         let session = AVAudioSession.sharedInstance()
-        // Clear any prior forced-speaker override FIRST, otherwise a newly-connected
-        // headset stays masked (currentRoute keeps reporting the speaker) and audio
-        // won't switch to the earbuds mid-session.
-        try? session.overrideOutputAudioPort(.none)
         let external: Set<AVAudioSession.Port> = [
             .headphones, .headsetMic, .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .carAudio, .usbAudio
         ]
-        let hasExternal = session.currentRoute.outputs.contains { external.contains($0.portType) }
-        if !hasExternal { try? session.overrideOutputAudioPort(.speaker) }
+        let outputs = session.currentRoute.outputs.map { $0.portType }
+        let hasExternal = outputs.contains { external.contains($0) }
+        let onSpeaker = outputs.contains(.builtInSpeaker)
+        // IDEMPOTENT: only touch the override when the route is actually wrong. Blind
+        // .none→.speaker cycles generate route-change churn (and with voiceChat's processing
+        // unit, each churn risks a reset that flips volume/level scales mid-session).
+        if hasExternal {
+            try? session.overrideOutputAudioPort(.none)      // let earbuds/headset carry it
+        } else if !onSpeaker {
+            try? session.overrideOutputAudioPort(.speaker)   // bare phone → loudspeaker, never the receiver
+        }
     }
 
     // Start a fresh recorder + reset the VAD counters. Returns false if it couldn't start.
