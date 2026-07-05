@@ -9141,7 +9141,7 @@ function CalendarSection({ coachId, roster }) {
 }
 
 // Coach's personal settings: identity, their voice, and their monthly financial goal.
-function CoachSettings({ coachId, email, coachName }) {
+function CoachSettings({ coachId, email, coachName, onMyTraining, onClose }) {
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [phone, setPhone] = useState("");
@@ -9175,7 +9175,24 @@ function CoachSettings({ coachId, email, coachName }) {
 
   return (
     <>
-      <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:14 }}>SETTINGS</div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, maxWidth:560 }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>SETTINGS</div>
+        {onClose && (
+          <button onClick={onClose} aria-label="Close settings" style={{ background:"transparent", border:"none", color:"#8a8aa4", fontSize:30, lineHeight:1, cursor:"pointer", padding:"0 4px", fontFamily:"'DM Sans'" }}>✕</button>
+        )}
+      </div>
+
+      {/* Flip to the coach's own client-side training app (same account, same data). */}
+      {onMyTraining && (
+        <button onClick={onMyTraining} style={{ ...card, display:"flex", alignItems:"center", gap:12, width:"100%", textAlign:"left", cursor:"pointer" }}>
+          <span style={{ fontSize:22, lineHeight:1 }}>🏋️</span>
+          <span style={{ flex:1 }}>
+            <span style={{ display:"block", color:C.text, fontSize:14.5, fontWeight:600, fontFamily:"'DM Sans'" }}>My Training App</span>
+            <span style={{ display:"block", color:C.muted, fontSize:12.5, marginTop:2, fontFamily:"'DM Sans'" }}>Your own workouts, meals, and voice coach</span>
+          </span>
+          <span style={{ color:"#8a8aa4", fontSize:18 }}>›</span>
+        </button>
+      )}
 
       <div style={card}>
         <div style={{ ...S.inputLabel, marginBottom:12 }}>Personal information</div>
@@ -9347,7 +9364,6 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
 
   const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
   const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
-  const [gearOpen, setGearOpen] = useState(false); // top-right gear menu (Settings + My Training App)
   const [mobileMenu, setMobileMenu] = useState(false); // phone: the collapsible MENU bar
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
   useEffect(() => {
@@ -9367,23 +9383,12 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           {/* Header row: wordmark + gear on the SAME line (gear matches the training app's icon). */}
           <div style={{ position:"relative", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"2px 4px 0" }}>
             <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
-            <button onClick={()=>setGearOpen(o=>!o)} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2 }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={gearOpen ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button onClick={()=>go("settings")} aria-label="Settings" style={{ background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:2 }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={section==="settings" ? "#e8ff00" : "#74748a"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
             </button>
-            {gearOpen && (
-              <>
-                <div onClick={()=>setGearOpen(false)} style={{ position:"fixed", inset:0, zIndex:68 }} />
-                <div style={{ position:"absolute", top:30, right:0, zIndex:69, background:"#12121a", border:`1px solid ${C.border}`, borderRadius:12, padding:6, minWidth:184, boxShadow:"0 14px 40px rgba(0,0,0,0.6)" }}>
-                  <button onClick={()=>{ setGearOpen(false); go("settings"); }} style={{ display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:C.text, fontSize:14, fontFamily:"'DM Sans'", padding:"11px 12px", borderRadius:8, cursor:"pointer" }}>⚙️ Settings</button>
-                  {onMyTraining && (
-                    <button onClick={()=>{ setGearOpen(false); onMyTraining(); }} style={{ display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", color:C.text, fontSize:14, fontFamily:"'DM Sans'", padding:"11px 12px", borderRadius:8, cursor:"pointer" }}>🏋️ My Training App</button>
-                  )}
-                </div>
-              </>
-            )}
           </div>
           <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", padding:"3px 4px 0" }}>High Paid Coaches</div>
           <div className="coach-nav coach-desknav">
@@ -9651,7 +9656,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           {section==="financials" && <FinancialsSection coachId={uid} roster={roster} />}
 
           {/* SETTINGS */}
-          {section==="settings" && <CoachSettings coachId={uid} email={user?.email} coachName={coachName} />}
+          {section==="settings" && <CoachSettings coachId={uid} email={user?.email} coachName={coachName} onMyTraining={onMyTraining} onClose={()=>go("overview")} />}
 
           {/* Phone: sign-out lives at the very bottom of the page (the sidebar bottom block is desktop-only). */}
           <div className="coach-mobileonly" style={{ marginTop:30, textAlign:"center" }}>
