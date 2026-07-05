@@ -8908,6 +8908,18 @@ const COACH_CSS = `
   .ctable tr.clk{ cursor:pointer; }
   .ctable tr.clk:hover td{ background:#16161f; }
   @media(max-width:760px){ .coach-shell{ flex-direction:column; } .coach-side{ width:100%; min-height:0; position:static; border-right:none; border-bottom:1px solid #2a2a3d; } .coach-nav{ flex-direction:row; flex-wrap:wrap; } .coach-main{ padding:18px 16px 50px; } }
+  /* Phone console (Neal's spec): ONE "MENU" bar that drops the nav down, yellow invite bar
+     below it, welcome header under that, the nine-card grid scaled to fit the screen in one
+     view, silhouette centered, sign-out at the very bottom. Desktop keeps the sidebar. */
+  .coach-mobilebar{ display:none; }
+  .coach-mobileonly{ display:none; }
+  @media(max-width:760px){
+    .coach-desknav{ display:none; }
+    .coach-side-bottom{ display:none; }
+    .coach-mobilebar{ display:block; margin-top:12px; }
+    .coach-mobileonly{ display:block; }
+    .coach-wm-img{ left:50%; width:92%; max-width:460px; }
+  }
 `;
 const KPI = ({ label, value, sub }) => (
   <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 16px" }}>
@@ -9336,6 +9348,13 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
   const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
   const [gearOpen, setGearOpen] = useState(false); // top-right gear menu (Settings + My Training App)
+  const [mobileMenu, setMobileMenu] = useState(false); // phone: the collapsible MENU bar
+  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
+  useEffect(() => {
+    const f = () => setVw(window.innerWidth);
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
 
   return (
     <div style={{ position:"relative" }}>
@@ -9367,13 +9386,30 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
             )}
           </div>
           <div style={{ fontSize:9.5, letterSpacing:2.6, textTransform:"uppercase", color:"#8a8aa4", padding:"3px 4px 0" }}>High Paid Coaches</div>
-          <div className="coach-nav">
+          <div className="coach-nav coach-desknav">
             {NAV.map(([k,label]) => (
               <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
             ))}
             <button className="coach-navitem" style={{ marginTop:8, background:"#e8ff00", color:"#000", fontWeight:700, textAlign:"center" }} onClick={()=>openInvite()}>+ Invite client</button>
           </div>
-          <div style={{ position:"absolute", bottom:16, left:12, right:12 }}>
+          {/* Phone: ONE collapsible MENU bar; the yellow invite bar lives OUTSIDE it (always visible). */}
+          <div className="coach-mobilebar">
+            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
+              {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
+            </button>
+            {mobileMenu && (
+              <div style={{ background:"#12121a", border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, overflow:"hidden" }}>
+                {NAV.map(([k,label]) => (
+                  <button key={k} onClick={()=>{ go(k); setMobileMenu(false); }}
+                    style={{ display:"block", width:"100%", textAlign:"left", background: section===k && !selected ? "rgba(232,255,0,0.10)" : "transparent", border:"none", borderBottom:"1px solid #1f1f2e", color: section===k && !selected ? "#e8ff00" : C.text, fontWeight: section===k && !selected ? 700 : 400, fontSize:14.5, fontFamily:"'DM Sans'", padding:"13px 14px", cursor:"pointer" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
+          </div>
+          <div className="coach-side-bottom" style={{ position:"absolute", bottom:16, left:12, right:12 }}>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Coach · {coachName}</div>
             <button onClick={onSignOut} style={{ ...S.btnSec, width:"100%", padding:"8px" }}>Sign out</button>
           </div>
@@ -9384,7 +9420,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           {section==="overview" && (
             <>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1, marginBottom:2 }}>WELCOME BACK, COACH <span style={{ color:"#e8ff00" }}>{coachFirst.toUpperCase()}</span></div>
-              <div style={{ color:"#6a6a82", fontSize:13 }}>Command center — everything at a glance.</div>
+              <div style={{ color:"#6a6a82", fontSize:13 }}>High Paid Coaches — everything in one place.</div>
 
               {(() => {
                 const CIRCLE = 420;   // center circle diameter
@@ -9411,8 +9447,13 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 );
                 const colHead = { fontSize:11, color:"#f0f0f8", letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:4, paddingBottom:7, borderBottom:"1px solid rgba(255,255,255,0.09)" };
                 const column = { display:"flex", flexDirection:"column", justifyContent:"space-around", height:CIRCLE, minWidth:118, marginTop:-21 };
+                // Phone: scale the WHOLE grid to the screen width so all nine cards + the circle
+                // are visible at once (same layout, just sized to fit). Desktop renders at 1:1.
+                const GRID_W = 564, GRID_H = 452;
+                const scale = vw <= 760 ? Math.min(1, (vw - 32) / GRID_W) : 1;
                 return (
-                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", margin:"26px auto 6px", maxWidth:"100%" }}>
+                  <div style={{ height: scale < 1 ? GRID_H * scale : undefined, display:"flex", justifyContent:"center", margin: scale < 1 ? "14px auto 0" : "26px auto 6px", maxWidth:"100%" }}>
+                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", flexShrink:0, ...(scale < 1 ? { width:GRID_W, transform:`scale(${scale})`, transformOrigin:"top center" } : {}) }}>
                     {/* LEFT — Sales & Marketing (nudged into the circle's empty corner) */}
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"stretch", marginRight:-46, zIndex:1 }}>
                       <div style={colHead}>Sales &amp; Marketing</div>
@@ -9453,6 +9494,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                       <div style={colHead}>Clients</div>
                       <div style={column}>{clients.map((c,i)=>Card(c,"c"+i))}</div>
                     </div>
+                  </div>
                   </div>
                 );
               })()}
@@ -9610,6 +9652,12 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
 
           {/* SETTINGS */}
           {section==="settings" && <CoachSettings coachId={uid} email={user?.email} coachName={coachName} />}
+
+          {/* Phone: sign-out lives at the very bottom of the page (the sidebar bottom block is desktop-only). */}
+          <div className="coach-mobileonly" style={{ marginTop:30, textAlign:"center" }}>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>Coach · {coachName}</div>
+            <button onClick={onSignOut} style={{ ...S.btnSec, padding:"9px 26px" }}>Sign out</button>
+          </div>
         </main>
       </div>
 
