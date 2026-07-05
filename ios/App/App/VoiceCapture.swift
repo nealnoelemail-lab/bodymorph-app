@@ -107,12 +107,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             do {
                 // .duckOthers lowers the user's music/podcast (like a GPS voice) instead
                 // of stopping it while the coach talks and listens.
-                // .voiceChat turns on Apple's voice processing (noise suppression + echo
-                // cancel + auto-gain — the FaceTime treatment) AND unlocks the Control
-                // Center "Mic Mode → Voice Isolation" for this app: Apple's ML strips
-                // background voices/music (TV, gym) that a level threshold can never
-                // separate from real speech. If levels shift oddly, revert to .default.
-                try session.setCategory(.playAndRecord, mode: .voiceChat,
+                // Mode stays .default ON PURPOSE. The .voiceChat experiment (2026-07-04)
+                // bought noise suppression but played output on the quiet CALL-volume curve
+                // ("can't hear the coach") and engaged inconsistently between sessions —
+                // reverted after a night of device testing. Noisy rooms are handled by the
+                // ADAPTIVE speech gate instead (learns the room's floor each turn).
+                try session.setCategory(.playAndRecord, mode: .default,
                                         options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
                 try session.setActive(true)
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
@@ -556,11 +556,8 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         pcm.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             let samples = raw.bindMemory(to: Int16.self)
             if let ch = buf.floatChannelData {
-                // 1.7x gain: .voiceChat's processing plays output noticeably quieter than
-                // .default did ("on the speaker, just very quiet") — compensate in software.
-                // Hard clamp keeps peaks safe; speech rarely brushes it.
                 for i in 0..<frames {
-                    ch[0][i] = max(-1.0, min(1.0, (Float(Int16(littleEndian: samples[i])) / 32768.0) * 1.7))
+                    ch[0][i] = max(-1.0, min(1.0, Float(Int16(littleEndian: samples[i])) / 32768.0))
                 }
             }
         }
