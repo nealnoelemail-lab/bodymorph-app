@@ -8914,6 +8914,10 @@ const COACH_CSS = `
   .coach-mobilebar{ display:none; }
   .coach-mobileonly{ display:none; }
   @media(max-width:760px){
+    /* align-items:flex-start (fine for the desktop ROW) shrink-wraps item WIDTH once the
+       shell flips to a COLUMN — coach-main sized itself to its widest child (596px on a
+       375px phone), shoving the grid off-screen right. Stretch restores full-width panes. */
+    .coach-shell{ align-items:stretch; }
     .coach-desknav{ display:none; }
     .coach-side-bottom{ display:none; }
     .coach-mobilebar{ display:block; margin-top:12px; }
@@ -9454,11 +9458,16 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 const column = { display:"flex", flexDirection:"column", justifyContent:"space-around", height:CIRCLE, minWidth:118, marginTop:-21 };
                 // Phone: scale the WHOLE grid to the screen width so all nine cards + the circle
                 // are visible at once (same layout, just sized to fit). Desktop renders at 1:1.
+                // Deterministic centering: scale from the LEFT edge, then center with an exact
+                // margin — flex-centering an overflowing box clips one side (the bug Neal saw).
                 const GRID_W = 564, GRID_H = 452;
-                const scale = vw <= 760 ? Math.min(1, (vw - 32) / GRID_W) : 1;
+                const avail = Math.max(260, vw - 32);          // coach-main mobile padding = 16+16
+                const scale = vw <= 760 ? Math.min(1, avail / GRID_W) : 1;
                 return (
-                  <div style={{ height: scale < 1 ? GRID_H * scale : undefined, display:"flex", justifyContent:"center", margin: scale < 1 ? "14px auto 0" : "26px auto 6px", maxWidth:"100%" }}>
-                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", flexShrink:0, ...(scale < 1 ? { width:GRID_W, transform:`scale(${scale})`, transformOrigin:"top center" } : {}) }}>
+                  <div style={ scale < 1
+                    ? { width:"100%", overflow:"hidden", height: GRID_H * scale + 10, marginTop:14 }
+                    : { display:"flex", justifyContent:"center", margin:"26px auto 6px", maxWidth:"100%" } }>
+                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", flexShrink:0, ...(scale < 1 ? { width:GRID_W, transform:`scale(${scale})`, transformOrigin:"top left", marginLeft: Math.max(0, (avail - GRID_W * scale) / 2) } : {}) }}>
                     {/* LEFT — Sales & Marketing (nudged into the circle's empty corner) */}
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"stretch", marginRight:-46, zIndex:1 }}>
                       <div style={colHead}>Sales &amp; Marketing</div>
