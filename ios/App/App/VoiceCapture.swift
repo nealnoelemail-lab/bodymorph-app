@@ -73,12 +73,17 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
     // -37 dBFS while actual speech runs -10 to -18 dBFS. At the old -38 the noise floor
     // touched the line, so stray noise kept registering as "speech" and resetting the
     // silence counter → end-of-phrase never fired → mic stayed open, coach never heard.
-    // RETUNED for .voiceChat voice processing (its AGC hands us much quieter readings):
-    // silent-room floor now measures < -46 dB (was ~-37 unprocessed), Neal's speech onset
-    // -43…-38, peaks -32…-27 (device log 2026-07-04). -42 clears the processed floor by
-    // ~4 dB and catches normal speech from the first syllable. History: -38 (open-mic bug)
-    // → -30 (fixed it, unprocessed scale) → -33 (sensitivity) → -42 (processed scale).
-    private let speechThreshold: Float = -42.0
+    // ADAPTIVE speech gate. Fixed thresholds kept breaking because iOS serves DIFFERENT
+    // level scales depending on whether .voiceChat's processing engages (processed:
+    // floor < -46, speech -43…-27; unprocessed: floor ~-45, speech -27…-9) — and it
+    // engages inconsistently session to session. Instead: measure the room's own noise
+    // floor continuously (EMA over non-speech frames, snap down on quieter readings)
+    // and put the gate a fixed 8 dB above it, clamped to sane bounds. Self-calibrates
+    // per turn, per room, per scale. History of the hand-tuned era: -38 → -30 → -33 → -42.
+    private var noiseFloor: Float = -55.0
+    private func speechGate() -> Float {
+        return Swift.min(Swift.max(noiseFloor + 8.0, -48.0), -20.0)
+    }
     private let silenceHang = 11                  // ~1.1s of silence ends a phrase — still clears a breath/pause, but snappier than 1.4s
     private let minSpeechFrames = 2               // need ~0.2s of speech to count as real
     private let maxFrames = 170                   // ~17s hard cap per phrase (room for a longer thought)
@@ -735,10 +740,24 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         notifyListeners("level", data: ["level": level])
 
         totalFrames += 1
-        if power > speechThreshold {
+        // CALIBRATION WINDOW: the first 0.4s after the mic opens teaches the floor
+        // unconditionally (the user hasn't started answering yet). Without this, a loud
+        // room deadlocks: ambient > stale gate → everything counts as "speech" → the
+        // floor (only taught by non-speech frames) never learns the room.
+        if totalFrames <= 4 {
+            if power < noiseFloor { noiseFloor = power }
+            else { noiseFloor = 0.6 * noiseFloor + 0.4 * power }
+            return
+        }
+        if power > speechGate() {
             hasSpeech = true; speechFrames += 1; silenceFrames = 0
-        } else if hasSpeech {
-            silenceFrames += 1
+        } else {
+            // Non-speech frame → teach the noise floor. Snap DOWN instantly on quieter
+            // readings; drift UP slowly (EMA) so a loudening room raises the gate without
+            // one cough poisoning it. Speech frames never touch the floor.
+            if power < noiseFloor { noiseFloor = power }
+            else { noiseFloor = 0.95 * noiseFloor + 0.05 * power }
+            if hasSpeech { silenceFrames += 1 }
         }
 
         if hasSpeech && silenceFrames >= silenceHang && speechFrames >= minSpeechFrames {
