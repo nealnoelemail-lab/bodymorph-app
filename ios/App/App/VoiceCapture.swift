@@ -100,7 +100,12 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
             do {
                 // .duckOthers lowers the user's music/podcast (like a GPS voice) instead
                 // of stopping it while the coach talks and listens.
-                try session.setCategory(.playAndRecord, mode: .default,
+                // .voiceChat turns on Apple's voice processing (noise suppression + echo
+                // cancel + auto-gain — the FaceTime treatment) AND unlocks the Control
+                // Center "Mic Mode → Voice Isolation" for this app: Apple's ML strips
+                // background voices/music (TV, gym) that a level threshold can never
+                // separate from real speech. If levels shift oddly, revert to .default.
+                try session.setCategory(.playAndRecord, mode: .voiceChat,
                                         options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
                 try session.setActive(true)
             } catch { print("[VoiceCapture] setCategory error: \(error)") }
