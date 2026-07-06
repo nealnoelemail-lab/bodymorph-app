@@ -2729,6 +2729,9 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
           return <button key={s} onClick={()=>set("store", on ? "" : s)} style={{ background: on?"rgba(61,220,132,0.15)":"#1a1a26", border:`1px solid ${on?"#3ddc84":"#2a2a3d"}`, color: on?"#3ddc84":"#c8c8e0", borderRadius:8, padding:"9px 4px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{s}</button>;
         })}
       </div>
+      <div style={{ width:"92%", maxWidth:340, marginTop:4 }}>
+        <input style={{ ...S.input, width:"100%", boxSizing:"border-box", fontSize:14 }} placeholder="Not listed? Type your local store (e.g. United Supermarkets)" value={STORE_BRANDS[p.store] ? "" : p.store} onChange={e=>set("store", e.target.value)} />
+      </div>
       <div style={{ width:"92%", maxWidth:340, marginTop:6 }}>
         <div style={{ color:"#c8c8e0", fontSize:11, marginBottom:4 }}>Food allergies? (optional — we'll avoid them completely)</div>
         <input style={{ ...S.input, width:"100%", boxSizing:"border-box", fontSize:15 }} placeholder="e.g. peanuts, shellfish, dairy" value={p.allergies} onChange={e=>set("allergies",e.target.value)} />
@@ -7643,7 +7646,7 @@ async function generateMealPlan({ name, goal, dietPref, allergies, targets, useB
 Diet style: ${dietPref}. Goal: ${goal}. DAILY targets (every day must hit these): ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
 ${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH across the days for variety: ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
-${store && STORE_BRANDS[store] ? `STORE — the client shops at ${store}. Choose common staple foods that ${store} reliably stocks year-round (nothing exotic or specialty).` : ""}
+${store ? `STORE — the client shops at ${store}. Choose common staple foods that ${store} reliably stocks year-round (nothing exotic or specialty).` : ""}
 GROCERY-BUDGET RULE: the whole point of the rotation is a CHEAP, SHORT shopping list. Reuse a small set of core ingredients across the three days in DIFFERENT dishes (one rice bag, two or three proteins, shared vegetables — prepared differently each day). Aim for about 12-16 UNIQUE ingredients across ALL THREE days combined. Never sacrifice the macro targets for variety.
 Each day: breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice"). The items are that dish's components.
 Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so each day's totals come close to the targets.
@@ -8521,7 +8524,8 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                       return <button key={s} onClick={()=>setStore(on ? "" : s)} style={{ background: on?"rgba(61,220,132,0.15)":"#1a1a26", border:`1px solid ${on?"#3ddc84":"#2a2a3d"}`, color: on?"#3ddc84":"#c8c8e0", borderRadius:12, padding:"15px 6px", cursor:"pointer", fontSize:16.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{s}</button>;
                     })}
                   </div>
-                  {store && <div style={{ fontSize:17.5, color:"#9898b8", marginBottom:16, lineHeight:1.4 }}>We'll stick to staples {store} reliably stocks and favor {store}'s house brands — usually the cheapest option in the store.</div>}
+                  <input style={{ width:"100%", boxSizing:"border-box", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"12px 12px", fontSize:16, fontFamily:"'DM Sans'", outline:"none", marginBottom: store?8:16 }} placeholder="Not listed? Type your local store (e.g. United Supermarkets)" value={STORE_BRANDS[store] ? "" : store} onChange={e=>setStore(e.target.value)} />
+                  {store && <div style={{ fontSize:17.5, color:"#9898b8", marginBottom:16, lineHeight:1.4 }}>We'll stick to staples {store} reliably stocks{STORE_BRANDS[store] ? ` and favor ${store}'s house brands — usually the cheapest option in the store` : ""}.</div>}
 
                   {/* Carb level — re-balances carbs vs fat inside any diet */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Carb level:</div>
