@@ -8408,7 +8408,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             ))}
           </div>
 
-          <button onClick={()=>{ setSetupOpen(false); setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:14, color:"#000", padding:"18px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:21 }}>Generate Meal Plan</button>
+          <button onClick={()=>{ setSetupOpen(false); setGenOpen(true); setGenPlan(null); setGenErr(null); setTgt({cal:calGoal,protein:proteinGoal,carbs:carbsGoal,fats:fatsGoal}); }} style={{ width:"100%", background:"linear-gradient(90deg,#e8ff00,#b6ff3d)", border:"none", borderRadius:14, color:"#000", padding:"18px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:21 }}>Next →</button>
         </div>
       </div>
     );
