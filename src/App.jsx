@@ -2235,7 +2235,7 @@ const YTButton = ({ query, gender }) => {
 };
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
-const STEPS = ["firstname","lastname","gender","goal","focus","days","time","stats","goals","activity"];
+const STEPS = ["firstname","lastname","address","gender","goal","focus","days","time","stats","goals","activity"];
 
 // ── HIGH FREQUENCY TRAINING — INFO PAGE ──────────────────────────────────────
 // Full-screen description shown when the user taps the info icon on the HFT option.
@@ -2457,6 +2457,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
   const [p, setP] = useState({
     firstName: ini.firstName || seedName.split(" ")[0] || "",
     lastName: ini.lastName || seedName.split(" ").slice(1).join(" ") || "",
+    address: ini.address || "",
     name: ini.name || "",
     gender: ini.gender || "",
     goal: ini.goal || "",
@@ -2481,6 +2482,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
   const canNext = [
     () => p.firstName.trim().length > 0,
     () => p.lastName.trim().length > 0,
+    () => p.address.trim().length > 0,
     () => !!p.gender,
     () => !!p.goal,
     () => !!p.focus,
@@ -2510,6 +2512,12 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
       <div style={{ ...S.stepLabel, fontSize:26 }}>LAST NAME</div>
       <input autoFocus style={{ ...S.input, maxWidth:320, textAlign:"center", fontSize:27 }} placeholder="Last Name" value={p.lastName} onChange={e=>set("lastName",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.lastName.trim()) setStep(2); }} />
       <div style={{ color:"#e8ff00", fontSize:24, letterSpacing:3, textTransform:"uppercase" }}>New Body 4 Life</div>
+    </div>,
+
+    <div key="address" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:18, width:"100%" }}>
+      <div style={{ ...S.stepLabel, fontSize:26 }}>HOME ADDRESS</div>
+      <input autoFocus style={{ ...S.input, maxWidth:360, textAlign:"center", fontSize:19 }} placeholder="Street, City, State ZIP" autoComplete="street-address" value={p.address} onChange={e=>set("address",e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && p.address.trim()) setStep(3); }} />
+      <div style={{ color:"#9898b8", fontSize:14, textAlign:"center", maxWidth:340, lineHeight:1.5 }}>Only your coach sees this — for in-person sessions and your client file.</div>
     </div>,
 
     <div key="g" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:9, width:"100%" }}>
@@ -10497,6 +10505,7 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
           <div style={{ display:"flex", gap:8, marginTop:7, flexWrap:"wrap" }}>
             {detail.phone && <a href={`tel:${detail.phone}`} style={chip}>📞 {detail.phone}</a>}
             {detail.email && <a href={`mailto:${detail.email}`} style={chip}>✉️ {detail.email}</a>}
+            {detail.profile?.address && <a href={`https://maps.apple.com/?q=${encodeURIComponent(detail.profile.address)}`} target="_blank" rel="noopener noreferrer" style={chip}>📍 {detail.profile.address}</a>}
           </div>
         </div>
       </div>
