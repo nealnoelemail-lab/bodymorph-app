@@ -3826,7 +3826,7 @@ function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStr
     ["NUTRITION",          <IconNutrition />,               "#f0f0f8", onNutrition],
     ["SUPPLEMENTS",        <IconSupplements />,              "#f0f0f8", onSupplements],
     ["PEPTIDES",           <IconPeptides />,                "#f0f0f8", onPeptides],
-    ["PROGRESS",           <IconProgress />,                "#f0f0f8", onProgress],
+    ["PROGRESS REPORT",    <IconProgress />,                "#f0f0f8", onProgress],
     ["MY PROGRAM SUMMARY", <IconProgramSummary />,          "#c8c8e0", onProgramSummary],
   ];
   return (
