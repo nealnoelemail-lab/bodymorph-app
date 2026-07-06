@@ -5391,7 +5391,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>PROGRESS</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>PROGRESS REPORT</div>
       </div>
 
       <div style={{ padding:"8px 20px 24px" }}>
