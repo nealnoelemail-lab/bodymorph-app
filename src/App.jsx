@@ -7552,13 +7552,30 @@ function todaysMealDay(mp) {
   return mp.days[idx];
 }
 
-async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines }) {
+// Grocery-chain → house-brand names (as they appear in the USDA Branded Foods DB).
+// Picking a store biases branded lookups toward its house brands — usually the
+// cheapest items in the store, which fits the rotation's budget philosophy.
+const STORE_BRANDS = {
+  "Kroger":       ["kroger", "simple truth", "private selection"],
+  "Walmart":      ["great value", "marketside"],
+  "Publix":       ["publix", "greenwise"],
+  "Costco":       ["kirkland signature"],
+  "Target":       ["good & gather", "market pantry"],
+  "Aldi":         ["millville", "friendly farms", "simply nature"],
+  "Whole Foods":  ["365"],
+  "Trader Joe's": ["trader joe"],
+  "Safeway":      ["signature select", "o organics"],
+  "H-E-B":        ["h-e-b", "hill country fare"],
+};
+
+async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines, store }) {
   const cuisineList = Array.isArray(cuisines) ? cuisines.filter(Boolean) : [];
   // 1. AI proposes THREE days of foods with simple USDA-friendly search terms + gram portions.
   const prompt = `You are a sports nutritionist building a 3-DAY ROTATING meal plan (Day A, Day B, Day C) for ${name || "a client"}. The client eats Day A, then B, then C, then the rotation repeats across the week (A,B,C,A,B,C,A).
 Diet style: ${dietPref}. Goal: ${goal}. DAILY targets (every day must hit these): ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
 ${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH across the days for variety: ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
+${store && STORE_BRANDS[store] ? `STORE — the client shops at ${store}. Choose common staple foods that ${store} reliably stocks year-round (nothing exotic or specialty).` : ""}
 GROCERY-BUDGET RULE: the whole point of the rotation is a CHEAP, SHORT shopping list. Reuse a small set of core ingredients across the three days in DIFFERENT dishes (one rice bag, two or three proteins, shared vegetables — prepared differently each day). Aim for about 12-16 UNIQUE ingredients across ALL THREE days combined. Never sacrifice the macro targets for variety.
 Each day: breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice"). The items are that dish's components.
 Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so each day's totals come close to the targets.
@@ -7991,7 +8008,11 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const [tgt, setTgt] = useState({ cal: parseInt(n.dailyCalories)||2000, protein: parseInt(n.protein)||150, carbs: parseInt(n.carbs)||150, fats: parseInt(n.fats)||60 });
   const [useBranded, setUseBranded] = useState(false);
   const [preferredBrands, setPreferredBrands] = useState((nutritionGoals && nutritionGoals.preferredBrands) || "");
+  const [store, setStore] = useState((nutritionGoals && nutritionGoals.store) || "");   // "Where do you shop?"
   const prefBrandList = () => preferredBrands.split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+  // Branded lookups: the user's own brand list + the chosen store's house brands.
+  const brandPrefs = () => [...(useBranded ? prefBrandList() : []), ...((STORE_BRANDS[store]) || [])];
+  const brandedOn = () => useBranded || !!STORE_BRANDS[store];
   const [bodyFat, setBodyFat] = useState((profile && profile.bodyFat) || ""); // estimated body-fat %
   const [bfHelp, setBfHelp] = useState(false);
   const [bfSaved, setBfSaved] = useState(false); // brief "Saved ✓" confirmation
@@ -8133,12 +8154,12 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   // ── AI meal-plan generator ──
   const runGenerate = async () => {
     setGenerating(true); setGenErr(null); setGenPlan(null);
-    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands, cuisines }); // remember prefs
+    onSaveNutritionGoals({ ...(nutritionGoals||{}), allergies, allergens, preferredBrands, cuisines, store }); // remember prefs
     try {
       const plan = await generateMealPlan({
         name: profile?.name, goal: profile?.goal || "general fitness", dietPref,
-        allergies: combinedAllergies(), useBranded, preferredBrands: useBranded ? prefBrandList() : [],
-        cuisines,
+        allergies: combinedAllergies(), useBranded: brandedOn(), preferredBrands: brandPrefs(),
+        cuisines, store,
         targets: { cal: parseInt(tgt.cal)||calGoal, protein: parseInt(tgt.protein)||proteinGoal, carbs: parseInt(tgt.carbs)||carbsGoal, fats: parseInt(tgt.fats)||fatsGoal },
       });
       setGenPlan(plan);
@@ -8158,7 +8179,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       if (!res.ok) throw new Error("ai");
       const alt = JSON.parse(((await res.json()).content?.[0]?.text||"").replace(/```json|```/g,"").trim());
       if (!alt || !alt.food) throw new Error("parse");
-      let m = await usdaMacrosPer100g(alt.query || alt.food, useBranded, useBranded ? prefBrandList() : []);
+      let m = await usdaMacrosPer100g(alt.query || alt.food, brandedOn(), brandPrefs());
       if (m && (m.cal <= 0 || (m.protein+m.carbs+m.fats) <= 0)) m = null;
       let per100, verified, brand=null;
       if (m) { per100 = { cal:m.cal, protein:m.protein, carbs:m.carbs, fats:m.fats }; verified=true; brand=m.brand||null; }
@@ -8424,6 +8445,16 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   </div>
                   {cuisines.length > 0 && <div style={{ fontSize:17.5, color:"#9898b8", marginBottom:16, lineHeight:1.4 }}>We'll rotate {cuisines.length===1?"this cuisine":"these cuisines"} across your meals so the day stays interesting.</div>}
 
+                  {/* Store — bias branded picks toward their chain's house brands (cheapest in store) */}
+                  <div style={{ fontSize:19, color:"#9898b8", marginBottom:4 }}>Where do you shop? <span style={{color:"#74748a", fontSize:15}}>(optional — we'll favor their store brands)</span></div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8, marginBottom: store?8:16 }}>
+                    {Object.keys(STORE_BRANDS).map(s => {
+                      const on = store === s;
+                      return <button key={s} onClick={()=>setStore(on ? "" : s)} style={{ background: on?"rgba(61,220,132,0.15)":"#1a1a26", border:`1px solid ${on?"#3ddc84":"#2a2a3d"}`, color: on?"#3ddc84":"#c8c8e0", borderRadius:12, padding:"15px 6px", cursor:"pointer", fontSize:16.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{s}</button>;
+                    })}
+                  </div>
+                  {store && <div style={{ fontSize:17.5, color:"#9898b8", marginBottom:16, lineHeight:1.4 }}>We'll stick to staples {store} reliably stocks and favor {store}'s house brands — usually the cheapest option in the store.</div>}
+
                   {/* Carb level — re-balances carbs vs fat inside any diet */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:8 }}>Carb level:</div>
                   <div style={{ display:"flex", gap:6, marginBottom:6 }}>
@@ -8539,7 +8570,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                           </div>
                         ))}
                         <button onClick={()=>printGroceryList(genPlan, { name: profile?.name })} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px solid rgba(61,220,132,0.45)", borderRadius:10, color:"#3ddc84", padding:"11px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:15 }}>🖨 Print Grocery List</button>
-                        <div style={{ color:"#74748a", fontSize:12.5, marginTop:8, textAlign:"center" }}>Covers all 7 days of the rotation.</div>
+                        <div style={{ color:"#74748a", fontSize:12.5, marginTop:8, textAlign:"center" }}>Covers all 7 days of the rotation.{store ? ` Shopping at ${store}.` : ""}</div>
                       </div>
                     )}
 
