@@ -7530,41 +7530,71 @@ function applySolver(plan, target) {
   return plan;
 }
 
+// The week is a 3-DAY ROTATION (A,B,C,A,B,C,A): three days of variety repeating across
+// seven days — 12 recipes instead of 21+, one tight grocery list, batch-cook friendly.
+const WEEK_ROTATION = ["A", "B", "C", "A", "B", "C", "A"];
+
+// Which rotation day is TODAY? Anchored to the plan's generation date; legacy
+// single-day plans return themselves. Used by the voice coach + Home suggestions.
+function todaysMealDay(mp) {
+  if (!mp) return null;
+  if (!mp.days || !mp.days.length) return mp;
+  const gen = mp.generatedAt ? new Date(mp.generatedAt + "T00:00:00") : new Date();
+  const idx = Math.max(0, Math.floor((Date.now() - gen.getTime()) / 86400000)) % mp.days.length;
+  return mp.days[idx];
+}
+
 async function generateMealPlan({ name, goal, dietPref, allergies, targets, useBranded, preferredBrands, cuisines }) {
   const cuisineList = Array.isArray(cuisines) ? cuisines.filter(Boolean) : [];
-  // 1. AI proposes the day's foods with simple USDA-friendly search terms + gram portions.
-  const prompt = `You are a sports nutritionist building ONE day's meal plan for ${name || "a client"}.
-Diet style: ${dietPref}. Goal: ${goal}. Daily targets: ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
+  // 1. AI proposes THREE days of foods with simple USDA-friendly search terms + gram portions.
+  const prompt = `You are a sports nutritionist building a 3-DAY ROTATING meal plan (Day A, Day B, Day C) for ${name || "a client"}. The client eats Day A, then B, then C, then the rotation repeats across the week (A,B,C,A,B,C,A).
+Diet style: ${dietPref}. Goal: ${goal}. DAILY targets (every day must hit these): ${targets.cal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fats}g fat.
 ${allergies ? `ALLERGIES — completely avoid these and anything containing them: ${allergies}.` : ""}
-${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH them across the day for variety (don't make every meal the same cuisine; ideally give different meals different cuisines): ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
-Build breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME that describes what the ingredients make together (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice", "Greek Chicken Power Bowl"). The items are that dish's components.
-Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so the day's totals come close to the targets.
+${cuisineList.length ? `CUISINES — draw flavor inspiration from these and MIX & MATCH across the days for variety: ${cuisineList.join(", ")}. Pick foods and pairings typical of those cuisines while keeping them single-ingredient and USDA-friendly.` : ""}
+GROCERY-BUDGET RULE: the whole point of the rotation is a CHEAP, SHORT shopping list. Reuse a small set of core ingredients across the three days in DIFFERENT dishes (one rice bag, two or three proteins, shared vegetables — prepared differently each day). Aim for about 12-16 UNIQUE ingredients across ALL THREE days combined. Never sacrifice the macro targets for variety.
+Each day: breakfast, lunch, dinner, and one snack. Each meal must be a COHESIVE DISH whose ingredients actually go together as one plate (not a random list of foods). Give each meal a short, appetizing dish NAME (e.g. "Huevos Rancheros Bowl", "Teriyaki Salmon & Jasmine Rice"). The items are that dish's components.
+Use whole, common, single-ingredient foods that exist in the USDA database. For each food give a SIMPLE lowercase search query (e.g. "chicken breast cooked", "white rice cooked", "olive oil", "banana raw", "egg whole", "almonds"). Choose portions (in grams) so each day's totals come close to the targets.
 Reply ONLY with JSON, no markdown, no commentary:
-{"meals":[{"slot":"breakfast","name":"Dish name","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","name":"Dish name","items":[...]},{"slot":"dinner","name":"Dish name","items":[...]},{"slot":"snacks","name":"Dish name","items":[...]}]}`;
-  const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 1500, messages: [{ role: "user", content: prompt }] });
+{"days":[{"label":"A","meals":[{"slot":"breakfast","name":"Dish name","items":[{"food":"Display name","query":"usda search term","grams":000}]},{"slot":"lunch","name":"Dish name","items":[...]},{"slot":"dinner","name":"Dish name","items":[...]},{"slot":"snacks","name":"Dish name","items":[...]}]},{"label":"B","meals":[...]},{"label":"C","meals":[...]}]}`;
+  const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
   if (!res.ok) throw new Error("AI error " + res.status);
   const data = await res.json();
   const txt = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
   const plan = JSON.parse(txt);
-  if (!plan || !Array.isArray(plan.meals)) throw new Error("bad plan");
+  if (!plan || !Array.isArray(plan.days) || plan.days.length < 3) throw new Error("bad plan");
+  plan.days = plan.days.slice(0, 3);
 
-  // 2. Get REAL per-100g macros for every food (parallel). Reject empty/energy-less USDA
-  //    entries (they corrupt totals) and fall back to an AI per-100g estimate for those.
-  const allItems = plan.meals.flatMap(m => m.items);
+  // 2. Get REAL per-100g macros for every food (parallel), MEMOIZED by query — the
+  //    rotation reuses ingredients across days, so each unique food is looked up once.
+  //    Reject empty/energy-less USDA entries and fall back to an AI per-100g estimate.
+  const memo = {};
+  const lookupOnce = (q, food) => memo[q] || (memo[q] = (async () => {
+    let m = await usdaMacrosPer100g(q, useBranded, preferredBrands);
+    if (m && (m.cal <= 0 || (m.protein + m.carbs + m.fats) <= 0)) m = null;
+    if (m) return { per100: { cal: m.cal, protein: m.protein, carbs: m.carbs, fats: m.fats }, verified: true, usdaDesc: m.desc, brand: m.brand || null };
+    const est = await lookupFoodMacros(`100 grams of ${food}`);
+    return { per100: { cal: est?.cal || 0, protein: est?.protein || 0, carbs: est?.carbs || 0, fats: est?.fats || 0 }, verified: false, brand: null };
+  })());
+  const allItems = plan.days.flatMap(d => d.meals.flatMap(m => m.items));
   await Promise.all(allItems.map(async (it) => {
-    let m = await usdaMacrosPer100g(it.query || it.food, useBranded, preferredBrands);
-    if (m && (m.cal <= 0 || (m.protein + m.carbs + m.fats) <= 0)) m = null; // missing/empty data → unreliable
-    if (m) { it.per100 = { cal: m.cal, protein: m.protein, carbs: m.carbs, fats: m.fats }; it.verified = true; it.usdaDesc = m.desc; it.brand = m.brand || null; }
-    else {
-      const est = await lookupFoodMacros(`100 grams of ${it.food}`); // AI estimate, per 100 g
-      it.per100 = { cal: est?.cal || 0, protein: est?.protein || 0, carbs: est?.carbs || 0, fats: est?.fats || 0 };
-      it.verified = false; it.brand = null;
-    }
+    const r = await lookupOnce((it.query || it.food || "").toLowerCase(), it.food);
+    it.per100 = r.per100; it.verified = r.verified; it.brand = r.brand;
+    if (r.usdaDesc) it.usdaDesc = r.usdaDesc;
   }));
 
-  // 3. SOLVER: deterministic gradient descent dials grams to hit all four macros at once
-  //    (far more reliable than asking the LLM to do the portion arithmetic).
-  return applySolver(plan, targets);
+  // 3. SOLVER per day: deterministic gradient descent dials each day's grams to hit
+  //    all four macros (far more reliable than LLM portion arithmetic).
+  const days = plan.days.map((d, i) => {
+    const solved = applySolver({ meals: d.meals }, targets);
+    return { label: "Day " + ("ABC"[i]), meals: solved.meals, totals: solved.totals };
+  });
+
+  const out = {
+    meals: days[0].meals, totals: days[0].totals, target: targets,   // legacy single-day shape (Day A)
+    days, rotation: WEEK_ROTATION, generatedAt: ymdLocal(),
+  };
+  out.grocery = buildGroceryList(out);   // aisle-grouped weekly shopping list
+  return out;
 }
 function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
@@ -7948,6 +7978,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const toggleCuisine = (c) => setCuisines(list => list.includes(c) ? list.filter(x=>x!==c) : [...list, c]);
   const [generating, setGenerating] = useState(false);
   const [genPlan, setGenPlan] = useState(null);
+  const [genDay, setGenDay] = useState(0);        // which rotation day (A/B/C) is being viewed
   const [genErr, setGenErr] = useState(null);
   const [tgt, setTgt] = useState({ cal: parseInt(n.dailyCalories)||2000, protein: parseInt(n.protein)||150, carbs: parseInt(n.carbs)||150, fats: parseInt(n.fats)||60 });
   const [useBranded, setUseBranded] = useState(false);
@@ -8111,7 +8142,8 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     if (!genPlan || swapping) return;
     setSwapping(mi+"-"+ii);
     try {
-      const cur = genPlan.meals[mi].items[ii];
+      const activeMeals = genPlan.days ? genPlan.days[genDay].meals : genPlan.meals;
+      const cur = activeMeals[mi].items[ii];
       const av = combinedAllergies();
       const prompt = `Suggest ONE alternative whole food to replace "${cur.food}" in a ${dietPref} day for a ${(profile?.goal||"fitness")} goal. It must fit the ${dietPref} diet, fill a similar role (e.g. swap a protein for a protein), and be DIFFERENT from "${cur.food}".${av?` Avoid anything containing: ${av}.`:""} Reply ONLY with JSON: {"food":"Display name","query":"usda search term"}`;
       const res = await anthropicFetch({ model:"claude-haiku-4-5-20251001", max_tokens:120, messages:[{role:"user", content:prompt}] });
@@ -8124,8 +8156,18 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       if (m) { per100 = { cal:m.cal, protein:m.protein, carbs:m.carbs, fats:m.fats }; verified=true; brand=m.brand||null; }
       else { const est = await lookupFoodMacros(`100 grams of ${alt.food}`); per100 = { cal:est?.cal||0, protein:est?.protein||0, carbs:est?.carbs||0, fats:est?.fats||0 }; verified=false; }
       const plan = JSON.parse(JSON.stringify(genPlan));
-      plan.meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
-      applySolver(plan, genPlan.target); // re-balance so macros still hit
+      if (plan.days) {
+        // Rotation plan: swap within the ACTIVE day, re-solve that day, refresh the
+        // Day-A alias + the weekly grocery list.
+        plan.days[genDay].meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
+        const solved = applySolver({ meals: plan.days[genDay].meals }, genPlan.target);
+        plan.days[genDay].totals = solved.totals;
+        plan.meals = plan.days[0].meals; plan.totals = plan.days[0].totals;
+        plan.grocery = buildGroceryList(plan);
+      } else {
+        plan.meals[mi].items[ii] = { food: alt.food, query: alt.query||alt.food, per100, verified, brand };
+        applySolver(plan, genPlan.target); // re-balance so macros still hit
+      }
       setGenPlan(plan);
     } catch { /* leave as-is on failure */ }
     setSwapping(null);
@@ -8136,7 +8178,11 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     // Save the plan ONLY (for the voice coach, My Program Summary, and Edit Meal Plan).
     // Do NOT prefill the food log — the daily log stays blank and calories read zero
     // until the client actually logs each meal AFTER eating it.
-    if (onSaveMealPlan) onSaveMealPlan({ meals: genPlan.meals, totals: genPlan.totals, target: genPlan.target, diet: dietPref, savedDate: dateKey });
+    if (onSaveMealPlan) onSaveMealPlan({
+      meals: genPlan.meals, totals: genPlan.totals, target: genPlan.target, diet: dietPref, savedDate: dateKey,
+      // Rotation extras (absent on legacy single-day plans)
+      ...(genPlan.days ? { days: genPlan.days, rotation: genPlan.rotation, grocery: genPlan.grocery, generatedAt: genPlan.generatedAt } : {}),
+    });
     setGenOpen(false); setGenPlan(null);
   };
 
@@ -8433,14 +8479,26 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
               )}
 
               {genPlan && (() => {
-                const tt = genPlan.totals||{}, tg = genPlan.target||{};
+                const days = genPlan.days;
+                const active = days ? (days[genDay] || days[0]) : genPlan;
+                const tt = active.totals||{}, tg = genPlan.target||{};
                 const chip = (label,val,goal,col) => (<div style={{ flex:1, textAlign:"center", background:"#12121a", borderRadius:10, padding:"9px 4px" }}><div style={{ color:col, fontSize:22, fontWeight:700, fontFamily:"'Oswald',sans-serif" }}>{val}</div><div style={{ color:"#74748a", fontSize:13 }}>/ {goal} {label}</div></div>);
                 return (
                   <div>
+                    {days && (
+                      <>
+                        <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                          {days.map((d,i)=>(
+                            <button key={i} onClick={()=>setGenDay(i)} style={{ flex:1, background: genDay===i ? "#e8ff00" : "#12121a", color: genDay===i ? "#000" : "#c8c8e0", border:"1px solid "+(genDay===i ? "#e8ff00" : "#2a2a3d"), borderRadius:10, padding:"10px 4px", cursor:"pointer", fontWeight:700, fontSize:15, fontFamily:"'DM Sans'" }}>{d.label.toUpperCase()}</button>
+                          ))}
+                        </div>
+                        <div style={{ color:"#74748a", fontSize:13, textAlign:"center", marginBottom:10 }}>3-day rotation — your week repeats A · B · C · A · B · C · A</div>
+                      </>
+                    )}
                     <div style={{ display:"flex", gap:6, marginBottom:14 }}>
                       {chip("cal", tt.cal, tg.cal, "#e8ff00")}{chip("P", tt.protein, tg.protein, "#3d8eff")}{chip("C", tt.carbs, tg.carbs, "#9b5de5")}{chip("F", tt.fats, tg.fats, "#3ddc84")}
                     </div>
-                    {genPlan.meals.map((ml,mi)=>(
+                    {active.meals.map((ml,mi)=>(
                       <div key={mi} style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10 }}>
                         <div style={{ marginBottom:7 }}>
                           <div style={{ fontFamily:"'DM Sans'", fontSize:11.5, letterSpacing:1.5, color:"#9898b8", textTransform:"uppercase", fontWeight:600 }}>{ml.slot}</div>
@@ -8455,6 +8513,28 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                         ); })}
                       </div>
                     ))}
+
+                    {/* Weekly grocery list — pure arithmetic from the solved gram portions
+                        × how many times each rotation day repeats, grouped by aisle. */}
+                    {genPlan.grocery && genPlan.grocery.length > 0 && (
+                      <div style={{ background:"#0e0e16", borderRadius:12, padding:"12px 14px", marginBottom:10, border:"1px solid rgba(61,220,132,0.3)" }}>
+                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:21, letterSpacing:0.5, color:"#3ddc84", marginBottom:4 }}>🛒 GROCERY LIST — FULL WEEK</div>
+                        {genPlan.grocery.map((grp,gi)=>(
+                          <div key={gi} style={{ marginTop:8 }}>
+                            <div style={{ fontSize:11.5, letterSpacing:1.2, color:"#9898b8", textTransform:"uppercase", fontWeight:600, marginBottom:3 }}>{grp.category}</div>
+                            {grp.items.map((g,ii)=>(
+                              <div key={ii} style={{ display:"flex", justifyContent:"space-between", fontSize:15.5, color:"#d2d2ec", padding:"3px 0" }}>
+                                <span>{g.food}</span>
+                                <span style={{ color:"#9898b8", whiteSpace:"nowrap" }}>{g.amount}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                        <button onClick={()=>printGroceryList(genPlan, { name: profile?.name })} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px solid rgba(61,220,132,0.45)", borderRadius:10, color:"#3ddc84", padding:"11px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:15 }}>🖨 Print Grocery List</button>
+                        <div style={{ color:"#74748a", fontSize:12.5, marginTop:8, textAlign:"center" }}>Covers all 7 days of the rotation.</div>
+                      </div>
+                    )}
+
                     <button onClick={applyGenPlan} style={{ width:"100%", background:"#e8ff00", border:"none", borderRadius:12, color:"#000", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:17, marginTop:6 }}>Use This Plan</button>
                     <div style={{ display:"flex", gap:8, marginTop:8 }}>
                       <button onClick={()=>{ setGenPlan(null); }} style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"15px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:17 }}>Regenerate</button>
@@ -8634,7 +8714,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         {/* Meal-plan actions — generate a fresh plan or edit the saved one */}
         <div style={{ display:"flex", gap:10, marginBottom:24 }}>
           <button onClick={()=>setSetupOpen(true)} style={{ flex:1, background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.5)", borderRadius:12, color:"#e8ff00", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Generate Meal Plan</button>
-          <button onClick={()=>{ if (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length) { setGenPlan({ meals: mealPlan.meals, totals: mealPlan.totals||{}, target: mealPlan.target || { cal:calGoal, protein:proteinGoal, carbs:carbsGoal, fats:fatsGoal } }); setGenOpen(true); } else { setSetupOpen(true); } }} style={{ flex:1, background:"rgba(61,220,132,0.12)", border:"1px solid rgba(61,220,132,0.5)", borderRadius:12, color:"#3ddc84", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Edit Meal Plan</button>
+          <button onClick={()=>{ if (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length) { setGenDay(0); setGenPlan({ meals: mealPlan.meals, totals: mealPlan.totals||{}, target: mealPlan.target || { cal:calGoal, protein:proteinGoal, carbs:carbsGoal, fats:fatsGoal }, ...(mealPlan.days ? { days: mealPlan.days, rotation: mealPlan.rotation, grocery: mealPlan.grocery, generatedAt: mealPlan.generatedAt } : {}) }); setGenOpen(true); } else { setSetupOpen(true); } }} style={{ flex:1, background:"rgba(61,220,132,0.12)", border:"1px solid rgba(61,220,132,0.5)", borderRadius:12, color:"#3ddc84", padding:"14px 8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16.5 }}>Edit Meal Plan</button>
         </div>
 
       </div>
@@ -9947,12 +10027,21 @@ function printMealPlan(plan, { name, dietPref, cuisines } = {}) {
   if (!plan || !Array.isArray(plan.meals)) return;
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
   const tt = plan.totals || {}, tg = plan.target || {};
-  const meals = plan.meals.map(ml => {
+  const mealsFor = (mealArr) => mealArr.map(ml => {
     const rows = (ml.items || []).map(it =>
       `<tr><td>${esc(it.food)}${it.brand ? ` <span class="brand">· ${esc(it.brand)}</span>` : ""}</td><td class="n">${esc(it.grams)} g</td><td class="n">${esc(it.cal)} cal</td><td class="n">${esc(it.protein)}g P</td></tr>`
     ).join("");
     return `<h2>${esc(ml.slot)}${ml.name ? ` — <span class="dish">${esc(ml.name)}</span>` : ""}</h2><table>${rows}</table>`;
   }).join("");
+  // Rotation plan → print all three days + the aisle-grouped weekly grocery list; legacy → one day.
+  const meals = plan.days && plan.days.length
+    ? plan.days.map((d) =>
+        `<h1 style="font-size:18px;margin:22px 0 2px">${esc(d.label)} <span style="color:#888;font-weight:400;font-size:12px">(${esc((d.totals||{}).cal||0)} cal · ${esc((d.totals||{}).protein||0)}g P)</span></h1>${mealsFor(d.meals)}`
+      ).join("")
+      + `<h1 style="font-size:18px;margin:26px 0 2px">🛒 Grocery List — Full Week</h1>
+         <div class="sub">3-day rotation repeats across 7 days: A · B · C · A · B · C · A</div>
+         ${(plan.grocery||[]).map(grp => `<h2>${esc(grp.category)}</h2><table>${grp.items.map(g => `<tr><td>${esc(g.food)}</td><td class="n">${esc(g.amount)}</td></tr>`).join("")}</table>`).join("")}`
+    : mealsFor(plan.meals);
   const cuisineLine = (Array.isArray(cuisines) && cuisines.length) ? ` · ${esc(cuisines.join(", "))}` : "";
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>BodyMorph Meal Plan${name ? " — " + esc(name) : ""}</title>
 <style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.5}
@@ -10041,14 +10130,22 @@ function buildGroceryList(plan, days = 7) {
     return "Pantry & Other";
   };
   const map = new Map();   // key: lowercased food -> { food, grams, brand, category }
-  (plan.meals || []).forEach(ml => (ml.items || []).forEach(it => {
+  const add = (items, mult) => (items || []).forEach(it => {
     const key = (it.food || it.query || "").toLowerCase().trim();
     if (!key) return;
-    const g = (parseFloat(it.grams) || 0) * days;
+    const g = (parseFloat(it.grams) || 0) * mult;
     const cur = map.get(key) || { food: it.food || it.query, grams: 0, brand: it.brand || null, category: cat(it.food || it.query) };
     cur.grams += g;
     map.set(key, cur);
-  }));
+  });
+  if (plan.days && plan.days.length) {
+    // 3-day ROTATION: each day's grams × how many times that day repeats in the week.
+    const mult = {};
+    (plan.rotation || WEEK_ROTATION).forEach(l => { mult[l] = (mult[l] || 0) + 1; });
+    plan.days.forEach((d, i) => (d.meals || []).forEach(ml => add(ml.items, mult["ABC"[i]] || 0)));
+  } else {
+    (plan.meals || []).forEach(ml => add(ml.items, days));   // legacy: one day × 7
+  }
   const items = [...map.values()].map(it => {
     const g = Math.round(it.grams);
     const amount = g >= 454 ? `${(g / 453.6).toFixed(1)} lb` : `${Math.max(1, Math.round(g / 28.35))} oz`;
@@ -11364,15 +11461,20 @@ export default function BodyMorph() {
       steps: (stepEntries||[]).find(e=>e.date===today)?.steps || 0,
       stepGoal: stepTargetFor(profile),
       sleep: (sleepEntries||[]).find(e=>e.date===today)?.hours ?? null, // last night's hours (null = not logged)
-      mealPlan: (mealPlan && Array.isArray(mealPlan.meals) && mealPlan.meals.length)
-        ? mealPlan.meals.map(ml => ({
-            slot: ml.slot,
-            name: ml.name || "",
-            items: (ml.items||[]).map(it => `${it.food}${it.grams?` (${it.grams}g)`:""}`).filter(Boolean).join(", "),
-            cal: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.cal)||0),0)),
-            protein: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.protein)||0),0)),
-          }))
-        : null,
+      mealPlan: (() => {
+        // Rotation-aware: the voice coach talks about TODAY'S rotation day (A/B/C),
+        // not always Day A. Legacy single-day plans resolve to themselves.
+        const day = todaysMealDay(mealPlan);
+        return (day && Array.isArray(day.meals) && day.meals.length)
+          ? day.meals.map(ml => ({
+              slot: ml.slot,
+              name: ml.name || "",
+              items: (ml.items||[]).map(it => `${it.food}${it.grams?` (${it.grams}g)`:""}`).filter(Boolean).join(", "),
+              cal: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.cal)||0),0)),
+              protein: Math.round((ml.items||[]).reduce((s,it)=>s+(parseFloat(it.protein)||0),0)),
+            }))
+          : null;
+      })(),
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
