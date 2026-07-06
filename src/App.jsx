@@ -2235,7 +2235,9 @@ const YTButton = ({ query, gender }) => {
 };
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
-const STEPS = ["firstname","lastname","address","gender","goal","focus","days","time","stats","goals","activity"];
+const STEPS = ["firstname","lastname","address","gender","goal","focus","days","time","stats","goals","activity","diet","cuisines","shopping"];
+// Shared option lists (onboarding wizard + the Nutrition meal-plan setup).
+const CUISINE_OPTIONS = ["Italian","Mexican","Chinese","Japanese","Thai","Indian","Mediterranean","Middle Eastern","American","Korean","Greek","Caribbean"];
 
 // ── HIGH FREQUENCY TRAINING — INFO PAGE ──────────────────────────────────────
 // Full-screen description shown when the user taps the info icon on the HFT option.
@@ -2475,6 +2477,13 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
     goalWeight: ini.goalWeight || "",
     goalBodyFat: ini.goalBodyFat || "",
     deficit: ini.deficit || "moderate",
+    // Nutrition preferences — captured at onboarding so the coach walks the client
+    // through them once, and every future meal plan starts pre-configured.
+    dietPref: ini.dietPref || "",
+    carbLevel: ini.carbLevel || "moderate",
+    cuisines: ini.cuisines || [],
+    store: ini.store || "",
+    allergies: ini.allergies || "",
   });
   const set = (k, v) => setP(prev => ({ ...prev, [k]:v }));
   const toggleDay = (d) => setP(prev => ({ ...prev, trainingDays: prev.trainingDays.includes(d) ? prev.trainingDays.filter(x=>x!==d) : [...prev.trainingDays, d] }));
@@ -2491,6 +2500,9 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
     () => p.age && p.weight && p.heightFt && p.fitnessLevel,
     () => !!p.goalWeight,   // goal weight required; body-fat fields optional
     () => !!p.activityLevel,
+    () => !!p.dietPref,     // diet style required — it drives every meal plan
+    () => true,             // cuisines optional
+    () => true,             // store + allergies optional
   ];
 
   const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
@@ -2666,6 +2678,60 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
             </button>
           );
         })}
+      </div>
+    </div>,
+
+    <div key="diet" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, width:"100%" }}>
+      <div style={S.stepLabel}>DIET STYLE</div>
+      <div style={{ color:"#c8c8e0", fontSize:11, textAlign:"center", maxWidth:320, lineHeight:1.3 }}>
+        How do you like to eat? Your meal plans are built around this.
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:6, width:"92%", maxWidth:340 }}>
+        {DIET_STYLES.map(d => {
+          const on = p.dietPref===d.id;
+          return (
+            <button key={d.id} onClick={()=>set("dietPref",d.id)} style={{ textAlign:"left", background: on ? "#e8ff00" : "#1a1a26", border:"1px solid " + (on ? "#e8ff00" : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:8, padding:"8px 10px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
+              <div style={{ fontWeight:600, fontSize:15 }}>{d.emoji} {d.label}</div>
+              <div style={{ fontSize:11.5, opacity:0.8, lineHeight:1.25, marginTop:2 }}>{d.tagline}</div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display:"flex", gap:6, width:"92%", maxWidth:340, marginTop:4 }}>
+        {[["low","Low carb"],["moderate","Moderate"],["high","High carb"]].map(([v,label])=>{
+          const on = p.carbLevel===v;
+          return <button key={v} onClick={()=>set("carbLevel",v)} style={{ flex:1, background: on?"#e8ff00":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#000":"#c8c8e0", borderRadius:8, padding:"8px 4px", cursor:"pointer", fontSize:13, fontWeight: on?700:500, fontFamily:"'DM Sans'" }}>{label}</button>;
+        })}
+      </div>
+    </div>,
+
+    <div key="cuisines" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, width:"100%" }}>
+      <div style={S.stepLabel}>FAVORITE CUISINES</div>
+      <div style={{ color:"#c8c8e0", fontSize:11, textAlign:"center", maxWidth:320, lineHeight:1.3 }}>
+        Optional — pick any you love and we'll mix them into your meals.
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, width:"92%", maxWidth:340 }}>
+        {CUISINE_OPTIONS.map(c => {
+          const on = p.cuisines.includes(c);
+          return <button key={c} onClick={()=>set("cuisines", on ? p.cuisines.filter(x=>x!==c) : [...p.cuisines, c])} style={{ background: on?"rgba(232,255,0,0.15)":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#e8ff00":"#c8c8e0", borderRadius:8, padding:"9px 4px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{c}</button>;
+        })}
+      </div>
+    </div>,
+
+    <div key="shopping" style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, width:"100%" }}>
+      <div style={S.stepLabel}>SHOPPING &amp; ALLERGIES</div>
+      <div style={{ color:"#c8c8e0", fontSize:11, textAlign:"center", maxWidth:320, lineHeight:1.3 }}>
+        Where do you usually shop? We'll stick to staples they stock and favor their store brands.
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:6, width:"92%", maxWidth:340 }}>
+        {Object.keys(STORE_BRANDS).map(s => {
+          const on = p.store === s;
+          return <button key={s} onClick={()=>set("store", on ? "" : s)} style={{ background: on?"rgba(61,220,132,0.15)":"#1a1a26", border:`1px solid ${on?"#3ddc84":"#2a2a3d"}`, color: on?"#3ddc84":"#c8c8e0", borderRadius:8, padding:"9px 4px", cursor:"pointer", fontSize:12.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{s}</button>;
+        })}
+      </div>
+      <div style={{ width:"92%", maxWidth:340, marginTop:6 }}>
+        <div style={{ color:"#c8c8e0", fontSize:11, marginBottom:4 }}>Food allergies? (optional — we'll avoid them completely)</div>
+        <input style={{ ...S.input, width:"100%", boxSizing:"border-box", fontSize:15 }} placeholder="e.g. peanuts, shellfish, dairy" value={p.allergies} onChange={e=>set("allergies",e.target.value)} />
       </div>
     </div>,
   ];
@@ -7560,6 +7626,8 @@ const STORE_BRANDS = {
   "Walmart":      ["great value", "marketside"],
   "Publix":       ["publix", "greenwise"],
   "Costco":       ["kirkland signature"],
+  "Sam's Club":   ["member's mark"],
+  "BJ's":         ["wellsley farms", "berkley jensen"],
   "Target":       ["good & gather", "market pantry"],
   "Aldi":         ["millville", "friendly farms", "simply nature"],
   "Whole Foods":  ["365"],
@@ -8438,7 +8506,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
                   {/* Cuisines — mix & match for variety so meals don't get boring */}
                   <div style={{ fontSize:19, color:"#9898b8", marginBottom:4 }}>Cuisines <span style={{color:"#74748a", fontSize:15}}>(optional — mix & match for variety)</span></div>
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8, marginBottom: cuisines.length?8:16 }}>
-                    {["Italian","Mexican","Chinese","Japanese","Thai","Indian","Mediterranean","Middle Eastern","American","Korean","Greek","Caribbean"].map(c => {
+                    {CUISINE_OPTIONS.map(c => {
                       const on = cuisines.includes(c);
                       return <button key={c} onClick={()=>toggleCuisine(c)} style={{ background: on?"rgba(232,255,0,0.15)":"#1a1a26", border:`1px solid ${on?"#e8ff00":"#2a2a3d"}`, color: on?"#e8ff00":"#c8c8e0", borderRadius:12, padding:"15px 6px", cursor:"pointer", fontSize:16.5, fontFamily:"'DM Sans'", fontWeight:600, textAlign:"center", lineHeight:1.2 }}>{on?"✓ ":""}{c}</button>;
                     })}
@@ -11156,6 +11224,15 @@ export default function BodyMorph() {
     await Store.set(PROFILE_KEY, prof);
     // Seed nutrition goal weight from signup so tracking targets the same goal.
     if (prof.goalWeight) setNutritionGoals(g => ({ ...g, goalWeight: String(prof.goalWeight) }));
+    // Nutrition preferences captured at onboarding → the same stores the meal-plan
+    // generator reads, so the first Generate is already configured (diet style,
+    // cuisines, store/house-brands, allergies). carbLevel rides on the profile.
+    if (prof.dietPref) setDietPref(prof.dietPref);
+    setNutritionGoals(g => ({ ...g,
+      ...(prof.allergies ? { allergies: prof.allergies } : {}),
+      ...(prof.cuisines && prof.cuisines.length ? { cuisines: prof.cuisines } : {}),
+      ...(prof.store ? { store: prof.store } : {}),
+    }));
     await new Promise(r => setTimeout(r, 1400));
     setProgram(resolveProgram(prof));
     // Any goal with a real weight/body-fat target gets the Plan & Timeline screen
