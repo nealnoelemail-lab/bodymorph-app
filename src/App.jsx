@@ -393,6 +393,11 @@ const DEFICIT_LEVELS = [
   { id:"aggressive", label:"Aggressive", desc:"~25% below maintenance · faster, harder to sustain", pct:0.25 },
 ];
 
+// Deadline mode: instead of picking a pace (deficit %) and getting a timeline, the
+// client picks a TIMELINE ("wedding in 90 days") and the required pace/calories are
+// derived — clamped to the same safety rails (≤1% bodyweight/week, never below BMR).
+const deadlineActive = (p) => !!p && p.paceMode === "deadline" && parseFloat(p.deadlineWeeks) > 0;
+
 function calorieTargets(profile, deficitId) {
   const w = parseFloat(profile.weight) || 170;      // lbs
   const kg = w * 0.453592;
@@ -406,8 +411,20 @@ function calorieTargets(profile, deficitId) {
     : (10*kg + 6.25*cm - 5*age - 161);
   const act = (ACTIVITY_LEVELS.find(a=>a.id===profile.activityLevel) || ACTIVITY_LEVELS[2]).mult;
   const tdee = bmr * act;
-  const deficit = (DEFICIT_LEVELS.find(d=>d.id===deficitId) || DEFICIT_LEVELS[1]).pct;
-  const target = Math.round((tdee * (1 - deficit)) / 10) * 10;
+  let target;
+  const goalW = effectiveTargetWeight(profile);
+  if (deadlineActive(profile) && goalW && goalW < w - 1) {
+    // Deadline drives the deficit: required weekly rate → daily deficit → calories,
+    // capped at 1% BW/week and floored at BMR (never starve someone for a date).
+    const weeks = parseFloat(profile.deadlineWeeks);
+    let rate = Math.min((w - goalW) / weeks, w * 0.01);
+    target = Math.round((tdee - (rate * 3500 / 7)) / 10) * 10;
+    const floor = Math.max(Math.round(bmr / 10) * 10, 1200);
+    if (target < floor) target = floor;
+  } else {
+    const deficit = (DEFICIT_LEVELS.find(d=>d.id===deficitId) || DEFICIT_LEVELS[1]).pct;
+    target = Math.round((tdee * (1 - deficit)) / 10) * 10;
+  }
   // Macros: high protein for fat loss (1.0 g/lb), 0.35 g/lb fat, rest carbs.
   const protein = Math.round(w * 1.0);
   const fats = Math.round(w * 0.35);
@@ -532,8 +549,16 @@ function goalTimeline(profile, deficitId, now, avgSteps) {
   if (weeklyRate < 0.1) weeklyRate = 0.1;
   const weeks = Math.ceil(lbsToLose / weeklyRate);
   const eta = new Date(today.getTime() + weeks * MS_PER_WEEK);
+  // Deadline mode honesty: did the safety-clamped plan actually fit the asked-for window?
+  let deadline = null;
+  if (deadlineActive(profile)) {
+    const asked = Math.ceil(parseFloat(profile.deadlineWeeks));
+    deadline = { asked, feasible: weeks <= asked,
+                 lbsByDeadline: Math.min(Math.round(weeklyRate * asked), Math.round(lbsToLose)),
+                 requiredRate: +(lbsToLose / asked).toFixed(2) };
+  }
   return { mode:"loss", lbs: Math.round(lbsToLose), weeklyRate:+weeklyRate.toFixed(2),
-           weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks),
+           weeks, etaDate: fmtGoalDate(eta), human: weeksToHuman(weeks), deadline,
            stepTarget: stepTargetFor(profile), avgSteps: (avgSteps != null && isFinite(avgSteps)) ? avgSteps : null,
            neatKcal: Math.round(neatKcal) };
 }
@@ -559,7 +584,13 @@ function macrosFor(profile, dietId) {
   else if (goal.includes("Cut"))    calPerLb = 11;
   else if (goal.includes("Reshape")) calPerLb = 13;
   else                              calPerLb = 15;
-  const cals = Math.round(w * calPerLb / 10) * 10;
+  let cals = Math.round(w * calPerLb / 10) * 10;
+  // Deadline mode: the deadline-derived calorie target replaces the per-lb heuristic,
+  // so the nutrition plan actually delivers the deficit the chosen date requires.
+  const dGoalW = effectiveTargetWeight(profile);
+  if (deadlineActive(profile) && dGoalW && dGoalW < w - 1) {
+    cals = calorieTargets(profile, profile.deficit).target;
+  }
 
   // PROTEIN FIRST — anchored to bodyweight (or LEAN mass if body-fat % is known), scaled by
   // goal. This is the fix for the old "flat % of calories" split that left protein too low and
@@ -1909,6 +1940,7 @@ function programSignature(profile) {
     profile.focus, profile.goal, profile.gender, profile.fitnessLevel,
     profile.sessionTime, (profile.trainingDays || []).join(","),
     profile.goalWeight, profile.goalBodyFat, profile.age, (profile.deficit || "moderate"),
+    (profile.paceMode || "pace"), (profile.deadlineWeeks || ""),
   ].join("|");
 }
 
@@ -2682,13 +2714,25 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
 // honest timeline; the choice persists and drives the program's horizon.
 function FatLossResults({ profile, onContinue, onEdit }) {
   const accent = profile.gender === "Female" ? APP_PINK : "#e8ff00";
-  const mode = (goalTimeline(profile, "moderate") || {}).mode;   // "loss" | "gain" | undefined
+  const mode = (goalTimeline({ ...profile, paceMode: "pace" }, "moderate") || {}).mode;   // "loss" | "gain" | undefined
   const isLoss = mode === "loss";
   const isGain = mode === "gain";
   const [deficit, setDeficit] = useState(profile.deficit || "moderate");
-  const t = calorieTargets(profile, deficit);
-  const tl = goalTimeline(profile, deficit);
-  const m = macrosFor(profile, profile.dietPref);
+  // TWO DIALS, one plan: pick a PACE (timeline is computed) or pick a DEADLINE
+  // ("wedding in 90 days" — required pace/calories are computed, safety-capped).
+  const [planBy, setPlanBy] = useState(profile.paceMode === "deadline" ? "deadline" : "pace");
+  const [dlWeeks, setDlWeeks] = useState(parseFloat(profile.deadlineWeeks) || 13);
+  const DEADLINES = [
+    { wks: 8,  label: "60 days" },
+    { wks: 13, label: "90 days" },
+    { wks: 16, label: "16 weeks" },
+    { wks: 20, label: "~4½ months" },
+    { wks: 26, label: "6 months" },
+  ];
+  const pv = { ...profile, paceMode: planBy, deadlineWeeks: planBy === "deadline" ? dlWeeks : null };
+  const t = calorieTargets(pv, deficit);
+  const tl = goalTimeline(pv, deficit);
+  const m = macrosFor(pv, profile.dietPref);
   const targetW = effectiveTargetWeight(profile);
   const goalLabel = `${targetW ? `~${targetW} lbs` : ""}${profile.goalBodyFat ? `${targetW ? " · " : ""}${profile.goalBodyFat}% body fat` : ""}`;
 
@@ -2734,27 +2778,69 @@ function FatLossResults({ profile, onContinue, onEdit }) {
           </div>
         )}
 
-        {/* Fat-loss: pick the pace — each shows its own honest timeline */}
+        {/* Fat-loss: TWO ways to plan — pick a pace (timeline computed) or pick a
+            deadline (pace/calories computed, safety-capped). */}
         {isLoss && (
           <>
-            <div style={{ color:"#c8c8e0", fontSize:12.5, letterSpacing:1, marginBottom:8 }}>CHOOSE YOUR PACE</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
-              {DEFICIT_LEVELS.map(d => {
-                const on = deficit===d.id;
-                const dtl = goalTimeline(profile, d.id);
-                return (
-                  <button key={d.id} onClick={()=>setDeficit(d.id)} style={{ textAlign:"left", background: on ? accent : "#1a1a26", border:"1px solid " + (on ? accent : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"13px 16px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-                      <span style={{ fontWeight:700, fontSize:15 }}>{d.label}</span>
-                      {dtl && <span style={{ fontWeight:700, fontSize:14 }}>{dtl.human}</span>}
-                    </div>
-                    <div style={{ fontSize:12, opacity:0.85, marginTop:2 }}>
-                      {d.desc}{dtl ? ` · target ${dtl.etaDate}` : ""}
-                    </div>
-                  </button>
-                );
-              })}
+            <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+              {[["pace","PICK A PACE"],["deadline","PICK A DEADLINE"]].map(([id,label]) => (
+                <button key={id} onClick={()=>setPlanBy(id)} style={{ flex:1, background: planBy===id ? accent : "#1a1a26", color: planBy===id ? "#000" : "#c8c8e0", border:"1px solid " + (planBy===id ? accent : "#2a2a3d"), borderRadius:10, padding:"11px 6px", cursor:"pointer", fontWeight:700, fontSize:13, letterSpacing:0.5, fontFamily:"'DM Sans'" }}>{label}</button>
+              ))}
             </div>
+
+            {planBy === "pace" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:18 }}>
+                {DEFICIT_LEVELS.map(d => {
+                  const on = deficit===d.id;
+                  const dtl = goalTimeline({ ...profile, paceMode:"pace" }, d.id);
+                  return (
+                    <button key={d.id} onClick={()=>setDeficit(d.id)} style={{ textAlign:"left", background: on ? accent : "#1a1a26", border:"1px solid " + (on ? accent : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"13px 16px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                        <span style={{ fontWeight:700, fontSize:15 }}>{d.label}</span>
+                        {dtl && <span style={{ fontWeight:700, fontSize:14 }}>{dtl.human}</span>}
+                      </div>
+                      <div style={{ fontSize:12, opacity:0.85, marginTop:2 }}>
+                        {d.desc}{dtl ? ` · target ${dtl.etaDate}` : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {planBy === "deadline" && (
+              <div style={{ marginBottom:18 }}>
+                <div style={{ color:"#c8c8e0", fontSize:12.5, lineHeight:1.6, marginBottom:10 }}>
+                  Got a wedding, reunion, or beach trip? Pick the window and we'll set the pace and nutrition to get you there — capped at a safe rate.
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {DEADLINES.map(dl => {
+                    const on = dlWeeks === dl.wks;
+                    const dtl = goalTimeline({ ...profile, paceMode:"deadline", deadlineWeeks: dl.wks });
+                    const feasible = dtl?.deadline?.feasible;
+                    const eta = new Date(Date.now() + dl.wks * 7 * 86400000);
+                    return (
+                      <button key={dl.wks} onClick={()=>setDlWeeks(dl.wks)} style={{ textAlign:"left", background: on ? accent : "#1a1a26", border:"1px solid " + (on ? accent : "#2a2a3d"), color: on ? "#000" : "#f0f0f8", borderRadius:12, padding:"13px 16px", cursor:"pointer", fontFamily:"'DM Sans'" }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                          <span style={{ fontWeight:700, fontSize:15 }}>{dl.label}</span>
+                          <span style={{ fontWeight:700, fontSize:14 }}>
+                            {dtl ? (feasible ? `~${dtl.weeklyRate} lb/wk` : `${dtl.deadline.lbsByDeadline} of ${dtl.lbs} lb`) : ""}
+                          </span>
+                        </div>
+                        <div style={{ fontSize:12, opacity:0.85, marginTop:2 }}>
+                          by {fmtGoalDate(eta)}{dtl && !feasible ? " · full goal needs longer — this is the safe max" : ""}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {tl && tl.deadline && !tl.deadline.feasible && (
+                  <div style={{ marginTop:10, background:"rgba(255,157,92,0.08)", border:"1px solid rgba(255,157,92,0.35)", borderRadius:10, padding:"11px 13px", color:"#ff9d5c", fontSize:12.5, lineHeight:1.6 }}>
+                    Straight talk: your goal needs ~{tl.deadline.requiredRate} lb/week — above the safe limit. At the maximum safe pace you'll be down about <b>{tl.deadline.lbsByDeadline} lb</b> by your date, and hit the full goal around <b>{tl.etaDate}</b>.
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -2789,7 +2875,7 @@ function FatLossResults({ profile, onContinue, onEdit }) {
           Science-based estimates (Mifflin-St Jeor). Real results vary with consistency, sleep and adherence &mdash; we'll adjust from your weekly progress. Guidance, not medical advice.
         </div>
 
-        <button onClick={()=>onContinue(deficit)} style={{ width:"100%", background:accent, color:"#000", border:"none", borderRadius:14, padding:"17px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:22 }}>
+        <button onClick={()=>onContinue(deficit, planBy, dlWeeks)} style={{ width:"100%", background:accent, color:"#000", border:"none", borderRadius:14, padding:"17px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:22 }}>
           {tl ? "I'M COMMITTED — START" : "GO TO MY PROGRAM"}
         </button>
       </div>
@@ -3069,7 +3155,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, stepEntries, 
   );
 }
 
-function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack }) {
+function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack, onEditPlan }) {
   const accent = "#e8ff00";
   const sched = (program && program.weeklySchedule) || [];
   const nMac = macrosFor(profile, dietPref || profile.dietPref || "mediterranean"); // current nutrition targets
@@ -3097,7 +3183,12 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack 
       </div>
 
       {/* Print / Save PDF — same native print sheet as the meal plan */}
-      <button onClick={()=>printProgramSummary(program, profile, mealPlan, dietPref || profile.dietPref)} style={{ width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:16, marginBottom:14 }}>🖨 Print / Save PDF</button>
+      <button onClick={()=>printProgramSummary(program, profile, mealPlan, dietPref || profile.dietPref)} style={{ width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:12, color:"#c8c8e0", padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:600, fontSize:16, marginBottom:10 }}>🖨 Print / Save PDF</button>
+
+      {/* Change the commitment: re-opens the Plan & Timeline picker (pace OR deadline). */}
+      {onEditPlan && (
+        <button onClick={onEditPlan} style={{ width:"100%", background:"rgba(232,255,0,0.08)", border:"1px solid rgba(232,255,0,0.4)", borderRadius:12, color:accent, padding:"14px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:16, marginBottom:14 }}>⏱ Adjust My Pace / Deadline</button>
+      )}
 
       {/* Profile details */}
       <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:"16px 18px", marginBottom:14 }}>
@@ -10938,9 +11029,9 @@ export default function BodyMorph() {
 
   // Persist the chosen fat-loss pace; the program effect regenerates the AI plan
   // around the new horizon (deficit is part of the program signature).
-  const saveDeficit = async (deficitId) => {
+  const saveDeficit = async (deficitId, paceMode, deadlineWeeks) => {
     if (!deficitId || !profile) return;
-    const updated = { ...profile, deficit: deficitId };
+    const updated = { ...profile, deficit: deficitId, paceMode: paceMode || "pace", deadlineWeeks: paceMode === "deadline" ? deadlineWeeks : null };
     setProfile(updated);
     await Store.set(PROFILE_KEY, updated);
   };
@@ -11321,7 +11412,7 @@ export default function BodyMorph() {
   if (phase === "subscribe") return <SubscribeScreen onSignOut={handleSignOut} onRefresh={refreshSubscription} />;
   if (phase === "dashboard") return <CoachApp user={user} profile={profile} onSignOut={handleSignOut} onMyTraining={goMyTraining} />;
   if (phase === "wizard")  return <><Toast /><Wizard onComplete={handleWizardDone} onCoachCode={becomeCoach} seed={inviteSeed} initial={editProfile} startStep={editProfile ? 8 : 0} /></>;
-  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d)=>{ saveDeficit(d); setPhase("home"); }} onEdit={()=>{ setEditProfile(profile); setPhase("wizard"); }} /></>;
+  if (phase === "fatloss") return <><Toast /><FatLossResults profile={profile} onContinue={(d, pm, dw)=>{ saveDeficit(d, pm, dw); setPhase("home"); }} onEdit={()=>{ setEditProfile(profile); setPhase("wizard"); }} /></>;
   if (phase === "loading") return <Loading name={profile && profile.name} />;
 
   if (phase === "home") return (
@@ -11363,7 +11454,7 @@ export default function BodyMorph() {
   );
 
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
-  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
+  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} onEditPlan={()=>setPhase("fatloss")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} watch={watchInsights} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
