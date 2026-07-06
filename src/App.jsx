@@ -5647,7 +5647,9 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
 
   const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); return isNaN(dt) ? d : dt.toLocaleDateString(undefined,{ month:"short", day:"numeric", year:"numeric" }); };
 
-  const input = { width:"100%", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px 12px", fontSize:16, fontFamily:"'Oswald', sans-serif", fontWeight:600, outline:"none" };
+  // boxSizing + appearance:none + minWidth:0 tame the iOS date input, whose native
+  // widget otherwise ignores width:100% and bleeds outside the LOG TODAY card.
+  const input = { width:"100%", boxSizing:"border-box", minWidth:0, maxWidth:"100%", WebkitAppearance:"none", appearance:"none", display:"block", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px 12px", fontSize:16, fontFamily:"'Oswald', sans-serif", fontWeight:600, outline:"none" };
 
   return (
     <div>
