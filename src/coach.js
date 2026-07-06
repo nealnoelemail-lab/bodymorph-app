@@ -248,8 +248,9 @@ function newCode() {
   try { return crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(); }
   catch { return Math.random().toString(36).slice(2, 10).toUpperCase(); }
 }
-export const inviteLink = (code) =>
-  (typeof window !== "undefined" ? window.location.origin : "") + "/?invite=" + code;
+// ALWAYS the public site — never window.location.origin: inside the native app the
+// origin is capacitor://localhost, which made texted invite links dead on arrival.
+export const inviteLink = (code) => "https://www.bodymorph.info/?invite=" + code;
 
 // Create a per-client invite; returns { code, link } or { error }.
 export async function createClientInvite(coachId, { name, phone, email, intake } = {}) {
