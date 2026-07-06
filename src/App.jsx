@@ -14,7 +14,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
   pushHealthSummary } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
-import { syncHealth, healthInsights } from "./healthkit";
+import { syncHealth, healthInsights, healthDaily } from "./healthkit";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -5336,7 +5336,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
 }
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────────
-function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId, watch }) {
+function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId, watch, watchDaily }) {
   const [view, setView] = useState("body");          // body | charts | log | report
   const exNames = Object.keys(logs);
   const [selectedEx, setSelectedEx] = useState(exNames[0] || null);
@@ -5419,7 +5419,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
 
         {/* CHARTS view — 6 charts with time interval selector */}
         {view === "charts" && (
-          <ProgressCharts logs={logs} bodyEntries={bodyEntries} cardioSessions={cardioSessions} />
+          <ProgressCharts logs={logs} bodyEntries={bodyEntries} cardioSessions={cardioSessions} watchDaily={watchDaily} />
         )}
 
         {/* BODY view */}
@@ -5792,7 +5792,7 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
 // ── PROGRESS CHARTS ──────────────────────────────────────────────────────────
 // Six charts: Bodyweight, Body Fat%, Lean Mass, Strength, Weekly Volume, Cardio Minutes
 // Time intervals: 1W, 1M, 3M, 6M, 1Y
-function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
+function ProgressCharts({ logs, bodyEntries, cardioSessions, watchDaily }) {
   const [interval, setInterval] = useState("3M");
   const [selectedEx, setSelectedEx] = useState(Object.keys(logs)[0] || null);
 
@@ -5814,10 +5814,10 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
   };
 
   // ── SVG Line Chart ──
-  const LineChart = ({ points, color="#e8ff00", label="", unit="", goalLine=null }) => {
+  const LineChart = ({ points, color="#e8ff00", label="", unit="", goalLine=null, lowerBetter=false }) => {
     if (!points || points.length < 2) return (
       <div style={{ padding:20, textAlign:"center", color:"#9898b8", fontSize:13 }}>
-        {points && points.length === 1 ? `${points[0].v} ${unit} — log more to see trend` : "No data for this period"}
+        {points && points.length === 1 ? `${points[0].v}${unit} — need more days to see a trend` : "No data for this period"}
       </div>
     );
     const W=320,H=150,pL=38,pR=12,pT=14,pB=26;
@@ -5830,11 +5830,12 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
     const pts = points.map((p,i)=>x(i)+","+y(p.v)).join(" ");
     const last = points[points.length-1], first = points[0];
     const chg = last.v - first.v;
+    const good = lowerBetter ? chg <= 0 : chg >= 0;   // for resting HR, DOWN is progress
     return (
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
           <span style={{ color:"#c8c8e0", fontSize:12 }}>{label}</span>
-          <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:13, color: chg>=0?"#3ddc84":"#ff7070" }}>
+          <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:13, color: good?"#3ddc84":"#ff7070" }}>
             {chg>=0?"↑ +":"↓ "}{Math.abs(Math.round(chg*10)/10)}{unit}
           </span>
         </div>
@@ -5914,6 +5915,28 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
   });
   const cardioBars = Object.keys(cardioByWeek).sort().map(wk=>({v:cardioByWeek[wk],d:wk}));
 
+  // ── Watch metrics (Apple Health) — trend over the selected interval ──
+  const wm = (watchDaily?.metrics || []).filter(x => after(x.day));
+  const wSleep = (watchDaily?.sleep || []).filter(x => after(x.day));
+  // For ranges longer than ~2 months, weekly-average the daily readings so the trend
+  // line stays clean instead of a dense noisy scatter; short ranges stay daily.
+  const weeklyAvg = (pts) => {
+    const b = {};
+    pts.forEach(p => { const w = weekKey(p.d); (b[w] = b[w] || []).push(p.v); });
+    return Object.keys(b).sort().map(w => ({ d:w, v: Math.round((b[w].reduce((s,v)=>s+v,0)/b[w].length)*10)/10 }));
+  };
+  const trend = (pts) => (days > 60 ? weeklyAvg(pts) : pts);
+  const metricPts = (key) => trend(wm.filter(x => x[key] != null && x[key] > 0).map(x => ({ v: x[key], d: x.day })));
+  const rhrPoints   = metricPts("restingHR");
+  const hrvPoints   = metricPts("hrvMs");
+  const vo2Points   = metricPts("vo2Max");
+  const sleepPoints = trend(wSleep.filter(x => x.hours > 0).map(x => ({ v: x.hours, d: x.day })));
+  // Active minutes & calories → weekly totals (bars), like the cardio chart.
+  const sumByWeek = (key) => { const b = {}; wm.forEach(x => { const w = weekKey(x.day); b[w] = (b[w]||0) + (x[key]||0); }); return Object.keys(b).sort().map(w => ({ v: Math.round(b[w]), d: w })); };
+  const activeMinBars  = sumByWeek("exerciseMin");
+  const activeKcalBars = sumByWeek("activeKcal");
+  const hasWatch = wm.length > 0 || wSleep.length > 0;
+
   const Card = ({title, color="#e8ff00", children}) => (
     <div style={{background:"#1a1a26",border:`1px solid ${color}33`,borderRadius:12,padding:14,marginBottom:12}}>
       <div style={{fontFamily:"'Bebas Neue'",fontSize:16,letterSpacing:1,color,marginBottom:10}}>{title}</div>
@@ -5966,6 +5989,44 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions }) {
       <Card title="CARDIO MINUTES" color="#3ddc84">
         <BarChart bars={cardioBars} color="#3ddc84" label="Total minutes per week" unit=" min"/>
       </Card>
+
+      {/* ── FROM YOUR WATCH — Apple Health trends (only when a watch has synced data) ── */}
+      {hasWatch && (
+        <>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:2, color:"#8a8aa4", margin:"22px 0 12px", paddingBottom:6, borderBottom:"1px solid #2a2a3d" }}>⌚ FROM YOUR WATCH</div>
+
+          {rhrPoints.length >= 1 && (
+            <Card title="RESTING HEART RATE" color="#ff6b6b">
+              <LineChart points={rhrPoints} color="#ff6b6b" label="bpm — lower is fitter" unit=" bpm" lowerBetter/>
+            </Card>
+          )}
+          {hrvPoints.length >= 1 && (
+            <Card title="HEART RATE VARIABILITY" color="#3d8eff">
+              <LineChart points={hrvPoints} color="#3d8eff" label="ms — higher = better recovery" unit=" ms"/>
+            </Card>
+          )}
+          {sleepPoints.length >= 1 && (
+            <Card title="SLEEP" color="#9b5de5">
+              <LineChart points={sleepPoints} color="#9b5de5" label="hours per night" unit=" h"/>
+            </Card>
+          )}
+          {vo2Points.length >= 1 && (
+            <Card title="VO₂ MAX (CARDIO FITNESS)" color="#3ddc84">
+              <LineChart points={vo2Points} color="#3ddc84" label="ml/kg·min — higher is fitter" unit=""/>
+            </Card>
+          )}
+          {activeMinBars.length > 0 && (
+            <Card title="ACTIVE MINUTES" color="#e8ff00">
+              <BarChart bars={activeMinBars} color="#e8ff00" label="Exercise minutes per week" unit=" min"/>
+            </Card>
+          )}
+          {activeKcalBars.length > 0 && (
+            <Card title="ACTIVE CALORIES" color="#ff9d5c">
+              <BarChart bars={activeKcalBars} color="#ff9d5c" label="Active kcal per week" unit=" kcal"/>
+            </Card>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -10806,6 +10867,7 @@ export default function BodyMorph() {
   const [stepEntries, setStepEntries] = useState([]);
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
   const [watchInsights, setWatchInsights] = useState(null); // weekly watch summary (background; reports only)
+  const [watchDaily, setWatchDaily] = useState(null);       // daily watch history for the trend charts
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -11141,6 +11203,9 @@ export default function BodyMorph() {
         setWatchInsights(insights);
         pushHealthSummary(userRef.current.id, insights);
       }
+      // Daily history for the Progress Report trend charts (on-device, not synced).
+      const daily = await healthDaily(365);
+      if (daily) setWatchDaily(daily);
     } catch { /* silent — reports simply omit watch data */ }
   }, []);
   useEffect(() => {
@@ -11680,7 +11745,7 @@ export default function BodyMorph() {
 
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} onEditPlan={()=>setPhase("fatloss")} /></>);
-  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} watch={watchInsights} /></>);
+  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} watch={watchInsights} watchDaily={watchDaily} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);

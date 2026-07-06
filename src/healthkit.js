@@ -65,6 +65,25 @@ export async function healthInsights() {
   } catch { return null; }
 }
 
+// Raw daily history for the Progress Report TREND charts (resting HR, HRV, VO2 max,
+// sleep hours, active minutes/calories over 1wk–1yr). Apple stores the history, so we
+// just query it on demand. Returns { metrics:[{day,restingHR,hrvMs,vo2Max,exerciseMin,
+// activeKcal,distanceKm}], sleep:[{day,hours}] } or null if unavailable.
+export async function healthDaily(days = 365) {
+  if (!IS_NATIVE || !IS_IOS) return null;
+  try {
+    if (!(await HealthKit.isAvailable())?.available) return null;
+    await HealthKit.requestAuthorization();
+    const [dm, sl] = await Promise.all([
+      HealthKit.getDailyMetrics({ days }).catch(() => ({ days: [] })),
+      HealthKit.getDailySleep({ days }).catch(() => ({ days: [] })),
+    ]);
+    const metrics = dm?.days || [], sleep = sl?.days || [];
+    if (!metrics.length && !sleep.length) return null;
+    return { metrics, sleep };
+  } catch { return null; }
+}
+
 // One-shot pull of what the coach cares about: today's steps + last night's sleep hours.
 // Requests authorization first (idempotent). Returns { steps, hours } or null if unavailable.
 export async function syncHealth() {

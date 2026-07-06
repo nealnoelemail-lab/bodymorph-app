@@ -882,6 +882,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getTodaySteps", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getLastNightSleep", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDailyMetrics", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getDailySleep", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getWorkouts", returnType: CAPPluginReturnPromise),
     ]
 
@@ -901,6 +902,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         if let exmin = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) { s.insert(exmin) }
         if let dist = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) { s.insert(dist) }
         if let hrv = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) { s.insert(hrv) }
+        if let vo2 = HKObjectType.quantityType(forIdentifier: .vo2Max) { s.insert(vo2) }
         s.insert(HKObjectType.workoutType())
         return s
     }
@@ -946,12 +948,35 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         store.execute(q)
     }
 
+    // Per-day sleep hours for the last N days → [{day, hours}], for the sleep trend chart.
+    // Each asleep sample is attributed to the date it ENDS (the morning you wake up).
+    @objc func getDailySleep(_ call: CAPPluginCall) {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { call.resolve(["days": []]); return }
+        let days = max(1, min(400, call.getInt("days") ?? 180))
+        let cal = Calendar.current
+        let start = cal.date(byAdding: .day, value: -(days - 1), to: cal.startOfDay(for: Date()))!
+        let pred = HKQuery.predicateForSamples(withStart: start, end: Date(), options: [])
+        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"; fmt.timeZone = TimeZone.current
+        let q = HKSampleQuery(sampleType: sleepType, predicate: pred, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+            var byDay: [String: Double] = [:]
+            for s in (samples as? [HKCategorySample]) ?? [] {
+                if self.isAsleep(s.value) {
+                    let day = fmt.string(from: s.endDate)
+                    byDay[day, default: 0] += s.endDate.timeIntervalSince(s.startDate)
+                }
+            }
+            let out = byDay.keys.sorted().map { d -> [String: Any] in ["day": d, "hours": (byDay[d]! / 3600.0 * 10).rounded() / 10] }
+            DispatchQueue.main.async { call.resolve(["days": out]) }
+        }
+        store.execute(q)
+    }
+
     // Per-day watch metrics for the last N days (default 14): resting heart rate (bpm),
     // active energy (kcal), exercise minutes, distance (km), HRV (ms). One statistics-
     // collection query per metric, merged into [{day, restingHR, activeKcal, exerciseMin,
     // distanceKm, hrvMs}]. Days with no data carry nulls — JS skips them.
     @objc func getDailyMetrics(_ call: CAPPluginCall) {
-        let days = max(1, min(60, call.getInt("days") ?? 14))
+        let days = max(1, min(400, call.getInt("days") ?? 14))   // up to ~1yr for trend charts
         let cal = Calendar.current
         let end = Date()
         let start = cal.date(byAdding: .day, value: -(days - 1), to: cal.startOfDay(for: end))!
@@ -964,6 +989,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             (.appleExerciseTime, .cumulativeSum, .minute(), "exerciseMin", 1),
             (.distanceWalkingRunning, .cumulativeSum, .meterUnit(with: .kilo), "distanceKm", 10),
             (.heartRateVariabilitySDNN, .discreteAverage, .secondUnit(with: .milli), "hrvMs", 1),
+            (.vo2Max, .discreteAverage, HKUnit(from: "ml/kg*min"), "vo2Max", 10),
         ]
 
         var byDay: [String: [String: Double]] = [:]
