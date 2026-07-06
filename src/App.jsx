@@ -5749,7 +5749,7 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
       )}
 
       {/* History timeline */}
-      <div style={S.sectionTitle}>PROGRESS HISTORY</div>
+      <div style={S.sectionTitle}>HISTORY</div>
       {entries.length === 0 ? (
         <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:24, textAlign:"center", color:"#c8c8e0", fontSize:14 }}>
           No entries yet. Snap your photos and log your weight above to start your visual transformation record.
