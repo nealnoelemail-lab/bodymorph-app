@@ -881,6 +881,8 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getTodaySteps", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getLastNightSleep", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getDailyMetrics", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getWorkouts", returnType: CAPPluginReturnPromise),
     ]
 
     private let store = HKHealthStore()
@@ -893,6 +895,13 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         var s = Set<HKObjectType>()
         if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { s.insert(steps) }
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { s.insert(sleep) }
+        // Watch-grade metrics for the weekly progress reports (read-only, aggregates only).
+        if let rhr = HKObjectType.quantityType(forIdentifier: .restingHeartRate) { s.insert(rhr) }
+        if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { s.insert(energy) }
+        if let exmin = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) { s.insert(exmin) }
+        if let dist = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) { s.insert(dist) }
+        if let hrv = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) { s.insert(hrv) }
+        s.insert(HKObjectType.workoutType())
         return s
     }
 
@@ -935,6 +944,110 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["hours": (seconds / 3600.0 * 10).rounded() / 10])   // one decimal
         }
         store.execute(q)
+    }
+
+    // Per-day watch metrics for the last N days (default 14): resting heart rate (bpm),
+    // active energy (kcal), exercise minutes, distance (km), HRV (ms). One statistics-
+    // collection query per metric, merged into [{day, restingHR, activeKcal, exerciseMin,
+    // distanceKm, hrvMs}]. Days with no data carry nulls — JS skips them.
+    @objc func getDailyMetrics(_ call: CAPPluginCall) {
+        let days = max(1, min(60, call.getInt("days") ?? 14))
+        let cal = Calendar.current
+        let end = Date()
+        let start = cal.date(byAdding: .day, value: -(days - 1), to: cal.startOfDay(for: end))!
+        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"; fmt.timeZone = TimeZone.current
+
+        // (identifier, options, unit, jsonKey, scale-to-round)
+        let specs: [(HKQuantityTypeIdentifier, HKStatisticsOptions, HKUnit, String, Double)] = [
+            (.restingHeartRate, .discreteAverage, HKUnit.count().unitDivided(by: .minute()), "restingHR", 1),
+            (.activeEnergyBurned, .cumulativeSum, .kilocalorie(), "activeKcal", 1),
+            (.appleExerciseTime, .cumulativeSum, .minute(), "exerciseMin", 1),
+            (.distanceWalkingRunning, .cumulativeSum, .meterUnit(with: .kilo), "distanceKm", 10),
+            (.heartRateVariabilitySDNN, .discreteAverage, .secondUnit(with: .milli), "hrvMs", 1),
+        ]
+
+        var byDay: [String: [String: Double]] = [:]
+        let lock = NSLock()
+        let group = DispatchGroup()
+
+        for (ident, opts, unit, key, scale) in specs {
+            guard let qt = HKObjectType.quantityType(forIdentifier: ident) else { continue }
+            group.enter()
+            let pred = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+            let q = HKStatisticsCollectionQuery(quantityType: qt, quantitySamplePredicate: pred,
+                                                options: opts, anchorDate: cal.startOfDay(for: end),
+                                                intervalComponents: DateComponents(day: 1))
+            q.initialResultsHandler = { _, results, _ in
+                results?.enumerateStatistics(from: start, to: end) { stats, _ in
+                    let qty = (opts == .cumulativeSum) ? stats.sumQuantity() : stats.averageQuantity()
+                    guard let v = qty?.doubleValue(for: unit), v > 0 else { return }
+                    let day = fmt.string(from: stats.startDate)
+                    lock.lock(); byDay[day, default: [:]][key] = (v * scale).rounded() / scale; lock.unlock()
+                }
+                group.leave()
+            }
+            store.execute(q)
+        }
+
+        group.notify(queue: .main) {
+            let daysOut = byDay.keys.sorted().map { day -> [String: Any] in
+                var row: [String: Any] = ["day": day]
+                for (k, v) in byDay[day] ?? [:] { row[k] = v }
+                return row
+            }
+            call.resolve(["days": daysOut])
+        }
+    }
+
+    // Logged workouts for the last N days: [{day, type, minutes, kcal}].
+    @objc func getWorkouts(_ call: CAPPluginCall) {
+        let days = max(1, min(60, call.getInt("days") ?? 14))
+        let cal = Calendar.current
+        let start = cal.date(byAdding: .day, value: -(days - 1), to: cal.startOfDay(for: Date()))!
+        let pred = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"; fmt.timeZone = TimeZone.current
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let q = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: pred, limit: 200, sortDescriptors: [sort]) { _, samples, _ in
+            let out: [[String: Any]] = ((samples as? [HKWorkout]) ?? []).map { w in
+                var kcal = 0.0
+                if #available(iOS 16.0, *) {
+                    if let t = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned),
+                       let s = w.statistics(for: t)?.sumQuantity() { kcal = s.doubleValue(for: .kilocalorie()) }
+                } else {
+                    kcal = w.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+                }
+                return [
+                    "day": fmt.string(from: w.startDate),
+                    "type": Self.workoutName(w.workoutActivityType),
+                    "minutes": Int((w.duration / 60).rounded()),
+                    "kcal": Int(kcal.rounded()),
+                ]
+            }
+            DispatchQueue.main.async { call.resolve(["workouts": out]) }
+        }
+        store.execute(q)
+    }
+
+    private static func workoutName(_ t: HKWorkoutActivityType) -> String {
+        switch t {
+        case .traditionalStrengthTraining, .functionalStrengthTraining: return "strength"
+        case .running: return "run"
+        case .walking: return "walk"
+        case .cycling: return "cycle"
+        case .swimming: return "swim"
+        case .highIntensityIntervalTraining: return "hiit"
+        case .yoga: return "yoga"
+        case .flexibility: return "stretch"
+        case .elliptical: return "elliptical"
+        case .rowing: return "rowing"
+        case .stairClimbing: return "stairs"
+        case .coreTraining: return "core"
+        case .pilates: return "pilates"
+        case .dance, .cardioDance: return "dance"
+        case .kickboxing, .boxing: return "boxing"
+        case .hiking: return "hike"
+        default: return "workout"
+        }
     }
 
     // "Asleep" across iOS versions: iOS 16+ splits core/deep/REM; older is a single

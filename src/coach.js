@@ -115,7 +115,7 @@ export async function resolveAtRisk(coachId, clientId, outcome, note) {
 // data so the existing chart transforms apply directly.
 export async function fetchClientDetail(clientId) {
   if (!supabase || !clientId) return null;
-  const [profile, body, steps, sleep, logs, food, rewards, rel] = await Promise.all([
+  const [profile, body, steps, sleep, logs, food, rewards, rel, watch] = await Promise.all([
     supabase.from("profiles").select("first_name, last_name, email, phone, extra").eq("id", clientId).maybeSingle(),
     supabase.from("body_entries").select("*").eq("user_id", clientId),
     supabase.from("step_entries").select("*").eq("user_id", clientId),
@@ -124,6 +124,7 @@ export async function fetchClientDetail(clientId) {
     supabase.from("food_log_days").select("day, cal, protein, carbs, fats").eq("user_id", clientId),
     supabase.from("rewards").select("*").eq("user_id", clientId).maybeSingle(),
     supabase.from("relationships").select("share_photos").eq("client_id", clientId).maybeSingle(), // RLS scopes to this coach's row
+    supabase.from("health_summaries").select("data").eq("user_id", clientId).order("week_start", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const bodyEntries = (body.data || [])
     .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat, photos: r.photos || {} }))
@@ -141,6 +142,7 @@ export async function fetchClientDetail(clientId) {
     rewards: rewards.data ? { coins: rewards.data.coins, stats: rewards.data.stats || {} } : null,
     lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0], workoutDays.slice(-1)[0]),
     sharePhotos: !!rel.data?.share_photos,  // client consent — photos render only when true
+    watch: watch.data?.data || null,        // latest weekly watch summary (null = no watch)
   };
 }
 
@@ -182,7 +184,33 @@ export function summarizeWeek(d) {
     workouts7d: (d.workoutDays || []).filter(x => x >= cutStr).length,
     daysFoodLogged7d: food7.length,
     currentStreak: d.rewards?.stats?.currentStreak || 0,
+    // Watch data (when the client has one) — objective cardio/recovery for the briefing.
+    ...(d.watch ? {
+      watchRestingHR: d.watch.restingHR, watchRestingHRPrev: d.watch.restingHRPrev,
+      watchActiveMin: d.watch.activeMin, watchActiveMinPrev: d.watch.activeMinPrev,
+      watchWorkouts: d.watch.workoutsCount, watchWorkoutTypes: d.watch.workoutTypes,
+      watchActiveKcal: d.watch.activeKcal, watchDistanceKm: d.watch.distanceKm,
+    } : {}),
   };
+}
+
+// ── Weekly watch summaries (health_summaries table) ─────────────────────────────
+// Client side: push this week's computed summary (background, silent).
+export async function pushHealthSummary(userId, insights) {
+  if (!supabase || !userId || !insights) return;
+  await supabase.from("health_summaries").upsert(
+    { user_id: userId, week_start: insights.weekStart, data: insights, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,week_start" }
+  );
+}
+
+// Either side: the latest weekly watch summary for a user (null if none/no watch).
+export async function fetchHealthSummary(userId) {
+  if (!supabase || !userId) return null;
+  const { data } = await supabase.from("health_summaries")
+    .select("data, week_start, updated_at")
+    .eq("user_id", userId).order("week_start", { ascending: false }).limit(1).maybeSingle();
+  return data?.data || null;
 }
 
 // Generate a short coach-facing briefing with Claude (Haiku — cheap, plenty here).

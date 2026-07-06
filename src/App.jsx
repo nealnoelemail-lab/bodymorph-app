@@ -11,9 +11,10 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   fetchSettings, saveSettings, logSession, listSessionsThisMonth, setClientFee, detectFollowups,
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
-  fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing } from "./coach";
+  fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
+  pushHealthSummary } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
-import { syncHealth } from "./healthkit";
+import { syncHealth, healthInsights } from "./healthkit";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -5167,7 +5168,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
 }
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────────
-function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId }) {
+function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId, watch }) {
   const [view, setView] = useState("body");          // body | charts | log | report
   const exNames = Object.keys(logs);
   const [selectedEx, setSelectedEx] = useState(exNames[0] || null);
@@ -5299,6 +5300,37 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
                     You've logged <b style={{ color:"#fff" }}>{allSessions.length}</b> total set entries across <b style={{ color:"#fff" }}>{exNames.length}</b> exercises on <b style={{ color:"#fff" }}>{dateKeys.length}</b> training days.
                   </div>
                 </div>
+
+                {/* Watch summary — appears automatically when Apple Health has watch data; no setup. */}
+                {watch && (
+                  <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:16, marginBottom:14 }}>
+                    <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#e8ff00", marginBottom:10 }}>THIS WEEK · FROM YOUR WATCH</div>
+                    {(() => {
+                      const arrow = (cur, prev, downGood = false) => {
+                        if (cur == null || prev == null || cur === prev) return null;
+                        const up = cur > prev;
+                        const good = downGood ? !up : up;
+                        return <span style={{ color: good ? "#3ddc84" : "#ff9d5c", marginLeft: 6, fontSize: 12.5 }}>{up ? "↑" : "↓"} {downGood ? "" : (up ? "+" : "")}{Math.round(Math.abs(cur - prev) * 10) / 10} vs last wk</span>;
+                      };
+                      const Row = ({ label, value, unit, trend }) => value == null ? null : (
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", padding:"5px 0", borderBottom:"1px solid #22222f" }}>
+                          <span style={{ fontSize:13.5, color:"#c8c8e0" }}>{label}</span>
+                          <span style={{ fontSize:14.5, color:"#fff", fontWeight:600 }}>{value}{unit ? " " + unit : ""}{trend}</span>
+                        </div>
+                      );
+                      return (
+                        <div>
+                          <Row label="Resting heart rate" value={watch.restingHR} unit="bpm" trend={arrow(watch.restingHR, watch.restingHRPrev, true)} />
+                          <Row label="Active minutes" value={watch.activeMin} unit="min" trend={arrow(watch.activeMin, watch.activeMinPrev)} />
+                          <Row label="Active calories" value={watch.activeKcal} unit="kcal" trend={arrow(watch.activeKcal, watch.activeKcalPrev)} />
+                          <Row label="Distance" value={watch.distanceKm} unit="km" trend={arrow(watch.distanceKm, watch.distanceKmPrev)} />
+                          <Row label="Workouts on watch" value={watch.workoutsCount ? `${watch.workoutsCount} (${watch.workoutMin} min)` : null} trend={arrow(watch.workoutsCount, watch.workoutsCountPrev)} />
+                          {watch.workoutTypes?.length ? <div style={{ fontSize:12.5, color:"#8a8aa4", marginTop:7 }}>Types: {watch.workoutTypes.join(", ")}</div> : null}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                   {exNames.map(name => {
                     const r = reportFor(name);
@@ -10292,6 +10324,35 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
           label="Weight" color={wkDelta == null ? C.muted : (wkDelta <= 0 ? C.green : C.blue)} />
       </div>
 
+      {/* From their watch — objective cardio/recovery, shown only when the client has one. */}
+      {detail.watch && (() => {
+        const wa = detail.watch;
+        const delta = (cur, prev, downGood = false) => {
+          if (cur == null || prev == null || cur === prev) return null;
+          const up = cur > prev;
+          return { txt: `${up ? "▲" : "▼"} ${Math.round(Math.abs(cur - prev) * 10) / 10} vs last wk`, good: downGood ? !up : up };
+        };
+        const tiles = [
+          { value: wa.restingHR != null ? `${Math.round(wa.restingHR)}` : null, label: "Resting HR", d: delta(wa.restingHR, wa.restingHRPrev, true) },
+          { value: wa.activeMin != null ? `${wa.activeMin}` : null, label: "Active min", d: delta(wa.activeMin, wa.activeMinPrev) },
+          { value: wa.activeKcal != null ? `${wa.activeKcal}` : null, label: "Active kcal", d: delta(wa.activeKcal, wa.activeKcalPrev) },
+          { value: wa.workoutsCount ? `${wa.workoutsCount}` : null, label: "Watch workouts", d: delta(wa.workoutsCount, wa.workoutsCountPrev) },
+          { value: wa.distanceKm != null ? `${wa.distanceKm} km` : null, label: "Distance", d: delta(wa.distanceKm, wa.distanceKmPrev) },
+        ].filter(t => t.value != null);
+        if (!tiles.length) return null;
+        return (
+          <>
+            <div style={{ ...S.inputLabel, marginBottom:8 }}>From their watch</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(92px, 1fr))", gap:8, marginBottom:18 }}>
+              {tiles.map(t => (
+                <WeekTile key={t.label} value={t.value} label={t.label}
+                  sub={t.d ? t.d.txt : null} color={t.d ? (t.d.good ? C.green : "#ff9d5c") : undefined} />
+              ))}
+            </div>
+          </>
+        );
+      })()}
+
       {/* What the client selected at signup — goal, targets, chosen pace + the
           realistic timeline they committed to, plus their generated program. */}
       {(() => {
@@ -10442,6 +10503,7 @@ export default function BodyMorph() {
   const [cardioSessions, setCardioSessions] = useState([]);
   const [stepEntries, setStepEntries] = useState([]);
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
+  const [watchInsights, setWatchInsights] = useState(null); // weekly watch summary (background; reports only)
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -10768,6 +10830,16 @@ export default function BodyMorph() {
         return [{ date: today, hours: h.hours }, ...(prev || [])].sort((a,b)=> a.date < b.date ? 1 : -1);
       });
     }
+    // Weekly WATCH summary — background only, no UI: compute week-over-week aggregates
+    // on-device and push one compact row for the reports (client progress report,
+    // coach client-detail week, coach weekly briefing).
+    try {
+      const insights = await healthInsights();
+      if (insights && userRef.current?.id) {
+        setWatchInsights(insights);
+        pushHealthSummary(userRef.current.id, insights);
+      }
+    } catch { /* silent — reports simply omit watch data */ }
   }, []);
   useEffect(() => {
     if (!loaded || !IS_NATIVE) return;
@@ -11292,7 +11364,7 @@ export default function BodyMorph() {
 
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} /></>);
-  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} /></>);
+  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} watch={watchInsights} /></>);
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
