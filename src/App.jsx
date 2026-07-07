@@ -10607,6 +10607,7 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
   const [summary, setSummary] = useState(null);   // { summary, generated_at }
   const [genBusy, setGenBusy] = useState(false);
   const [genErr, setGenErr] = useState("");
+  const [baRange, setBaRange] = useState("ALL");  // Before & After comparison window
   useEffect(() => {
     let on = true;
     (async () => { const s = await fetchClientSummary(coachId, clientId); if (on) setSummary(s); })();
@@ -10634,7 +10635,6 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
   );
   if (loading || !detail) return wrap(<div style={{ color:C.muted, fontSize:13 }}>Loading client…</div>);
 
-  const pts = (detail.bodyEntries || []).filter(e => e.weight != null).map(e => ({ d: e.date, v: Number(e.weight) }));
   const stats = detail.rewards?.stats || {};
   const Stat = ({ label, value }) => (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 10px", textAlign:"center", flex:1 }}>
@@ -10642,29 +10642,6 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
       <div style={{ fontSize:11, color:C.muted, marginTop:3, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
     </div>
   );
-
-  // Compact inline weight trend — gradient area fill + a marker on the latest point.
-  let chart = <div style={{ color:C.muted, fontSize:13 }}>Not enough weight data yet.</div>;
-  if (pts.length >= 2) {
-    const vs = pts.map(p => p.v), min = Math.min(...vs), max = Math.max(...vs), range = (max - min) || 1;
-    const W = 320, H = 110, pad = 10;
-    const xy = pts.map((p, i) => [pad + i * (W - 2*pad) / (pts.length - 1), H - pad - ((p.v - min) / range) * (H - 2*pad)]);
-    const down = pts[pts.length-1].v <= pts[0].v;
-    const color = down ? C.green : C.blue;
-    const line = xy.map(c => c.map(n => n.toFixed(1)).join(",")).join(" ");
-    const gid = "wtgrad";
-    chart = (
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto" }} preserveAspectRatio="none">
-        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient></defs>
-        <polygon points={`${pad},${H-pad} ${line} ${W-pad},${H-pad}`} fill={`url(#${gid})`} />
-        <polyline points={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={xy[xy.length-1][0]} cy={xy[xy.length-1][1]} r="4" fill={color} stroke="#0a0a0f" strokeWidth="1.5" />
-      </svg>
-    );
-  }
 
   // ── Hero header bits ──
   const initials = (detail.name || "?").trim().split(/\s+/).map(s => s[0]).slice(0,2).join("").toUpperCase() || "?";
@@ -10900,6 +10877,127 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
         );
       })()}
 
+      {/* ── BEFORE & AFTER — the screen-share view: side-by-side photos + then-vs-now
+          numbers over a chosen window ("you started on this date, look at you now"). ── */}
+      {(() => {
+        const RANGES = [["ALL", null],["1W",7],["1M",30],["3M",90],["6M",180],["1Y",365]];
+        const rDays = RANGES.find(r => r[0] === baRange)?.[1];
+        const cut = rDays ? ymdLocal(new Date(Date.now() - rDays * 86400000)) : "0000-00-00";
+        const today = ymdLocal();
+        const inR = (arr, key = "date") => (arr || []).filter(x => x[key] >= cut).sort((a,b)=> a[key] < b[key] ? -1 : 1);
+
+        const body = inR(detail.bodyEntries);
+        const wAll = body.filter(e => e.weight != null);
+        const bfAll = body.filter(e => e.bodyFat != null);
+        const lean = (e) => e && e.weight != null && e.bodyFat != null ? Math.round(e.weight * (1 - e.bodyFat/100) * 10) / 10 : null;
+        const lmAll = body.filter(e => lean(e) != null);
+
+        // The comparison anchor: where this window's data actually starts.
+        const steps = inR(detail.stepEntries), sleeps = inR(detail.sleepEntries);
+        const wodays = (detail.workoutDays || []).filter(d => d >= cut).sort();
+        const wd = detail.watch?.daily;
+        const rhrs = (wd?.metrics || []).filter(m => m.restingHR > 0 && m.day >= cut).map(m => ({ date: m.day, v: m.restingHR })).sort((a,b)=> a.date < b.date ? -1 : 1);
+        const firstDate = [wAll[0]?.date, steps[0]?.date, sleeps[0]?.date, wodays[0], rhrs[0]?.date].filter(Boolean).sort()[0] || null;
+        const spanDays = firstDate ? Math.round((new Date(today+"T00:00:00") - new Date(firstDate+"T00:00:00")) / 86400000) : 0;
+
+        // "Then" = the first 14 days of the window, "now" = the last 14. Averages only
+        // make sense once the windows can't overlap, so they need ~4 weeks of history.
+        const thenEnd = firstDate ? ymdLocal(new Date(new Date(firstDate+"T00:00:00").getTime() + 13 * 86400000)) : null;
+        const nowStart = ymdLocal(new Date(Date.now() - 13 * 86400000));
+        const canAvg = spanDays >= 27;
+        const avgIn = (arr, from, to, get) => {
+          const vals = arr.filter(x => x.date >= from && x.date <= to).map(get).filter(v => v != null && v > 0);
+          return vals.length ? Math.round((vals.reduce((s,v)=>s+v,0)/vals.length) * 10) / 10 : null;
+        };
+        const perWk = (days, from, to) => {
+          const n = days.filter(d => d >= from && d <= to).length;
+          return n ? Math.round(n / 2 * 10) / 10 : null;   // 14-day window = 2 weeks
+        };
+
+        const goalW = parseFloat(detail.profile?.goalWeight) || null;
+        const wDownGood = goalW && wAll.length ? goalW < wAll[0].weight : true;
+        const rows = [
+          wAll.length >= 2 && { label:"Weight", unit:" lb", then:+wAll[0].weight, now:+wAll[wAll.length-1].weight, downGood:wDownGood, dates:[wAll[0].date, wAll[wAll.length-1].date] },
+          bfAll.length >= 2 && { label:"Body fat", unit:"%", then:+bfAll[0].bodyFat, now:+bfAll[bfAll.length-1].bodyFat, downGood:true },
+          lmAll.length >= 2 && { label:"Lean mass", unit:" lb", then:lean(lmAll[0]), now:lean(lmAll[lmAll.length-1]) },
+          canAvg && { label:"Avg steps", unit:"", then:avgIn(steps, firstDate, thenEnd, x=>x.steps), now:avgIn(steps, nowStart, today, x=>x.steps) },
+          canAvg && { label:"Avg sleep", unit:"h", then:avgIn(sleeps, firstDate, thenEnd, x=>+x.hours), now:avgIn(sleeps, nowStart, today, x=>+x.hours) },
+          canAvg && { label:"Workouts / wk", unit:"", then:perWk(wodays, firstDate, thenEnd), now:perWk(wodays, nowStart, today) },
+          canAvg && { label:"Resting HR", unit:" bpm", then:avgIn(rhrs, firstDate, thenEnd, x=>x.v), now:avgIn(rhrs, nowStart, today, x=>x.v), downGood:true },
+        ].filter(r => r && r.then != null && r.now != null);
+
+        // Photos: earliest vs latest photo day in the window (consent-gated, as everywhere).
+        const withPhotos = body.filter(e => e.photos && Object.keys(e.photos).length);
+        const pB = withPhotos[0], pA = withPhotos.length >= 2 ? withPhotos[withPhotos.length-1] : null;
+        const pairAngles = pB && pA ? ANGLES.filter(a => pB.photos[a.id] && pA.photos[a.id]) : [];
+
+        const fmtN = (v) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v);
+        return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:10 }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>BEFORE & AFTER</div>
+              <div style={{ display:"flex", gap:4 }}>
+                {RANGES.map(([k]) => (
+                  <button key={k} onClick={()=>setBaRange(k)} style={{ background: baRange===k ? "#e8ff00" : "transparent", color: baRange===k ? "#0a0a0f" : C.muted,
+                    border:`1px solid ${baRange===k ? "#e8ff00" : C.border}`, borderRadius:6, padding:"4px 8px", fontSize:11.5, fontWeight:700, cursor:"pointer" }}>{k}</button>
+                ))}
+              </div>
+            </div>
+            {firstDate
+              ? <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Comparing <b style={{ color:C.text }}>{firstDate}</b> → <b style={{ color:C.text }}>today</b></div>
+              : <div style={{ fontSize:13, color:C.muted }}>No data in this window yet.</div>}
+
+            {withPhotos.length > 0 && !detail.sharePhotos && (
+              <div style={{ fontSize:12.5, color:C.muted, marginBottom:12 }}>{"\u{1F512}"} Photos exist but aren't shared — {detail.name?.split(" ")[0] || "the client"} can enable sharing from their Body Progress page.</div>
+            )}
+            {detail.sharePhotos && pB && pA && pairAngles.length > 0 && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+                {[["BEFORE", pB], ["AFTER", pA]].map(([tag, e]) => (
+                  <div key={tag}>
+                    <div style={{ fontSize:11, fontWeight:700, letterSpacing:0.8, color: tag==="AFTER" ? "#e8ff00" : C.muted, textTransform:"uppercase", textAlign:"center", marginBottom:5 }}>
+                      {tag} · {e.date}{e.weight ? ` · ${e.weight} lb` : ""}
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                      {pairAngles.map(a => (
+                        <div key={a.id} style={{ aspectRatio:"3/4", borderRadius:10, overflow:"hidden", border:`1px solid ${tag==="AFTER" ? "rgba(232,255,0,0.4)" : C.border}` }}>
+                          <ProgressImg value={e.photos[a.id]} alt={`${tag} ${a.label}`} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {detail.sharePhotos && withPhotos.length === 1 && (
+              <div style={{ fontSize:12.5, color:C.muted, marginBottom:12 }}>Only one photo day in this window — a second weekly photo makes this a side-by-side.</div>
+            )}
+
+            {rows.length > 0 && (
+              <div>
+                {rows.map(r => {
+                  const chg = Math.round((r.now - r.then) * 10) / 10;
+                  const good = r.downGood ? chg <= 0 : chg >= 0;
+                  return (
+                    <div key={r.label} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"7px 0", borderBottom:`1px solid ${C.border}` }}>
+                      <span style={{ fontSize:12.5, color:C.muted, flex:1 }}>{r.label}</span>
+                      <span style={{ fontSize:13.5, color:C.text, fontWeight:600 }}>{fmtN(r.then)}{r.unit}</span>
+                      <span style={{ color:C.muted, fontSize:12 }}>→</span>
+                      <span style={{ fontSize:13.5, color:C.text, fontWeight:700 }}>{fmtN(r.now)}{r.unit}</span>
+                      <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:12.5, minWidth:64, textAlign:"right", color: chg === 0 ? C.muted : good ? C.green : "#ff9d5c" }}>
+                        {chg === 0 ? "—" : `${chg > 0 ? "▲ +" : "▼ "}${fmtN(Math.abs(chg))}${r.unit}`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {firstDate && rows.length === 0 && (
+              <div style={{ fontSize:12.5, color:C.muted }}>Not enough history in this window for a comparison yet{spanDays < 27 ? " — averages unlock at ~4 weeks of data" : ""}.</div>
+            )}
+          </div>
+        );
+      })()}
+
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
         <Stat label="Day streak" value={stats.currentStreak || 0} />
         <Stat label="Workouts" value={stats.workoutsCompleted || (detail.workoutDays||[]).length || 0} />
@@ -10910,17 +11008,6 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
       <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
 
       <CoachCuesEditor coachId={coachId} clientId={clientId} />
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginTop:16 }}>
-        <div style={{ ...S.inputLabel, marginBottom:8 }}>Bodyweight trend</div>
-        {chart}
-        {pts.length > 0 && (
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted, marginTop:6 }}>
-            <span>{pts[0].d}: {pts[0].v} lb</span>
-            <span>{pts[pts.length-1].d}: {pts[pts.length-1].v} lb</span>
-          </div>
-        )}
-      </div>
 
       {(() => {
         // Weekly progress photos — every entry that has photos, newest first (up to 8 weeks).
