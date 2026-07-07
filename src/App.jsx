@@ -10139,14 +10139,11 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               the yellow invite bar lives OUTSIDE it (always visible). */}
           <div className="coach-mobilebar">
             <div style={{ display:"flex", gap:8 }}>
-              <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
+              <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:"none", color:C.text, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
                 {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
               </button>
-              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:`1px solid ${C.border}`, color:"#e8ff00", borderRadius:10, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center", position:"relative" }}>
-                💬 MESSENGER
-                {unreadTotal > 0 && (
-                  <span style={{ position:"absolute", top:6, right:8, background:"#e8ff00", color:"#0a0a0f", borderRadius:10, padding:"0 7px", fontSize:12, fontWeight:800, lineHeight:"18px" }}>{unreadTotal}</span>
-                )}
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:"none", color:"#e8ff00", padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
+                MESSAGES{unreadTotal > 0 ? ` (${unreadTotal})` : ""}
               </button>
             </div>
             {mobileMenu && (
