@@ -2460,7 +2460,25 @@ function GLBInfo({ onClose }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
+// Per-step guidance shown ONLY in coach mode (the guided intake): what to ask and
+// what to steer, so a brand-new coach runs a professional onboarding on day one.
+const COACH_TIPS = {
+  firstname: "Set the tone: “We're going to build your whole program together right now — takes about five minutes.”",
+  address:   "For your client file and in-person sessions. Confirm the spelling back to them.",
+  gender:    "Programs and calorie math differ — pick what fits their training profile.",
+  goal:      "Dig in here: why this goal, why NOW? Write their reason down — you'll use it when motivation dips.",
+  focus:     "Steer them. Beginners do best on Full Body; match the focus to what they said they want to change.",
+  days:      "Push for honest, not ambitious — 4 days they'll keep beats 6 they won't. Protect at least one rest day.",
+  time:      "Their real window, warm-up included. If they've got 45 minutes at lunch, pick 45.",
+  stats:     "Measure now if you can — a scale reading beats a guess. Estimate body fat visually if you have to.",
+  goals:     "Set the target together and keep it realistic — you can always raise it. This number drives their calories.",
+  activity:  "Their job and daily movement, NOT their workouts — training is counted separately.",
+  diet:      "Pick what they'll actually eat, not what's trendy. This drives every meal plan they'll ever generate.",
+  cuisines:  "Favorite foods = adherence. Ask what they actually cook at home.",
+  shopping:  "Their store shapes the grocery list. Nail the allergies — meal plans will avoid them completely.",
+};
+
+function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, onCancel }) {
   const [step, setStep] = useState(startStep || 0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
@@ -2772,17 +2790,33 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep }) {
       <Watermark />
       {showHFTInfo && <HFTInfo onClose={()=>setShowHFTInfo(false)} />}
       {showGLBInfo && <GLBInfo onClose={()=>setShowGLBInfo(false)} />}
-      <Logo small />
+      {coachMode ? (
+        <div style={{ width:"92%", maxWidth:480, textAlign:"center", position:"relative" }}>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:2, color:"#e8ff00" }}>GUIDED CLIENT INTAKE</div>
+          <div style={{ color:"#9898b8", fontSize:12.5, marginTop:2 }}>Ask the questions out loud — fill it in together{p.firstName ? ` · ${p.firstName.trim()}` : ""}</div>
+          {onCancel && (
+            <button onClick={onCancel} aria-label="Exit intake" style={{ position:"absolute", right:0, top:-4, background:"transparent", border:"none", color:"#8a8aa4", fontSize:26, lineHeight:1, cursor:"pointer" }}>✕</button>
+          )}
+        </div>
+      ) : (
+        <Logo small />
+      )}
       <div style={{ display:"flex", gap:5, alignItems:"center" }}>
         {STEPS.map((_,i) => (<div key={i} style={{ height:6, borderRadius:3, transition:"all 0.3s", width: i===step ? 18 : 6, background: i<=step ? "#e8ff00" : "#2a2a3d" }} />))}
       </div>
       <div className="fade-in" key={step} style={{ width:"100%", maxWidth:480, display:"flex", justifyContent:"center" }}>{steps[step]}</div>
+      {coachMode && COACH_TIPS[STEPS[step]] && (
+        <div style={{ width:"92%", maxWidth:400, background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.3)", borderRadius:10, padding:"9px 12px", fontSize:12.5, color:"#d2d2ec", lineHeight:1.5 }}>
+          <span style={{ background:"#e8ff00", color:"#000", fontSize:10, fontWeight:700, letterSpacing:1, padding:"1px 6px", borderRadius:3, marginRight:7, verticalAlign:"middle" }}>COACH</span>
+          {COACH_TIPS[STEPS[step]]}
+        </div>
+      )}
       <div style={{ display:"flex", gap:7, width:"92%", maxWidth:340 }}>
         {step > 0 && (<button onClick={() => setStep(s=>s-1)} style={{ ...S.btnSec, flex:"0 0 25%", padding:"10px 4px" }}>Back</button>)}
         {step < STEPS.length-1 ? (
           <button onClick={() => ok && setStep(s=>s+1)} disabled={!ok} style={{ ...S.btnPri, flex:1, opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", padding:"10px 8px" }}>Continue</button>
         ) : (
-          <button onClick={() => { if(!ok) return; const totalIn = (parseInt(p.heightFt)||0)*12 + (parseInt(p.heightIn)||0); onComplete({ ...p, firstName: p.firstName.trim(), lastName: p.lastName.trim(), name: p.firstName.trim(), height: String(totalIn) }); }} disabled={!ok} style={{ ...S.btnPri, flex:"0 0 73%", opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", background:"#e8ff00", color:"#000", padding:"10px 6px", fontSize:15.6 }}>BUILD MY PROGRAM</button>
+          <button onClick={() => { if(!ok) return; const totalIn = (parseInt(p.heightFt)||0)*12 + (parseInt(p.heightIn)||0); onComplete({ ...p, firstName: p.firstName.trim(), lastName: p.lastName.trim(), name: p.firstName.trim(), height: String(totalIn) }); }} disabled={!ok} style={{ ...S.btnPri, flex:"0 0 73%", opacity:ok?1:0.4, cursor:ok?"pointer":"not-allowed", background:"#e8ff00", color:"#000", padding:"10px 6px", fontSize:15.6 }}>{coachMode ? "FINISH INTAKE" : "BUILD MY PROGRAM"}</button>
         )}
       </div>
 
@@ -9810,6 +9844,22 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
     if (iProspectId) { await setProspectStage(iProspectId, "invited"); }
     load();
   };
+  // Guided intake: the coach runs the FULL onboarding wizard with the client in the
+  // room (or on Zoom). The finished profile rides the invite (intake.complete), so
+  // the client's app skips the questionnaire entirely — account, then straight to
+  // "your coach set everything up," program ready.
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const finishGuidedIntake = async (prof) => {
+    setIntakeOpen(false); setIBusy(true);
+    const fullName = `${prof.firstName} ${prof.lastName}`.trim() || iForm.name;
+    const r = await createClientInvite(uid, { name: fullName, phone:iForm.phone, email:iForm.email, intake:{ ...prof, complete:true } });
+    setIBusy(false);
+    if (r.error) { alert("Couldn't create invite: " + r.error); return; }
+    setIForm(f => ({ ...f, name: fullName }));
+    setIResult(r);
+    if (iProspectId) { await setProspectStage(iProspectId, "invited"); }
+    load();
+  };
   const inviteMsg = (link) => `${iForm.name ? iForm.name + ", " : ""}your coach set you up on BodyMorph. Tap to get started: ${link}`;
 
   const addProspect = async () => {
@@ -10222,7 +10272,11 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                     <input value={iForm.focus} onChange={e=>setIForm({...iForm,focus:e.target.value})} placeholder="Focus (optional)" style={fld} />
                   </div>
                 </div>
-                <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                <button onClick={()=>setIntakeOpen(true)} style={{ width:"100%", marginTop:12, background:"rgba(232,255,0,0.08)", border:"1px solid rgba(232,255,0,0.4)", borderRadius:10, color:"#e8ff00", padding:"12px 14px", cursor:"pointer", textAlign:"left", fontSize:13.5, lineHeight:1.45 }}>
+                  <b>🧭 Guided intake (recommended)</b><br/>
+                  <span style={{ color:C.muted, fontSize:12.5 }}>Set up their whole profile together, step by step — their app arrives ready, no questionnaire.</span>
+                </button>
+                <div style={{ display:"flex", gap:8, marginTop:12 }}>
                   <button onClick={()=>setInviteOpen(false)} style={{ ...S.btnSec, flex:1 }}>Cancel</button>
                   <button onClick={createInvite} disabled={iBusy} style={{ ...S.btnPri, flex:2, background:"#e8ff00", color:"#000", border:"none", opacity:iBusy?0.6:1 }}>{iBusy?"Creating…":"Create invite"}</button>
                 </div>
@@ -10240,6 +10294,13 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* GUIDED INTAKE — the client wizard, run by the coach with the client present. */}
+      {intakeOpen && (
+        <div style={{ position:"fixed", inset:0, zIndex:500, overflowY:"auto", background:"#0a0a0f" }}>
+          <Wizard coachMode seed={{ name: iForm.name }} onComplete={finishGuidedIntake} onCancel={()=>setIntakeOpen(false)} />
         </div>
       )}
     </div>
@@ -11245,9 +11306,10 @@ export default function BodyMorph() {
         // Coach invite link (?invite=CODE): redeem once to link this client to the
         // coach, capture intake to seed the wizard, then clean the URL.
         const inviteCode = (typeof window !== "undefined") ? new URLSearchParams(window.location.search).get("invite") : null;
+        let coachIntake = null;   // full profile from a coach's GUIDED intake (intake.complete)
         if (uid && inviteCode) {
           const r = await redeemClientInvite(inviteCode);
-          if (r?.ok) { setInviteSeed(r.intake || null); try { window.history.replaceState({}, "", window.location.pathname); } catch {} }
+          if (r?.ok) { coachIntake = r.intake || null; setInviteSeed(coachIntake); try { window.history.replaceState({}, "", window.location.pathname); } catch {} }
         }
         const todayStr = ymdLocal();
         const localHyd = (shyd && shyd.date === todayStr) ? shyd : { date: todayStr, cups: 0, goal: (shyd && shyd.goal) || 8 };
@@ -11328,6 +11390,12 @@ export default function BodyMorph() {
           const linked = (hasBackend && uid) ? await clientHasCoach(uid) : true; // offline = no gate
           if (!linked) setPhase("accesscode");
           else if (hasProfile) setPhase(subscribed ? "home" : "subscribe");
+          else if (subscribed && coachIntake?.complete) {
+            // Coach ran the guided intake — the profile is done. Skip the questionnaire
+            // entirely: build the program now, exactly as if they'd finished the wizard.
+            const { complete, ...prof } = coachIntake;
+            handleWizardDone(prof);
+          }
           else setPhase(subscribed ? "wizard" : "subscribe");
         }
       } catch(loadErr) {
