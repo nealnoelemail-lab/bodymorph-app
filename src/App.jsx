@@ -5357,6 +5357,18 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
   allSessions.forEach(s => { (byDate[s._d] = byDate[s._d] || []).push(s); });
   const dateKeys = Object.keys(byDate).sort((a,b)=> a < b ? 1 : -1);
 
+  // Time-period filter — shared by LOG + REPORT (same options as CHARTS).
+  const PERIODS = [["1W",7],["1M",30],["3M",90],["6M",180],["1Y",365]];
+  const [periodLabel, setPeriodLabel] = useState("3M");
+  const periodDays = PERIODS.find(p=>p[0]===periodLabel)?.[1] || 90;
+  const pCutoff = ymdLocal(new Date(Date.now() - periodDays*86400000));
+  const inPeriod = (d) => d && d >= pCutoff;
+  const periodName = { "1W":"the last week", "1M":"the last month", "3M":"the last 3 months", "6M":"the last 6 months", "1Y":"the last year" }[periodLabel];
+  // Period-scoped rollups for the REPORT summary.
+  const periodDateKeys = dateKeys.filter(inPeriod);
+  const periodSessions = allSessions.filter(s => inPeriod(s._d));
+  const periodExNames = [...new Set(periodSessions.map(s => s.name))];
+
   // ── Chart helpers ──
   function chartFor(name) {
     const arr = (logs[name]||[]).slice();
@@ -5366,7 +5378,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
 
   // ── Report helpers ──
   function reportFor(name) {
-    const arr = (logs[name]||[]).slice().sort((a,b)=> dateOf(a) < dateOf(b) ? -1 : 1);
+    const arr = (logs[name]||[]).slice().filter(h => inPeriod(dateOf(h))).sort((a,b)=> dateOf(a) < dateOf(b) ? -1 : 1);
     if (!arr.length) return null;
     const first = wOf(arr[0]), last = wOf(arr[arr.length-1]);
     const pr = arr.reduce((m,h)=>Math.max(m,wOf(h)),0);
@@ -5429,14 +5441,24 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
 
         {view !== "body" && view !== "charts" && !hasData ? (
           <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:28, textAlign:"center", color:"#c8c8e0", fontSize:14 }}>
-            No lifts logged yet. Pick a day, tap Start Workout, and log your sets. Your progress over the 4-week block will show up here.
+            No lifts logged yet. Pick a day, tap Start Workout, and log your sets. Your progress will show up here.
           </div>
         ) : (view !== "body" && view !== "charts") ? (
           <>
+            {/* Time-period selector — LOG + REPORT (same options as CHARTS) */}
+            <div style={{display:"flex",gap:6,marginBottom:16,background:"#12121a",border:"1px solid #2a2a3d",borderRadius:10,padding:4}}>
+              {PERIODS.map(([label])=>(
+                <button key={label} onClick={()=>setPeriodLabel(label)} style={{flex:1,background:periodLabel===label?"#e8ff00":"transparent",color:periodLabel===label?"#000":"#d6d6ec",border:"none",borderRadius:7,padding:"8px 4px",cursor:"pointer",fontFamily:"'Bebas Neue'",letterSpacing:1,fontSize:14}}>{label}</button>
+              ))}
+            </div>
+
             {/* SESSION LOG VIEW */}
             {view === "log" && (
+              periodDateKeys.length === 0 ? (
+                <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:24, textAlign:"center", color:"#c8c8e0", fontSize:14 }}>No sessions logged in {periodName}.</div>
+              ) : (
               <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                {dateKeys.map(d => (
+                {periodDateKeys.map(d => (
                   <div key={d}>
                     <div style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, color:"#e8ff00", marginBottom:6 }}>{fmtDate(d)}</div>
                     <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -5457,15 +5479,16 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
                   </div>
                 ))}
               </div>
+              )
             )}
 
             {/* REPORT VIEW */}
             {view === "report" && (
               <div>
                 <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:16, marginBottom:14 }}>
-                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#e8ff00", marginBottom:8 }}>4-WEEK PROGRESS REPORT</div>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#e8ff00", marginBottom:8 }}>PROGRESS REPORT · {periodLabel}</div>
                   <div style={{ fontSize:14.5, lineHeight:1.7, color:"#d2d2ec" }}>
-                    You've logged <b style={{ color:"#fff" }}>{allSessions.length}</b> total set entries across <b style={{ color:"#fff" }}>{exNames.length}</b> exercises on <b style={{ color:"#fff" }}>{dateKeys.length}</b> training days.
+                    Over {periodName} you've logged <b style={{ color:"#fff" }}>{periodSessions.length}</b> set entries across <b style={{ color:"#fff" }}>{periodExNames.length}</b> exercises on <b style={{ color:"#fff" }}>{periodDateKeys.length}</b> training days.
                   </div>
                 </div>
 
@@ -5500,7 +5523,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
                   </div>
                 )}
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                  {exNames.map(name => {
+                  {periodExNames.map(name => {
                     const r = reportFor(name);
                     if (!r) return null;
                     const up = r.gain > 0, flat = r.gain === 0;
