@@ -80,6 +80,26 @@ export function subscribeThread(coachId, clientId, cb) {
   return () => { try { supabase.removeChannel(ch); } catch { /* already gone */ } };
 }
 
+// Coach inbox: one row per client conversation, newest activity first —
+// { clientId, last: {sender, body, created_at}, unread }. Fed by the most
+// recent ~500 messages, which is plenty for a coaching roster.
+export async function listConversations(coachId) {
+  if (!supabase || !coachId) return [];
+  const { data, error } = await supabase.from("messages")
+    .select("client_id, sender, body, created_at, read_at")
+    .eq("coach_id", coachId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) { console.warn("listConversations:", error.message); return []; }
+  const by = new Map();   // first row seen per client = their latest message
+  (data || []).forEach(m => {
+    let c = by.get(m.client_id);
+    if (!c) { c = { clientId: m.client_id, last: m, unread: 0 }; by.set(m.client_id, c); }
+    if (m.sender === "client" && !m.read_at) c.unread++;
+  });
+  return [...by.values()];
+}
+
 // Compact recent-thread summary for the AI voice coach's prompt: the human
 // coach leads; the AI must know what was said. Last `days` days, max `max` msgs.
 export function threadForPrompt(msgs, { days = 7, max = 10 } = {}) {

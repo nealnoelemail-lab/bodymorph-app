@@ -14,7 +14,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
   pushHealthSummary, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
-import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt } from "./messaging";
+import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt, listConversations } from "./messaging";
 import { syncHealth, healthInsights, healthDaily } from "./healthkit";
 
 const C = {
@@ -9961,9 +9961,21 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
 
   const [chatPrefill, setChatPrefill] = useState("");   // draft text to drop into the in-app chat when opening a client
   const openClient = async (id, prefill = "") => { setChatPrefill(prefill); setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
+
+  // ── MESSENGER (inbox) — conversations newest-first, tap → thread, ✏️ → new ──
+  const [msgThread, setMsgThread] = useState(null);     // clientId of the open thread
+  const [convs, setConvs] = useState(null);             // inbox rows (null = loading)
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeSearch, setComposeSearch] = useState("");
+  const loadConvs = useCallback(async () => {
+    if (!uid) return;
+    const [cv, um] = await Promise.all([listConversations(uid), unreadByClient(uid)]);
+    setConvs(cv); setUnreadMap(um);
+  }, [uid]);
+  useEffect(() => { if (section === "messages" && !msgThread) loadConvs(); }, [section, msgThread, loadConvs]);
   // Jump straight to the in-app conversation with a client, optionally pre-filling
   // a drafted message (from an at-risk nudge or a follow-up). Keeps chat IN the app.
-  const openClientChat = (id, prefill = "") => { setSection("clients"); openClient(id, prefill); };
+  const openClientChat = (id, prefill = "") => { setChatPrefill(prefill); setSelected(null); setComposeOpen(false); setMsgThread(id); setSection("messages"); };
 
   // Resolve an at-risk client: record the outcome (+ note), update the roster locally so
   // they fall off the queue immediately. 'lost' removes them from the roster entirely.
@@ -9980,7 +9992,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
     }
     setResolveNote("");
   };
-  const go = (s) => { setSelected(null); setSection(s); };
+  const go = (s) => { setSelected(null); if (s === "messages") { setMsgThread(null); setComposeOpen(false); setComposeSearch(""); } setSection(s); };
 
   const openInvite = (prefill, prospectId) => {
     setIForm({ name:prefill?.name||"", phone:prefill?.phone||"", email:prefill?.email||"", goal:"", focus:"" });
@@ -10063,7 +10075,9 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   const networkClients = 0;
 
   const activeFu = followups.filter(f => !fuDone[f.clientId + ":" + f.key]);
-  const NAV = [["overview","Overview"],["clients","Clients"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
+  const NAV = [["overview","Overview"],["clients","Clients"],["messages","Messages"],["followups","Follow-ups"],["calendar","Calendar"],["prospects","Prospects"],["financials","Financials"]];
+  const unreadTotal = Object.values(unreadMap).reduce((s, n) => s + n, 0);
+  const navLabel = (k, label) => (k === "messages" && unreadTotal > 0) ? `${label} (${unreadTotal})` : label;
   const [mobileMenu, setMobileMenu] = useState(false); // phone: the collapsible MENU bar
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
   useEffect(() => {
@@ -10117,15 +10131,24 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           </div>
           <div className="coach-nav coach-desknav">
             {NAV.map(([k,label]) => (
-              <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{label}</button>
+              <button key={k} className={"coach-navitem" + (section===k && !selected ? " on" : "")} onClick={()=>go(k)}>{navLabel(k, label)}</button>
             ))}
             <button className="coach-navitem" style={{ marginTop:8, background:"#e8ff00", color:"#000", fontWeight:700, textAlign:"center" }} onClick={()=>openInvite()}>+ Invite client</button>
           </div>
-          {/* Phone: ONE collapsible MENU bar; the yellow invite bar lives OUTSIDE it (always visible). */}
+          {/* Phone: MENU + MESSENGER split the top bar (clear buttons, evenly spaced);
+              the yellow invite bar lives OUTSIDE it (always visible). */}
           <div className="coach-mobilebar">
-            <button onClick={()=>setMobileMenu(o=>!o)} style={{ width:"100%", background:"#12121a", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"14px", fontSize:23, fontWeight:700, letterSpacing:2, fontFamily:"'DM Sans'", cursor:"pointer" }}>
-              {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
-            </button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:`1px solid ${C.border}`, color:C.text, borderRadius:10, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
+                {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
+              </button>
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:`1px solid ${C.border}`, color:"#e8ff00", borderRadius:10, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center", position:"relative" }}>
+                💬 MESSENGER
+                {unreadTotal > 0 && (
+                  <span style={{ position:"absolute", top:6, right:8, background:"#e8ff00", color:"#0a0a0f", borderRadius:10, padding:"0 7px", fontSize:12, fontWeight:800, lineHeight:"18px" }}>{unreadTotal}</span>
+                )}
+              </button>
+            </div>
             {mobileMenu && (
               <div style={{ background:"#12121a", border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, overflow:"hidden" }}>
                 {NAV.map(([k,label]) => (
@@ -10333,6 +10356,92 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load} msgPrefill={chatPrefill}
               onBack={()=>{ setSelected(null); setDetail(null); setChatPrefill(""); }} />
           )}
+
+          {/* MESSENGER — phone-style inbox: conversations newest-first, tap → thread,
+              ✏️ → pick a client and start a new one. */}
+          {section==="messages" && (() => {
+            const nameFor = (id) => roster.find(c => c.id === id)?.name || "Client";
+            const when = (iso) => {
+              const d = new Date(iso), now = new Date();
+              return d.toDateString() === now.toDateString()
+                ? d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" })
+                : d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+            };
+            if (msgThread) return (
+              <>
+                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12 }}>
+                  <button onClick={()=>{ setMsgThread(null); setChatPrefill(""); loadConvs(); }} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Inbox</button>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>{nameFor(msgThread).toUpperCase()}</div>
+                  <button onClick={()=>{ setSection("clients"); openClient(msgThread); setMsgThread(null); }} style={{ marginLeft:"auto", background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:12.5 }}>View client ›</button>
+                </div>
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 14px", maxWidth:640 }}>
+                  <ChatThread coachId={uid} clientId={msgThread} meRole="coach" initialDraft={chatPrefill}
+                    maxHeight={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 320)} />
+                </div>
+              </>
+            );
+            if (composeOpen) {
+              const pick = roster.filter(c => !composeSearch || (c.name||"").toLowerCase().includes(composeSearch.toLowerCase()));
+              return (
+                <>
+                  <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12 }}>
+                    <button onClick={()=>setComposeOpen(false)} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+                    <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>NEW MESSAGE</div>
+                  </div>
+                  <input autoFocus value={composeSearch} onChange={e=>setComposeSearch(e.target.value)} placeholder="Search your clients…"
+                    style={{ width:"100%", maxWidth:520, boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:10, color:C.text, padding:"11px 13px", fontSize:14.5, outline:"none", marginBottom:12 }} />
+                  <div style={{ display:"flex", flexDirection:"column", gap:6, maxWidth:520 }}>
+                    {pick.length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No clients match.</div>}
+                    {pick.map(c => (
+                      <button key={c.id} onClick={()=>{ setChatPrefill(""); setMsgThread(c.id); setComposeOpen(false); }}
+                        style={{ display:"flex", alignItems:"center", gap:12, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
+                        <span style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:15, color:"#0a0a0f" }}>
+                          {(c.name||"?").trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase() || "?"}
+                        </span>
+                        <span style={{ color:C.text, fontSize:14.5, fontWeight:600 }}>{c.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              );
+            }
+            return (
+              <>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, maxWidth:640, paddingRight:44 }}>
+                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>MESSAGES{unreadTotal > 0 ? <span style={{ color:"#e8ff00" }}> ({unreadTotal})</span> : null}</div>
+                  <button onClick={()=>{ setComposeSearch(""); setComposeOpen(true); }} aria-label="New message"
+                    style={{ background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:10, padding:"9px 14px", fontSize:15, fontWeight:700, cursor:"pointer" }}>✏️ New</button>
+                </div>
+                {convs === null ? <div style={{ color:C.muted, fontSize:13 }}>Loading conversations…</div>
+                : convs.length === 0 ? (
+                  <div style={{ color:C.muted, fontSize:13.5, lineHeight:1.6, maxWidth:480 }}>
+                    No conversations yet. Tap <b style={{ color:"#e8ff00" }}>✏️ New</b> to message a client — it lands inside their app, and their AI coach stays in the loop.
+                  </div>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", gap:6, maxWidth:640 }}>
+                    {convs.map(cv => (
+                      <button key={cv.clientId} onClick={()=>{ setChatPrefill(""); setMsgThread(cv.clientId); }}
+                        style={{ display:"flex", alignItems:"center", gap:12, background: cv.unread ? "rgba(232,255,0,0.06)" : C.card, border:`1px solid ${cv.unread ? "rgba(232,255,0,0.4)" : C.border}`, borderRadius:12, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
+                        <span style={{ width:42, height:42, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:17, color:"#0a0a0f" }}>
+                          {nameFor(cv.clientId).trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase()}
+                        </span>
+                        <span style={{ flex:1, minWidth:0 }}>
+                          <span style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"baseline" }}>
+                            <span style={{ color:C.text, fontSize:14.5, fontWeight: cv.unread ? 800 : 600 }}>{nameFor(cv.clientId)}</span>
+                            <span style={{ color: cv.unread ? "#e8ff00" : C.muted, fontSize:11.5, flexShrink:0 }}>{when(cv.last.created_at)}</span>
+                          </span>
+                          <span style={{ display:"block", color: cv.unread ? C.text : C.muted, fontSize:13, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontWeight: cv.unread ? 600 : 400 }}>
+                            {cv.last.sender === "coach" ? "You: " : ""}{cv.last.body}
+                          </span>
+                        </span>
+                        {cv.unread > 0 && <span style={{ flexShrink:0, background:"#e8ff00", color:"#0a0a0f", borderRadius:11, padding:"2px 9px", fontSize:12, fontWeight:800 }}>{cv.unread}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* FOLLOW-UPS */}
           {section==="followups" && (
