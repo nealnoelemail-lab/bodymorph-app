@@ -10159,7 +10159,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 ))}
               </div>
             )}
-            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"rgba(232,255,0,0.14)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:10, padding:"14px", fontSize:28, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite Client</button>
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"rgba(232,255,0,0.14)", color:"#e8ff00", border:"1px solid rgba(232,255,0,0.5)", borderRadius:10, padding:"11px 14px", fontSize:28, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite Client</button>
             {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
             <div style={{ textAlign:"center", marginTop:16 }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
