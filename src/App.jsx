@@ -126,6 +126,10 @@ const BODY_KEY    = "bodymorph_body_v2";
 const CARDIO_KEY  = "bodymorph_cardio_v2";
 const STEPS_KEY   = "bodymorph_steps_v2";
 const BRAND_KEY   = "bodymorph_coach_brand";
+// Message-notification preference is PER-DEVICE (you choose which phone buzzes),
+// so it lives in localStorage, not the synced cloud profile. Default ON.
+const NOTIFY_KEY  = "bodymorph_notify_msgs";
+const msgNotifyOn = () => { try { return localStorage.getItem(NOTIFY_KEY) !== "0"; } catch { return true; } };
 const SLEEP_KEY   = "bodymorph_sleep_v2";
 const MEALPLAN_KEY = "bodymorph_mealplan_v2"; // last AI-generated meal plan (for Program Summary)
 const SUPP_KEY    = "bodymorph_supplements_v2";
@@ -3642,6 +3646,8 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
           )}
         </div>
 
+        <MsgNotifyCard accent={profile?.gender === "Female" ? APP_PINK : "#e8ff00"} />
+
         {items.map(item => (
           <button key={item.label} onClick={item.action} style={{ display:"flex", alignItems:"center", gap:14, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 16px", cursor:"pointer", textAlign:"left", width:"100%" }}>
             <span style={{ fontSize:22 }}>{item.icon}</span>
@@ -3921,11 +3927,13 @@ function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStr
 // ── IN-APP COACH↔CLIENT CHAT ────────────────────────────────────────────────
 // One shared thread component for both sides: the coach uses it inside the
 // client detail view, the client in their MESSAGES screen. Realtime + 15s poll.
-function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8ff00" }) {
+function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8ff00", initialDraft = "" }) {
   const [msgs, setMsgs] = useState(null);   // null = loading
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft);
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef(null);
+  // A drafted nudge/follow-up handed in from the dashboard drops into the composer.
+  useEffect(() => { if (initialDraft) setDraft(initialDraft); }, [initialDraft]);
 
   const load = useCallback(async () => {
     const t = await fetchThread(coachId, clientId);
@@ -4000,6 +4008,23 @@ function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8f
           Send
         </button>
       </div>
+    </div>
+  );
+}
+
+// Per-device toggle for message-arrival alerts (used in both Settings screens).
+function MsgNotifyCard({ accent = "#e8ff00" }) {
+  const [on, setOn] = useState(msgNotifyOn());
+  const toggle = () => { const v = !on; setOn(v); try { localStorage.setItem(NOTIFY_KEY, v ? "1" : "0"); } catch { /* private mode */ } };
+  return (
+    <div style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"16px 18px", marginBottom:16, maxWidth:560, display:"flex", alignItems:"center", justifyContent:"space-between", gap:14 }}>
+      <div>
+        <div style={{ color:"#f0f0f8", fontSize:14.5, fontWeight:600, fontFamily:"'DM Sans'", marginBottom:3 }}>💬 Message notifications</div>
+        <div style={{ color:"#9898b8", fontSize:12.5, lineHeight:1.5, maxWidth:380, fontFamily:"'DM Sans'" }}>Get an alert when a new message comes in. Applies to this device.</div>
+      </div>
+      <button onClick={toggle} aria-label="Toggle message notifications" style={{ flexShrink:0, width:52, height:30, borderRadius:15, border:"none", cursor:"pointer", position:"relative", background: on ? accent : "#3a3a52", transition:"background 0.2s" }}>
+        <span style={{ position:"absolute", top:3, left: on ? 25 : 3, width:24, height:24, borderRadius:"50%", background:"#fff", transition:"left 0.2s" }} />
+      </button>
     </div>
   );
 }
@@ -9859,6 +9884,8 @@ function CoachSettings({ coachId, email, coachName, onMyTraining, onClose }) {
         <button onClick={saveBrand} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>{savedBrand ? "Saved ✓" : "Save branding"}</button>
       </div>
 
+      <MsgNotifyCard />
+
       <div style={card}>
         <div style={{ ...S.inputLabel, marginBottom:10 }}>Monthly financial goal</div>
         <div style={{ fontSize:13, color:C.muted, lineHeight:1.55, marginBottom:12 }}>
@@ -9912,14 +9939,31 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
     setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setSettings(st); setMonthSessions(sess); setUnreadMap(um); setLoading(false);
   }, [uid]);
   useEffect(() => { load(); }, [load]);
-  // Keep the message badges fresh while the dashboard sits open.
+  // Keep the message badges fresh while the dashboard sits open, and raise a
+  // foreground alert when a client's new message arrives (per-device pref).
+  const [msgAlert, setMsgAlert] = useState(null);
+  const prevUnreadTotalRef = useRef(null);
   useEffect(() => {
     if (!uid) return;
-    const iv = setInterval(async () => setUnreadMap(await unreadByClient(uid)), 60000);
+    const tick = async () => {
+      const um = await unreadByClient(uid);
+      const total = Object.values(um).reduce((s, n) => s + n, 0);
+      if (prevUnreadTotalRef.current != null && total > prevUnreadTotalRef.current && msgNotifyOn()) {
+        setMsgAlert("💬 New message from a client");
+        setTimeout(() => setMsgAlert(null), 6000);
+      }
+      prevUnreadTotalRef.current = total;
+      setUnreadMap(um);
+    };
+    const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
   }, [uid]);
 
-  const openClient = async (id) => { setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
+  const [chatPrefill, setChatPrefill] = useState("");   // draft text to drop into the in-app chat when opening a client
+  const openClient = async (id, prefill = "") => { setChatPrefill(prefill); setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
+  // Jump straight to the in-app conversation with a client, optionally pre-filling
+  // a drafted message (from an at-risk nudge or a follow-up). Keeps chat IN the app.
+  const openClientChat = (id, prefill = "") => { setSection("clients"); openClient(id, prefill); };
 
   // Resolve an at-risk client: record the outcome (+ note), update the roster locally so
   // they fall off the queue immediately. 'lost' removes them from the roster entirely.
@@ -10035,6 +10079,11 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   return (
     <div style={{ position:"relative" }}>
       <style>{GLOBAL_CSS + COACH_CSS}</style>
+      {msgAlert && (
+        <button onClick={()=>{ setMsgAlert(null); setSelected(null); setSection("clients"); }} style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:600, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"11px 18px", color:"#e8ff00", fontWeight:700, fontSize:14, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", cursor:"pointer" }}>
+          {msgAlert} — open Clients
+        </button>
+      )}
       <div aria-hidden="true" className="coach-wm-base" />
       <img aria-hidden="true" src={WATERMARK_SRC} className="coach-wm-img" alt="" />
 
@@ -10213,9 +10262,12 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                           <span style={{ color:C.red, fontSize:F(12.5), marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
                         </div>
                         <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                          <button onClick={()=>openClientChat(c.id, checkInMsg(c))} style={{ background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"7px 13px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>
+                            💬 Message
+                          </button>
                           {href && (
-                            <a href={href} style={{ textDecoration:"none", background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"7px 13px", fontSize:F(12.5), fontWeight:700, textAlign:"center", ...(isMobile ? { flex:1 } : {}) }}>
-                              {c.phone ? "💬 Text" : "✉ Email"}
+                            <a href={href} title="Text their phone (for clients who've stopped opening the app)" style={{ textDecoration:"none", background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"7px 11px", fontSize:F(12.5), textAlign:"center", ...(isMobile ? { flex:1 } : {}) }}>
+                              {c.phone ? "Text phone" : "Email"}
                             </a>
                           )}
                           <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"7px 11px", fontSize:F(12.5), cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Open</button>
@@ -10278,8 +10330,8 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           )}
           {section==="clients" && selected && (
             <CoachClientView coachId={uid} clientId={selected} detail={detail} loading={detailLoading}
-              clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load}
-              onBack={()=>{ setSelected(null); setDetail(null); }} />
+              clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load} msgPrefill={chatPrefill}
+              onBack={()=>{ setSelected(null); setDetail(null); setChatPrefill(""); }} />
           )}
 
           {/* FOLLOW-UPS */}
@@ -10304,7 +10356,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                         <textarea value={msg} onChange={e=>setFuMsg(p=>({ ...p, [key]:e.target.value }))} rows={2}
                           style={{ width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13.5, fontFamily:"'DM Sans'", outline:"none", resize:"vertical", lineHeight:1.5 }} />
                         <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
-                          <a href={`sms:?&body=${encodeURIComponent(msg)}`} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", textDecoration:"none", padding:"7px 14px" }}>Text</a>
+                          <button onClick={()=>openClientChat(f.clientId, msg)} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", padding:"7px 14px" }}>💬 Message</button>
                           <button onClick={()=>navigator.clipboard?.writeText(msg)} style={{ ...S.btnSec, padding:"7px 12px" }}>Copy</button>
                           <button onClick={()=>setFuDone(p=>({ ...p, [key]:true }))} style={{ ...S.btnSec, padding:"7px 12px" }}>Done</button>
                         </div>
@@ -10855,7 +10907,10 @@ function CoachCuesEditor({ coachId, clientId }) {
   );
 }
 
-function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved }) {
+function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved, msgPrefill }) {
+  const msgCardRef = useRef(null);
+  // Opened from an at-risk nudge / follow-up "Message" → jump to the thread.
+  useEffect(() => { if (msgPrefill && msgCardRef.current) msgCardRef.current.scrollIntoView({ behavior:"smooth", block:"center" }); }, [msgPrefill, clientId]);
   const [fee, setFee] = useState(clientFee == null ? "" : String(clientFee));
   const [feeSaved, setFeeSaved] = useState(false);
   useEffect(() => { setFee(clientFee == null ? "" : String(clientFee)); }, [clientFee, clientId]);
@@ -11263,9 +11318,9 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
 
       {/* In-app chat — lands in the client's app (MESSAGES), and the AI voice coach
           reads the recent thread so it coaches in line with what you tell them. */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+      <div ref={msgCardRef} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
         <div style={{ ...S.inputLabel, marginBottom:10 }}>Messages</div>
-        <ChatThread coachId={coachId} clientId={clientId} meRole="coach" />
+        <ChatThread coachId={coachId} clientId={clientId} meRole="coach" initialDraft={msgPrefill} />
       </div>
 
       <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
@@ -11396,6 +11451,7 @@ export default function BodyMorph() {
   const [unreadMsgs, setUnreadMsgs] = useState(0);
   const [coachThread, setCoachThread] = useState([]);
   const inChat = phase === "chat";
+  const prevUnreadRef = useRef(null);   // null until first read, so we don't toast pre-existing unread on open
   useEffect(() => {
     if (!hasBackend || !user?.id) { setMyCoach(null); setUnreadMsgs(0); setCoachThread([]); return; }
     let on = true;
@@ -11406,6 +11462,12 @@ export default function BodyMorph() {
       if (!cid) { setUnreadMsgs(0); setCoachThread([]); return; }
       const [n, t] = await Promise.all([unreadForClient(user.id), fetchThread(cid, user.id, 30)]);
       if (!on) return;
+      // A NEW message arrived while the app is open → foreground alert (if allowed).
+      if (prevUnreadRef.current != null && n > prevUnreadRef.current && !inChat && msgNotifyOn() && (typeof document === "undefined" || document.visibilityState === "visible")) {
+        setToast({ kind:"msg", title: coachBrand?.brand_name ? coachBrand.brand_name : "New message", body: "Your coach sent you a message — tap to read" });
+        setTimeout(() => setToast(t => (t && t.kind === "msg") ? null : t), 5000);
+      }
+      prevUnreadRef.current = n;
       setUnreadMsgs(n); setCoachThread(t);
     };
     refresh();
@@ -12062,15 +12124,27 @@ export default function BodyMorph() {
   };
 
   // Medal toast (rendered above everything)
-  const Toast = () => toast ? (
-    <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease" }}>
-      <span style={{ fontSize:30 }}>{toast.emoji}</span>
-      <div>
-        <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1 }}>MEDAL UNLOCKED</div>
-        <div style={{ fontSize:14, fontWeight:600 }}>{toast.label} &middot; +{toast.coins} coins</div>
+  const Toast = () => {
+    if (!toast) return null;
+    if (toast.kind === "msg") return (
+      <button onClick={()=>{ setToast(null); if (myCoach) setPhase("chat"); }} style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease", cursor:"pointer", maxWidth:"90%", textAlign:"left" }}>
+        <span style={{ fontSize:26 }}>💬</span>
+        <div>
+          <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1 }}>{toast.title}</div>
+          <div style={{ fontSize:13, color:"#c8c8e0" }}>{toast.body}</div>
+        </div>
+      </button>
+    );
+    return (
+      <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease" }}>
+        <span style={{ fontSize:30 }}>{toast.emoji}</span>
+        <div>
+          <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1 }}>MEDAL UNLOCKED</div>
+          <div style={{ fontSize:14, fontWeight:600 }}>{toast.label} &middot; +{toast.coins} coins</div>
+        </div>
       </div>
-    </div>
-  ) : null;
+    );
+  };
 
   // ── Persistent voice coach: ONE instance that survives screen changes. The
   // companion you start at home keeps talking and automatically switches into
