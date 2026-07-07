@@ -10142,8 +10142,11 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:"none", color:C.text, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
                 {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
               </button>
-              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:"none", color:"#e8ff00", padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
-                MESSAGES{unreadTotal > 0 ? ` (${unreadTotal})` : ""}
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:"none", color:"#e8ff00", padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center", position:"relative" }}>
+                MESSAGES
+                {unreadTotal > 0 && (
+                  <span aria-label={`${unreadTotal} unread`} style={{ position:"absolute", top:10, right:2, width:10, height:10, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.9)" }} />
+                )}
               </button>
             </div>
             {mobileMenu && (
@@ -10156,7 +10159,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 ))}
               </div>
             )}
-            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"#e8ff00", color:"#000", border:"none", borderRadius:10, padding:"14px", fontSize:23, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite client</button>
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"rgba(232,255,0,0.14)", color:"#e8ff00", border:"2px solid #e8ff00", borderRadius:10, padding:"14px", fontSize:28, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite Client</button>
             {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
             <div style={{ textAlign:"center", marginTop:16 }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
