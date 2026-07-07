@@ -14,6 +14,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
   pushHealthSummary, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
+import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt } from "./messaging";
 import { syncHealth, healthInsights, healthDaily } from "./healthkit";
 
 const C = {
@@ -3696,7 +3697,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
   );
 }
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand }) {
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3774,6 +3775,13 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       {/* Greeting */}
       <div style={{ padding:"6px 0 0" }}>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>Welcome back, <span style={{ color:accent }}>{profile.name}</span></div>
+        {unreadMsgs > 0 && onMessages && (
+          <button onClick={onMessages} style={{ width:"100%", marginTop:10, background:"rgba(232,255,0,0.08)", border:`1px solid ${accent}`, borderRadius:12, color:"#f0f0f8", padding:"12px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10, textAlign:"left" }}>
+            <span style={{ fontSize:20, lineHeight:1 }}>💬</span>
+            <span style={{ flex:1, fontSize:14 }}>Your coach sent you {unreadMsgs > 1 ? `${unreadMsgs} messages` : "a message"} — tap to read</span>
+            <span style={{ color:accent, fontSize:18 }}>›</span>
+          </button>
+        )}
       </div>
 
       {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
@@ -3875,9 +3883,10 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
 // ── MENU PAGE ─────────────────────────────────────────────────────────────────
 // Full-page list of every action, reached from the dashboard's MENU button.
-function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary }) {
+function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary, onMessages, unreadMsgs }) {
   const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const items = [
+    ...(onMessages ? [[`MESSAGES${unreadMsgs ? ` (${unreadMsgs} NEW)` : ""}`, <span style={{ fontSize:20, lineHeight:1 }}>💬</span>, unreadMsgs ? accent : "#f0f0f8", onMessages]] : []),
     ["TO DO DAILY",        <IconToDo color="#3ddc84" />,    "#3ddc84", onCalendar],
     ["TRAINING",           <IconTraining color={accent} />, accent,    onTrainingWeek],
     ["CARDIO",             <IconCardio />,                  "#f0f0f8", onCardio],
@@ -3904,6 +3913,92 @@ function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStr
             <span style={{ color:"#4a4a6a", fontSize:20 }}>&#8250;</span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── IN-APP COACH↔CLIENT CHAT ────────────────────────────────────────────────
+// One shared thread component for both sides: the coach uses it inside the
+// client detail view, the client in their MESSAGES screen. Realtime + 15s poll.
+function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8ff00" }) {
+  const [msgs, setMsgs] = useState(null);   // null = loading
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef(null);
+
+  const load = useCallback(async () => {
+    const t = await fetchThread(coachId, clientId);
+    setMsgs(prev => {
+      // Keep any optimistic rows the fetch hasn't caught up to yet.
+      if (!prev) return t;
+      const ids = new Set(t.map(m => m.id));
+      return [...t, ...prev.filter(m => !ids.has(m.id))];
+    });
+    markThreadRead(coachId, clientId, meRole);
+  }, [coachId, clientId, meRole]);
+
+  useEffect(() => {
+    if (!coachId || !clientId) return;
+    load();
+    const unsub = subscribeThread(coachId, clientId, (row) => {
+      setMsgs(prev => (prev || []).some(m => m.id === row.id) ? prev : [...(prev || []), row]);
+      markThreadRead(coachId, clientId, meRole);
+    });
+    const poll = setInterval(load, 15000);
+    return () => { unsub(); clearInterval(poll); };
+  }, [coachId, clientId, meRole, load]);
+
+  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs?.length]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true); setDraft("");
+    const row = await sendMessage(coachId, clientId, meRole, text);
+    setBusy(false);
+    if (row) setMsgs(prev => (prev || []).some(m => m.id === row.id) ? prev : [...(prev || []), row]);
+    else setDraft(text);   // send failed — give them their words back
+  };
+
+  const when = (iso) => {
+    const d = new Date(iso), now = new Date();
+    const t = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return d.toDateString() === now.toDateString() ? t : `${d.toLocaleDateString(undefined,{month:"short",day:"numeric"})} ${t}`;
+  };
+
+  if (!coachId || !clientId) return null;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", minHeight:120 }}>
+      <div ref={scrollRef} style={{ overflowY:"auto", maxHeight, display:"flex", flexDirection:"column", gap:8, paddingRight:4 }}>
+        {msgs === null && <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", padding:16 }}>Loading…</div>}
+        {msgs !== null && msgs.length === 0 && (
+          <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", padding:16 }}>
+            {meRole === "coach" ? "No messages yet — say hello. Your client reads this inside their app." : "No messages yet — your coach is on the other end of this thread."}
+          </div>
+        )}
+        {(msgs || []).map(m => {
+          const mine = m.sender === meRole;
+          return (
+            <div key={m.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth:"82%" }}>
+              <div style={{ background: mine ? accent : "#1a1a26", color: mine ? "#0a0a0f" : "#f0f0f8",
+                border: mine ? "none" : "1px solid #2a2a3d", borderRadius: mine ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                padding:"9px 12px", fontSize:14, lineHeight:1.45, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>
+                {m.body}
+              </div>
+              <div style={{ fontSize:10, color:"#74748a", marginTop:2, textAlign: mine ? "right" : "left" }}>{when(m.created_at)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display:"flex", gap:8, marginTop:10 }}>
+        <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={1} placeholder="Type a message…"
+          onKeyDown={e=>{ if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          style={{ flex:1, resize:"none", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"10px 12px", fontSize:14, outline:"none", fontFamily:"inherit", lineHeight:1.4 }} />
+        <button onClick={send} disabled={busy || !draft.trim()}
+          style={{ background:accent, color:"#0a0a0f", border:"none", borderRadius:10, padding:"0 18px", fontWeight:700, fontSize:14, cursor:"pointer", opacity:(busy || !draft.trim())?0.5:1 }}>
+          Send
+        </button>
       </div>
     </div>
   );
@@ -4215,6 +4310,9 @@ ${resumeAt
 ${PERSONA}
 
 CONTEXT: It's ${cd.timeOfDay||"day"} (hour ${cd.hour}). ${profile.name} — goal: ${profile.goal || "general fitness"}, activity: ${profile.activityLevel || "moderate"}, fitness: ${profile.fitnessLevel || "intermediate"}. (Low/sedentary activity means steps don't add up on their own — help them plan a deliberate walk.)
+${cd.coachMsgs ? `
+RECENT IN-APP MESSAGES WITH THEIR HUMAN COACH (context only — their human coach LEADS; never contradict or override what the coach told them, and work the coach's instructions into your coaching where they apply, e.g. an injury mentioned → adapt today's plan):
+${cd.coachMsgs}` : ""}
 ${mealPlanStr ? `
 MEAL PLAN TODAY (their real saved plan — USE it; never say you can't see it):
 ${mealPlanStr}
@@ -9807,12 +9905,19 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   const [settings, setSettings] = useState({ inperson_rate:75, consulting_fee:105, monthly_goal:0 });
   const [monthSessions, setMonthSessions] = useState([]);
 
+  const [unreadMap, setUnreadMap] = useState({});   // clientId → unread in-app messages
   const load = useCallback(async () => {
     if (!uid) return;
-    const [ros, pros, inv, fu, st, sess] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid), detectFollowups(uid), fetchSettings(uid), listSessionsThisMonth(uid)]);
-    setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setSettings(st); setMonthSessions(sess); setLoading(false);
+    const [ros, pros, inv, fu, st, sess, um] = await Promise.all([fetchRoster(uid), listProspects(uid), listClientInvites(uid), detectFollowups(uid), fetchSettings(uid), listSessionsThisMonth(uid), unreadByClient(uid)]);
+    setRoster(ros); setProspects(pros); setInvites(inv); setFollowups(fu); setSettings(st); setMonthSessions(sess); setUnreadMap(um); setLoading(false);
   }, [uid]);
   useEffect(() => { load(); }, [load]);
+  // Keep the message badges fresh while the dashboard sits open.
+  useEffect(() => {
+    if (!uid) return;
+    const iv = setInterval(async () => setUnreadMap(await unreadByClient(uid)), 60000);
+    return () => clearInterval(iv);
+  }, [uid]);
 
   const openClient = async (id) => { setSelected(id); setDetail(null); setDetailLoading(true); setDetail(await fetchClientDetail(id)); setDetailLoading(false); };
 
@@ -10155,7 +10260,12 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                   <tbody>
                     {filteredRoster.map(c => (
                       <tr key={c.id} className="clk" onClick={()=>openClient(c.id)}>
-                        <td style={{ fontWeight:600 }}>{c.name}</td>
+                        <td style={{ fontWeight:600 }}>
+                          {c.name}
+                          {unreadMap[c.id] > 0 && (
+                            <span style={{ marginLeft:8, background:"#e8ff00", color:"#0a0a0f", borderRadius:10, padding:"1px 8px", fontSize:11, fontWeight:700, verticalAlign:"middle" }}>💬 {unreadMap[c.id]}</span>
+                          )}
+                        </td>
                         <td style={{ color:C.muted }}>{c.lastActive || "—"}</td>
                         <td>{c.weight != null ? `${c.weight} lb` : "—"}</td>
                         <td style={{ color: c.weightTrend==null?C.muted : c.weightTrend<0?C.green:C.blue }}>{c.weightTrend==null?"—":`${c.weightTrend<0?"▼":"▲"} ${Math.abs(c.weightTrend)} lb`}</td>
@@ -11151,6 +11261,13 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
         <Stat label="Coins" value={detail.rewards?.coins || 0} />
       </div>
 
+      {/* In-app chat — lands in the client's app (MESSAGES), and the AI voice coach
+          reads the recent thread so it coaches in line with what you tell them. */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+        <div style={{ ...S.inputLabel, marginBottom:10 }}>Messages</div>
+        <ChatThread coachId={coachId} clientId={clientId} meRole="coach" />
+      </div>
+
       <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
 
       <CoachCuesEditor coachId={coachId} clientId={clientId} />
@@ -11271,6 +11388,32 @@ export default function BodyMorph() {
     fetchMyCoachBranding(user.id).then(b => { if (!on) return; setCoachBrand(b); Store.set(BRAND_KEY, b); });
     return () => { on = false; };
   }, [user?.id]);
+
+  // In-app chat with my coach: who they are, what's unread, and the recent thread.
+  // The thread also feeds the AI voice coach's context, so the human coach and the
+  // AI coach never contradict each other.
+  const [myCoach, setMyCoach] = useState(null);
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+  const [coachThread, setCoachThread] = useState([]);
+  const inChat = phase === "chat";
+  useEffect(() => {
+    if (!hasBackend || !user?.id) { setMyCoach(null); setUnreadMsgs(0); setCoachThread([]); return; }
+    let on = true;
+    const refresh = async () => {
+      const cid = await myCoachId(user.id);
+      if (!on) return;
+      setMyCoach(cid);
+      if (!cid) { setUnreadMsgs(0); setCoachThread([]); return; }
+      const [n, t] = await Promise.all([unreadForClient(user.id), fetchThread(cid, user.id, 30)]);
+      if (!on) return;
+      setUnreadMsgs(n); setCoachThread(t);
+    };
+    refresh();
+    const iv = setInterval(refresh, 60000);
+    const onVis = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { on = false; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [user?.id, inChat]);
 
   // Load all saved data from storage, then route to home (has profile) or wizard.
   // Extracted so it can run on first mount AND after a sign-in.
@@ -12043,8 +12186,9 @@ export default function BodyMorph() {
       workout: todayWorkout ? { type: todayWorkout.type, focus: todayWorkout.focus, count: (todayWorkout.workout||[]).length, done: workoutDone } : null,
       cardio: { planned: cardioLbl || null, done: cardioDone },
       todos,
+      coachMsgs: threadForPrompt(coachThread),   // recent in-app chat with their human coach
     };
-  }, [profile, foodLog, dietPref, program, logs, cardioSessions, cardioPlan, supplements, peptides, todoChecked, hydration, stepEntries, sleepEntries, mealPlan]);
+  }, [profile, foodLog, dietPref, program, logs, cardioSessions, cardioPlan, supplements, peptides, todoChecked, hydration, stepEntries, sleepEntries, mealPlan, coachThread]);
   const voiceCoachEl = homeVoice ? (
     <VoiceCoach
       profile={profile}
@@ -12096,12 +12240,27 @@ export default function BodyMorph() {
         onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} sleepEntries={sleepEntries} onSaveSleep={setSleepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
-        onMenu={()=>setPhase("menu")} brand={coachBrand}
+        onMenu={()=>setPhase("menu")} brand={coachBrand} unreadMsgs={unreadMsgs} onMessages={myCoach ? ()=>setPhase("chat") : null}
         onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
 
-  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} /></>);
+  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} onMessages={myCoach ? ()=>setPhase("chat") : null} unreadMsgs={unreadMsgs} /></>);
+  if (phase === "chat") return (
+    <><Toast />
+      <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
+        <style>{GLOBAL_CSS}</style><WatermarkPlain />
+        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 0 12px" }}>
+          <button onClick={()=>setPhase("home")} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1 }}>{(coachBrand?.brand_name || "YOUR COACH").toUpperCase()}</div>
+        </div>
+        <div style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 14px" }}>
+          <ChatThread coachId={myCoach} clientId={user?.id} meRole="client" maxHeight={Math.max(260, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)} />
+        </div>
+        <div style={{ fontSize:11.5, color:"#74748a", marginTop:10, lineHeight:1.5, textAlign:"center" }}>Messages go straight to your coach inside BodyMorph. Your AI coach reads them too, so your voice sessions stay in sync with what your coach tells you.</div>
+      </div>
+    </>
+  );
 
   if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
 
