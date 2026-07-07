@@ -4,7 +4,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy } from "./aiproxy";
-import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary,
+import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
   computeFinancials, fetchEvaluation, saveEvaluation, generateEvaluation,
@@ -5815,29 +5815,20 @@ function BodyProgress({ entries, onAdd, onDelete, userId }) {
 // ── PROGRESS CHARTS ──────────────────────────────────────────────────────────
 // Six charts: Bodyweight, Body Fat%, Lean Mass, Strength, Weekly Volume, Cardio Minutes
 // Time intervals: 1W, 1M, 3M, 6M, 1Y
-function ProgressCharts({ logs, bodyEntries, cardioSessions, watchDaily }) {
-  const [interval, setInterval] = useState("3M");
-  const [selectedEx, setSelectedEx] = useState(Object.keys(logs)[0] || null);
+// ── Shared trend-chart primitives (client Progress charts + the coach's Weekly Report) ──
+const fmtChartDate = (d) => {
+  if (!d) return "";
+  const dt = new Date(d+"T00:00:00");
+  return isNaN(dt) ? d : dt.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+};
+const chartWeekKey = (d) => {
+  const dt = new Date(d+"T00:00:00");
+  const sun = new Date(dt); sun.setDate(dt.getDate()-dt.getDay());
+  return ymdLocal(sun);
+};
 
-  const INTERVALS = [["1W",7],["1M",30],["3M",90],["6M",180],["1Y",365]];
-  const days = INTERVALS.find(i=>i[0]===interval)?.[1] || 90;
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
-  const after = (d) => d && new Date(d+"T00:00:00") >= cutoff;
-
-  // ── Helpers ──
-  const fmtDate = (d) => {
-    if (!d) return "";
-    const dt = new Date(d+"T00:00:00");
-    return isNaN(dt) ? d : dt.toLocaleDateString(undefined,{month:"short",day:"numeric"});
-  };
-  const weekKey = (d) => {
-    const dt = new Date(d+"T00:00:00");
-    const sun = new Date(dt); sun.setDate(dt.getDate()-dt.getDay());
-    return ymdLocal(sun);
-  };
-
-  // ── SVG Line Chart ──
-  const LineChart = ({ points, color="#e8ff00", label="", unit="", goalLine=null, lowerBetter=false }) => {
+// ── SVG Line Chart (module-scoped so the coach's Weekly Report reuses it) ──
+const TrendLineChart = ({ points, color="#e8ff00", label="", unit="", goalLine=null, lowerBetter=false }) => {
     if (!points || points.length < 2) return (
       <div style={{ padding:20, textAlign:"center", color:"#9898b8", fontSize:13 }}>
         {points && points.length === 1 ? `${points[0].v}${unit} — need more days to see a trend` : "No data for this period"}
@@ -5871,15 +5862,15 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions, watchDaily }) {
           <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
           {points.map((p,i) => <circle key={i} cx={x(i)} cy={y(p.v)} r="3.5" fill={color}/>)}
           {[0, Math.floor(points.length/2), points.length-1].map(i => (
-            <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="9" fill="#9898b8" fontFamily="Oswald">{fmtDate(points[i].d)}</text>
+            <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="9" fill="#9898b8" fontFamily="Oswald">{fmtChartDate(points[i].d)}</text>
           ))}
         </svg>
       </div>
     );
   };
 
-  // ── SVG Bar Chart ──
-  const BarChart = ({ bars, color="#3d8eff", label="", unit="" }) => {
+// ── SVG Bar Chart (module-scoped, same reuse) ──
+const TrendBarChart = ({ bars, color="#3d8eff", label="", unit="" }) => {
     if (!bars || bars.length === 0) return <div style={{ padding:20, textAlign:"center", color:"#9898b8", fontSize:13 }}>No data for this period</div>;
     const W=320,H=140,pL=38,pR=12,pT=14,pB=26;
     const maxV = Math.max(...bars.map(b=>b.v),1);
@@ -5898,12 +5889,27 @@ function ProgressCharts({ logs, bodyEntries, cardioSessions, watchDaily }) {
             const bh = (b.v/maxV)*ph;
             const bx = pL + i*gap + gap/2 - bw/2;
             const by = pT+ph-bh;
-            return <g key={i}><rect x={bx} y={by} width={bw} height={bh} fill={color} rx="2"/><text x={bx+bw/2} y={H-8} textAnchor="middle" fontSize="8" fill="#9898b8" fontFamily="Oswald">{fmtDate(b.d)}</text></g>;
+            return <g key={i}><rect x={bx} y={by} width={bw} height={bh} fill={color} rx="2"/><text x={bx+bw/2} y={H-8} textAnchor="middle" fontSize="8" fill="#9898b8" fontFamily="Oswald">{fmtChartDate(b.d)}</text></g>;
           })}
         </svg>
       </div>
     );
-  };
+};
+
+function ProgressCharts({ logs, bodyEntries, cardioSessions, watchDaily }) {
+  const [interval, setInterval] = useState("3M");
+  const [selectedEx, setSelectedEx] = useState(Object.keys(logs)[0] || null);
+
+  const INTERVALS = [["1W",7],["1M",30],["3M",90],["6M",180],["1Y",365]];
+  const days = INTERVALS.find(i=>i[0]===interval)?.[1] || 90;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+  const after = (d) => d && new Date(d+"T00:00:00") >= cutoff;
+
+  // Shared module-level chart pieces, local names kept so the JSX below reads the same
+  const fmtDate = fmtChartDate;
+  const weekKey = chartWeekKey;
+  const LineChart = TrendLineChart;
+  const BarChart = TrendBarChart;
 
   // ── Data prep ──
   const bodyFiltered = (bodyEntries||[]).filter(e=>after(e.date)).sort((a,b)=>a.date>b.date?1:-1);
@@ -10612,8 +10618,9 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
     const res = await generateClientSummary(detail);
     setGenBusy(false);
     if (res.error) { setGenErr(res.error); return; }
-    setSummary({ summary: res.text, generated_at: new Date().toISOString() });
-    saveClientSummary(coachId, clientId, res.text);   // cache (best-effort)
+    const payload = JSON.stringify({ v: 2, report: res.report });   // versioned — parseSummary handles old prose rows
+    setSummary({ summary: payload, generated_at: new Date().toISOString() });
+    saveClientSummary(coachId, clientId, payload);   // cache (best-effort)
   };
   const Back = () => (
     <button onClick={onBack} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
@@ -10787,24 +10794,111 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
         <button onClick={saveFee} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5 }}>{feeSaved ? "Saved ✓" : "Save"}</button>
       </div>
 
-      {/* AI weekly briefing */}
-      <div style={{ background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.25)", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
-          <div style={{ ...S.inputLabel, marginBottom:0 }}>Weekly briefing</div>
-          <button onClick={generate} disabled={genBusy} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5, opacity:genBusy?0.6:1 }}>
-            {genBusy ? "Generating…" : (summary ? "Refresh" : "Generate")}
-          </button>
-        </div>
-        {genErr && <div style={{ color:C.red, fontSize:12.5, marginBottom:6 }}>{genErr}</div>}
-        {summary?.summary ? (
-          <>
-            <div style={{ fontSize:14, color:C.text, lineHeight:1.6 }}>{summary.summary}</div>
-            <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Generated {new Date(summary.generated_at).toLocaleDateString()}</div>
-          </>
-        ) : (
-          <div style={{ fontSize:13, color:C.muted }}>No briefing yet — tap Generate for an AI summary of this client's week.</div>
-        )}
-      </div>
+      {/* ── WEEKLY REPORT — the full coach briefing: AI headline/highlights/watchouts/
+          adjustments + trend charts over everything the app collects. ── */}
+      {(() => {
+        const brief = parseSummary(summary);
+        const rpt = brief?.report || null;
+
+        // Chart data — same shapes the client-side trend charts use ({d,v}).
+        const d14 = ymdLocal(new Date(Date.now() - 13 * 86400000));
+        const d56 = ymdLocal(new Date(Date.now() - 55 * 86400000));
+        const weeklyAvg = (arr) => {   // {d,v}[] → weekly averages, sorted
+          const b = {};
+          arr.forEach(p => { const w = chartWeekKey(p.d); (b[w] = b[w] || []).push(p.v); });
+          return Object.keys(b).sort().map(w => ({ d: w, v: Math.round((b[w].reduce((s,v)=>s+v,0)/b[w].length)*10)/10 }));
+        };
+        const weightPts = weeklyAvg((detail.bodyEntries||[]).filter(e => e.weight && e.date >= d56).map(e => ({ d: e.date, v: +e.weight })));
+        const trainBars = (() => {
+          const b = {};
+          (detail.workoutDays||[]).filter(d => d >= d56).forEach(d => { const w = chartWeekKey(d); b[w] = (b[w]||0)+1; });
+          return Object.keys(b).sort().map(w => ({ d: w, v: b[w] }));
+        })();
+        const stepBars = (detail.stepEntries||[]).filter(e => e.date >= d14 && e.steps > 0).sort((a,b)=>a.date<b.date?-1:1).map(e => ({ d: e.date, v: e.steps }));
+        const calBars = (detail.foodDays||[]).filter(f => f.date >= d14 && f.cal > 0).sort((a,b)=>a.date<b.date?-1:1).map(f => ({ d: f.date, v: Math.round(f.cal) }));
+        const wd = detail.watch?.daily;   // synced ~90-day watch history (null = no watch)
+        const sleepSrc = (wd?.sleep?.length ? wd.sleep.map(s => ({ d: s.day, v: s.hours })) : (detail.sleepEntries||[]).map(e => ({ d: e.date, v: +e.hours })))
+          .filter(p => p.v > 0 && p.d >= d14).sort((a,b)=>a.d<b.d?-1:1);
+        const rhrRaw = (wd?.metrics||[]).filter(m => m.restingHR > 0).map(m => ({ d: m.day, v: m.restingHR })).sort((a,b)=>a.d<b.d?-1:1);
+        const rhrPts = rhrRaw.length > 30 ? weeklyAvg(rhrRaw) : rhrRaw;
+        const actBars = (wd?.metrics||[]).filter(m => m.exerciseMin > 0 && m.day >= d14).map(m => ({ d: m.day, v: m.exerciseMin })).sort((a,b)=>a.d<b.d?-1:1);
+        const goalW = parseFloat(detail.profile?.goalWeight) || null;
+
+        const charts = [
+          weightPts.length >= 2 && ["wt", <TrendLineChart points={weightPts} label="BODYWEIGHT · weekly avg · 8 wk" unit=" lb" color="#e8ff00" goalLine={goalW}
+            lowerBetter={goalW ? goalW < weightPts[0].v : weightPts[weightPts.length-1].v <= weightPts[0].v} />],
+          trainBars.length >= 1 && ["tr", <TrendBarChart bars={trainBars} label="TRAINING DAYS / WEEK · 8 wk" color="#e8ff00" />],
+          calBars.length >= 1 && ["cal", <TrendBarChart bars={calBars} label="CALORIES LOGGED · 14 days" color="#ff9d5c" />],
+          stepBars.length >= 1 && ["st", <TrendBarChart bars={stepBars} label="STEPS · 14 days" color="#3d8eff" />],
+          sleepSrc.length >= 2 && ["sl", <TrendLineChart points={sleepSrc} label="SLEEP HOURS · 14 days" unit="h" color="#9d7bff" />],
+          rhrPts.length >= 2 && ["rhr", <TrendLineChart points={rhrPts} label={`RESTING HR${rhrRaw.length > 30 ? " · weekly avg" : ""} · from watch`} unit=" bpm" color="#ff7070" lowerBetter />],
+          actBars.length >= 1 && ["act", <TrendBarChart bars={actBars} label="ACTIVE MINUTES · 14 days · from watch" color="#3ddc84" />],
+        ].filter(Boolean);
+
+        const AREA_COLORS = { training: "#e8ff00", nutrition: "#ff9d5c", recovery: "#9d7bff", engagement: "#3d8eff" };
+        return (
+          <div style={{ background:"rgba(232,255,0,0.06)", border:"1px solid rgba(232,255,0,0.25)", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:20, letterSpacing:1 }}>WEEKLY REPORT</div>
+              <button onClick={generate} disabled={genBusy} style={{ ...S.btnSec, padding:"5px 11px", fontSize:12.5, opacity:genBusy?0.6:1 }}>
+                {genBusy ? "Generating…" : (summary ? "Refresh" : "Generate")}
+              </button>
+            </div>
+            {genErr && <div style={{ color:C.red, fontSize:12.5, marginBottom:6 }}>{genErr}</div>}
+
+            {rpt ? (
+              <>
+                <div style={{ fontSize:15.5, fontWeight:700, color:C.text, lineHeight:1.45, marginBottom:10 }}>{rpt.headline}</div>
+                {(rpt.highlights||[]).length > 0 && (
+                  <div style={{ marginBottom:10 }}>
+                    {(rpt.highlights||[]).map((h,i) => (
+                      <div key={i} style={{ display:"flex", gap:8, fontSize:13.5, color:C.text, lineHeight:1.55, marginBottom:3 }}>
+                        <span style={{ color:C.green, flexShrink:0 }}>✔</span><span>{h}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(rpt.watchouts||[]).length > 0 && (
+                  <div style={{ marginBottom:10 }}>
+                    {(rpt.watchouts||[]).map((h,i) => (
+                      <div key={i} style={{ display:"flex", gap:8, fontSize:13.5, color:C.text, lineHeight:1.55, marginBottom:3 }}>
+                        <span style={{ color:"#ff9d5c", flexShrink:0 }}>⚠</span><span>{h}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(rpt.adjustments||[]).length > 0 && (
+                  <div style={{ marginBottom:4 }}>
+                    <div style={{ ...S.inputLabel, marginBottom:6 }}>Recommended adjustments</div>
+                    {(rpt.adjustments||[]).map((a,i) => (
+                      <div key={i} style={{ background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", marginBottom:6 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                          <span style={{ fontSize:10, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", color:"#0a0a0f", background: AREA_COLORS[a.area] || "#e8ff00", borderRadius:4, padding:"2px 7px" }}>{a.area}</span>
+                          <span style={{ fontSize:13.5, fontWeight:700, color:C.text }}>{a.action}</span>
+                        </div>
+                        <div style={{ fontSize:12.5, color:C.muted, lineHeight:1.5 }}>{a.why}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : brief?.text ? (
+              <div style={{ fontSize:14, color:C.text, lineHeight:1.6 }}>{brief.text}</div>
+            ) : (
+              <div style={{ fontSize:13, color:C.muted }}>No report yet — tap Generate to compile this client's week: highlights, watchouts, and adjustment recommendations from everything the app tracked.</div>
+            )}
+            {brief?.generatedAt && <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Generated {new Date(brief.generatedAt).toLocaleDateString()}</div>}
+
+            {charts.length > 0 && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(270px, 1fr))", gap:10, marginTop:12 }}>
+                {charts.map(([k, node]) => (
+                  <div key={k} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px" }}>{node}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>
         <Stat label="Day streak" value={stats.currentStreak || 0} />
@@ -11222,13 +11316,15 @@ export default function BodyMorph() {
     // coach client-detail week, coach weekly briefing).
     try {
       const insights = await healthInsights();
-      if (insights && userRef.current?.id) {
-        setWatchInsights(insights);
-        pushHealthSummary(userRef.current.id, insights);
-      }
-      // Daily history for the Progress Report trend charts (on-device, not synced).
+      // Daily history: full year for the on-device Progress Report trend charts;
+      // the last ~90 days also ride up with the weekly summary (data.daily) so the
+      // coach's Weekly Report can chart trends without device access.
       const daily = await healthDaily(365);
       if (daily) setWatchDaily(daily);
+      if (insights && userRef.current?.id) {
+        setWatchInsights(insights);
+        pushHealthSummary(userRef.current.id, insights, daily);
+      }
     } catch { /* silent — reports simply omit watch data */ }
   }, []);
   useEffect(() => {

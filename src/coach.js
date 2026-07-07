@@ -195,11 +195,22 @@ export function summarizeWeek(d) {
 }
 
 // ── Weekly watch summaries (health_summaries table) ─────────────────────────────
-// Client side: push this week's computed summary (background, silent).
-export async function pushHealthSummary(userId, insights) {
+// Client side: push this week's computed summary (background, silent). `daily` is the
+// optional raw day-by-day history from healthDaily() — trimmed to ~90 days and stored
+// inside the same row (data.daily) so the coach's Weekly Report can draw trend charts
+// (HealthKit history only exists on the client's device; this is the only way over).
+export async function pushHealthSummary(userId, insights, daily = null) {
   if (!supabase || !userId || !insights) return;
+  const data = { ...insights };
+  if (daily?.metrics?.length || daily?.sleep?.length) {
+    const cut = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    data.daily = {
+      metrics: (daily.metrics || []).filter(d => d.day >= cut),
+      sleep: (daily.sleep || []).filter(d => d.day >= cut),
+    };
+  }
   await supabase.from("health_summaries").upsert(
-    { user_id: userId, week_start: insights.weekStart, data: insights, updated_at: new Date().toISOString() },
+    { user_id: userId, week_start: insights.weekStart, data, updated_at: new Date().toISOString() },
     { onConflict: "user_id,week_start" }
   );
 }
@@ -213,20 +224,95 @@ export async function fetchHealthSummary(userId) {
   return data?.data || null;
 }
 
-// Generate a short coach-facing briefing with Claude (Haiku — cheap, plenty here).
+// Everything the weekly report needs beyond the 7-day snapshot: multi-week trends
+// so the AI (and the coach) can tell a one-off bad week from a slide.
+export function buildReportData(detail) {
+  const week = summarizeWeek(detail);
+  const ymd = (dt) => ymdLocal(dt);
+  const weekOf = (dstr) => { const dt = new Date(dstr + "T00:00:00"); dt.setDate(dt.getDate() - dt.getDay()); return ymd(dt); };
+
+  // Weight: weekly averages over the last 8 weeks.
+  const cut8 = new Date(); cut8.setDate(cut8.getDate() - 56);
+  const w8 = {};
+  (detail.bodyEntries || []).filter(e => e.weight && new Date(e.date + "T00:00:00") >= cut8)
+    .forEach(e => { const wk = weekOf(e.date); (w8[wk] = w8[wk] || []).push(+e.weight); });
+  const weightByWeek = Object.keys(w8).sort().map(wk =>
+    ({ week: wk, avg: +(w8[wk].reduce((s, v) => s + v, 0) / w8[wk].length).toFixed(1) }));
+
+  // Training consistency: workout days per week, last 4 weeks.
+  const cut4 = new Date(); cut4.setDate(cut4.getDate() - 28);
+  const t4 = {};
+  (detail.workoutDays || []).filter(d => new Date(d + "T00:00:00") >= cut4)
+    .forEach(d => { const wk = weekOf(d); t4[wk] = (t4[wk] || 0) + 1; });
+  const workoutsByWeek = Object.keys(t4).sort().map(wk => ({ week: wk, days: t4[wk] }));
+
+  // Nutrition: how many of the last 14 days were logged + 7-day macro averages.
+  const cut14 = ymd(new Date(Date.now() - 13 * 86400000));
+  const food14 = (detail.foodDays || []).filter(f => f.date >= cut14);
+  const cut7 = ymd(new Date(Date.now() - 6 * 86400000));
+  const food7 = food14.filter(f => f.date >= cut7);
+  const avg = (arr, f) => arr.length ? Math.round(arr.reduce((s, x) => s + (+f(x) || 0), 0) / arr.length) : null;
+
+  // Goal context from the signup profile — fitness fields only (no address/PII).
+  const p = detail.profile || {};
+  const goal = {};
+  ["goal", "focus", "days", "time", "pace", "paceMode", "deadlineWeeks", "targetWeight",
+   "goalWeight", "activity", "gender"].forEach(k => { if (p[k] != null && p[k] !== "") goal[k] = p[k]; });
+
+  return {
+    week,
+    goal,
+    weightByWeek,
+    workoutsByWeek,
+    daysFoodLogged14d: food14.length,
+    avgCal7d: avg(food7, f => f.cal),
+    avgProtein7d: avg(food7, f => f.protein),
+    watchPrevWeek: detail.watch ? {
+      restingHRPrev: detail.watch.restingHRPrev, hrvMs: detail.watch.hrvMs, hrvMsPrev: detail.watch.hrvMsPrev,
+      activeKcalPrev: detail.watch.activeKcalPrev, distanceKmPrev: detail.watch.distanceKmPrev,
+      workoutsCountPrev: detail.watch.workoutsCountPrev,
+    } : null,
+  };
+}
+
+// Generate the coach's WEEKLY REPORT briefing — structured JSON (headline, highlights,
+// watchouts, adjustment recommendations) rendered as cards next to the charts.
+// Sonnet: this is the flagship coach deliverable and it has to reason across trends.
 export async function generateClientSummary(detail) {
   if (!USE_PROXY && !ANTHROPIC_KEY) return { error: "No AI key configured." };
-  const w = summarizeWeek(detail);
+  const data = buildReportData(detail);
   const prompt =
-    "You are an assistant to a fitness coach. Write a SHORT briefing (2-3 sentences, plain prose — no greeting, no preamble, no bullet points) about this client's past 7 days, so the coach can skim it before a check-in. Use the actual numbers, note what's going well, and flag the one thing to address.\n\n" +
-    `Client: ${detail.name}\nMetrics: ${JSON.stringify(w)}`;
+    "You are the analyst behind a fitness coach's weekly client report. From the metrics below, return ONLY a JSON object (no markdown fence, no prose around it) with exactly these keys:\n" +
+    '{"headline": "one sentence, the single most important thing about this client\'s week",\n' +
+    ' "highlights": ["2-4 short bullets on what went WELL, each citing a real number"],\n' +
+    ' "watchouts": ["1-3 short bullets on what needs attention, each citing a real number; empty array if the week was clean"],\n' +
+    ' "adjustments": [{"area": "training|nutrition|recovery|engagement", "action": "specific change the coach should make or discuss", "why": "one sentence tying it to the data"}]}\n\n' +
+    "Rules: use ONLY numbers present in the data (never invent values); null/missing means not tracked — skip it, don't call it a problem; a resting heart rate DROP is good; weightByWeek direction should be judged against the stated goal; 1-3 adjustments, ranked most important first; write for a busy coach — punchy and concrete, no hedging.\n\n" +
+    `Client: ${detail.name}\nData: ${JSON.stringify(data)}`;
   try {
-    const res = await anthropicFetch({ model: "claude-haiku-4-5-20251001", max_tokens: 220, messages: [{ role: "user", content: prompt }] });
+    const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 900, messages: [{ role: "user", content: prompt }] });
     if (!res.ok) return { error: `AI error (${res.status})` };
-    const data = await res.json();
-    const text = (data.content?.[0]?.text || "").trim();
-    return text ? { text } : { error: "Empty response" };
+    const body = await res.json();
+    const text = (body.content?.[0]?.text || "").trim();
+    const start = text.indexOf("{"), end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return { error: "Bad AI response" };
+    try {
+      const report = JSON.parse(text.slice(start, end + 1));
+      if (!report.headline) return { error: "Bad AI response" };
+      return { report };
+    } catch { return { error: "Bad AI response" }; }
   } catch (e) { return { error: e.message }; }
+}
+
+// The cached briefing is a JSON string ({v:2, report}) for new reports; older cached
+// rows are plain prose. parseSummary() gives callers one shape for both.
+export function parseSummary(saved) {
+  if (!saved?.summary) return null;
+  try {
+    const obj = JSON.parse(saved.summary);
+    if (obj && obj.v === 2 && obj.report) return { report: obj.report, generatedAt: saved.generated_at };
+  } catch { /* legacy plain-text briefing */ }
+  return { text: saved.summary, generatedAt: saved.generated_at };
 }
 
 // Read / write the cached briefing (no-op without the table / backend).
