@@ -329,6 +329,34 @@ export async function saveClientSummary(coachId, clientId, summary) {
     { onConflict: "coach_id,client_id" });
 }
 
+// ── COACH BRANDING (optional white-label-lite) ───────────────────────────────────
+// Coach side: read/write their branding row. Blank/missing row = default BodyMorph.
+export async function fetchBranding(coachId) {
+  if (!supabase || !coachId) return null;
+  const { data } = await supabase.from("coach_branding")
+    .select("brand_name, logo, accent").eq("coach_id", coachId).maybeSingle();
+  return data || null;
+}
+export async function saveBranding(coachId, { brand_name, logo, accent }) {
+  if (!supabase || !coachId) return false;
+  const { error } = await supabase.from("coach_branding").upsert(
+    { coach_id: coachId, brand_name: brand_name || null, logo: logo || null, accent: accent || null, updated_at: new Date().toISOString() },
+    { onConflict: "coach_id" });
+  if (error) { console.warn("saveBranding:", error.message); return false; }
+  return true;
+}
+// Client side: my coach's branding (RLS lets an active client read it). Null when
+// the client has no coach or the coach hasn't set anything up.
+export async function fetchMyCoachBranding(clientId) {
+  if (!supabase || !clientId) return null;
+  const { data: rel } = await supabase.from("relationships")
+    .select("coach_id").eq("client_id", clientId).eq("status", "active").maybeSingle();
+  if (!rel?.coach_id) return null;
+  const { data } = await supabase.from("coach_branding")
+    .select("brand_name, logo, accent").eq("coach_id", rel.coach_id).maybeSingle();
+  return (data && (data.brand_name || data.logo)) ? data : null;
+}
+
 // ── PROSPECTS (CRM-lite) ─────────────────────────────────────────────────────────
 export const PROSPECT_STAGES = ["lead", "contacted", "trial", "invited", "won", "lost"];
 

@@ -12,7 +12,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
-  pushHealthSummary } from "./coach";
+  pushHealthSummary, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { syncHealth, healthInsights, healthDaily } from "./healthkit";
 
@@ -124,6 +124,7 @@ const MEDAL_KEY   = "bodymorph_medals_v2";
 const BODY_KEY    = "bodymorph_body_v2";
 const CARDIO_KEY  = "bodymorph_cardio_v2";
 const STEPS_KEY   = "bodymorph_steps_v2";
+const BRAND_KEY   = "bodymorph_coach_brand";
 const SLEEP_KEY   = "bodymorph_sleep_v2";
 const MEALPLAN_KEY = "bodymorph_mealplan_v2"; // last AI-generated meal plan (for Program Summary)
 const SUPP_KEY    = "bodymorph_supplements_v2";
@@ -2073,7 +2074,31 @@ const WatermarkPlain = () => (
   </>
 );
 
-const Logo = ({ small, onSettings, align="center" }) => (
+const Logo = ({ small, onSettings, align="center", brand=null }) => brand ? (
+  // Coach-branded header (white-label-lite): their logo + business name, with a
+  // quiet "powered by" line. Settings gear stays where users expect it.
+  <div style={{ lineHeight:1, textAlign:align, position:"relative" }}>
+    {onSettings && (
+      <button onClick={onSettings} aria-label="Settings" style={{ position:"absolute", right:0, top:2, background:"transparent", border:"none", cursor:"pointer", lineHeight:0, padding:"0 2px", zIndex:1 }}>
+        <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#74748a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+    )}
+    {brand.logo && (
+      <img src={brand.logo} alt="" style={{ maxHeight: small?54:84, maxWidth:"70%", objectFit:"contain", display: align==="center"?"block":"inline-block", margin: align==="center"?"0 auto":"0", marginBottom: brand.brand_name ? (small?8:12) : 0 }} />
+    )}
+    {brand.brand_name && (
+      <div style={{ fontFamily:"'Bebas Neue'", fontSize: small?42:60, letterSpacing: small?3:5, lineHeight:1.05, color: brand.accent || "#e8ff00" }}>
+        {brand.brand_name}
+      </div>
+    )}
+    <div style={{ fontFamily:"'DM Sans', sans-serif", fontSize:10, letterSpacing:2, color:"#74748a", marginTop:7, textTransform:"uppercase" }}>
+      Powered by BodyMorph&#8482;
+    </div>
+  </div>
+) : (
   <div style={{ lineHeight:1, textAlign:align, position:"relative" }}>
     <div style={{ fontFamily:"'DM Sans', sans-serif", fontWeight:600, fontSize: small?25:32, letterSpacing: small?4.5:6, color:"#c8c8e0", marginBottom: small?9:24, textTransform:"none", position:"relative", textAlign:"center" }}>
       NTF
@@ -3637,7 +3662,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
   );
 }
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu }) {
+function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3709,7 +3734,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
-        <Logo small onSettings={onSettings} align="left" />
+        <Logo small onSettings={onSettings} align="left" brand={brand} />
       </div>
 
       {/* Greeting */}
@@ -5575,7 +5600,8 @@ const ANGLES = [
   { id:"right", label:"Right" },
 ];
 
-// Compress an uploaded image file to a small base64 JPEG for storage.
+// Compress an uploaded image file to a small base64 image for storage.
+// PNG in → PNG out (keeps logo transparency); everything else → JPEG.
 function compressImage(file, maxDim = 700, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -5589,7 +5615,7 @@ function compressImage(file, maxDim = 700, quality = 0.7) {
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        resolve(file.type === "image/png" ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -9566,11 +9592,15 @@ function CoachSettings({ coachId, email, coachName, onMyTraining, onClose }) {
   const [savedInfo, setSavedInfo] = useState(false);
   const [savedGoal, setSavedGoal] = useState(false);
   const [voiceNote, setVoiceNote] = useState(false);
+  const [brandName, setBrandName] = useState("");
+  const [brandLogo, setBrandLogo] = useState(null);   // small data URI
+  const [brandAccent, setBrandAccent] = useState("#e8ff00");
+  const [savedBrand, setSavedBrand] = useState(false);
 
   useEffect(() => {
     let on = true;
     (async () => {
-      const [p, s] = await Promise.all([fetchCoachProfile(coachId), fetchSettings(coachId)]);
+      const [p, s, b] = await Promise.all([fetchCoachProfile(coachId), fetchSettings(coachId), fetchBranding(coachId)]);
       if (!on) return;
       const parts = (coachName || "").trim().split(/\s+/);
       setFirst(p?.first_name || parts[0] || "");
@@ -9578,12 +9608,23 @@ function CoachSettings({ coachId, email, coachName, onMyTraining, onClose }) {
       setPhone(p?.phone || "");
       setGoal(s?.monthly_goal ? String(s.monthly_goal) : "");
       setVoiceId(s?.voice_id || null);
+      if (b) { setBrandName(b.brand_name || ""); setBrandLogo(b.logo || null); setBrandAccent(b.accent || "#e8ff00"); }
     })();
     return () => { on = false; };
   }, [coachId, coachName]);
 
   const saveInfo = async () => { await updateCoachProfile(coachId, { firstName:first, lastName:last, phone }); setSavedInfo(true); setTimeout(()=>setSavedInfo(false), 1500); };
   const saveGoal = async () => { await saveSettings(coachId, { monthly_goal: parseFloat(goal) || 0 }); setSavedGoal(true); setTimeout(()=>setSavedGoal(false), 1500); };
+  const saveBrand = async () => {
+    await saveBranding(coachId, { brand_name: brandName.trim(), logo: brandLogo, accent: brandAccent });
+    setSavedBrand(true); setTimeout(()=>setSavedBrand(false), 1500);
+  };
+  const pickLogo = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try { setBrandLogo(await compressImage(f, 320, 0.85)); } catch { /* bad file — keep current */ }
+    e.target.value = "";
+  };
 
   const inp = { width:"100%", boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:14, outline:"none" };
   const lbl = { fontSize:11.5, color:C.muted, marginBottom:4, textTransform:"uppercase", letterSpacing:0.5 };
@@ -9640,6 +9681,48 @@ function CoachSettings({ coachId, email, coachName, onMyTraining, onClose }) {
         </div>
         <button onClick={()=>setVoiceNote(true)} style={S.btnSec}>🎙 Record my voice</button>
         {voiceNote && <div style={{ marginTop:10, fontSize:12.5, color:"#e8ff00" }}>Voice recording &amp; cloning is the next feature we're building — it'll live right here.</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{ ...S.inputLabel, marginBottom:10 }}>Your brand on the app</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.55, marginBottom:12 }}>
+          Optional: put <b style={{ color:C.text }}>your business</b> front and center. Your clients open the app to your logo and name (with a small "powered by BodyMorph"). Leave blank for the standard look.
+        </div>
+        <div style={{ marginBottom:10 }}>
+          <div style={lbl}>Business name</div>
+          <input value={brandName} onChange={e=>setBrandName(e.target.value.slice(0,40))} placeholder="e.g. Iron Temple Fitness" style={inp} />
+        </div>
+        <div style={{ marginBottom:10 }}>
+          <div style={lbl}>Logo</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <label style={{ ...S.btnSec, cursor:"pointer", display:"inline-block" }}>
+              {brandLogo ? "Change logo" : "Upload logo"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={pickLogo} style={{ display:"none" }} />
+            </label>
+            {brandLogo && <img src={brandLogo} alt="logo" style={{ maxHeight:44, maxWidth:120, objectFit:"contain", borderRadius:6 }} />}
+            {brandLogo && <button onClick={()=>setBrandLogo(null)} style={{ background:"transparent", border:"none", color:C.muted, fontSize:12.5, cursor:"pointer", textDecoration:"underline" }}>remove</button>}
+          </div>
+          <div style={{ fontSize:11.5, color:"#74748a", marginTop:5 }}>PNG with a transparent background looks best on the dark app.</div>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <div style={lbl}>Accent color</div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {["#e8ff00","#3d8eff","#3ddc84","#ff9d5c","#ff5c8a","#9d7bff","#ffffff"].map(c => (
+              <button key={c} onClick={()=>setBrandAccent(c)} aria-label={c}
+                style={{ width:30, height:30, borderRadius:"50%", background:c, cursor:"pointer",
+                  border: brandAccent===c ? "3px solid #fff" : `2px solid ${C.border}`, boxSizing:"border-box" }} />
+            ))}
+          </div>
+        </div>
+        {(brandName.trim() || brandLogo) && (
+          <div style={{ background:"#0a0a0f", border:`1px solid ${C.border}`, borderRadius:10, padding:"18px 14px", marginBottom:14, textAlign:"center" }}>
+            <div style={{ fontSize:10.5, color:"#74748a", letterSpacing:1, textTransform:"uppercase", marginBottom:10 }}>What your clients see</div>
+            {brandLogo && <img src={brandLogo} alt="" style={{ maxHeight:54, maxWidth:"70%", objectFit:"contain", display:"block", margin:"0 auto", marginBottom: brandName.trim() ? 8 : 0 }} />}
+            {brandName.trim() && <div style={{ fontFamily:"'Bebas Neue'", fontSize:38, letterSpacing:3, lineHeight:1.05, color:brandAccent }}>{brandName.trim()}</div>}
+            <div style={{ fontFamily:"'DM Sans', sans-serif", fontSize:10, letterSpacing:2, color:"#74748a", marginTop:7, textTransform:"uppercase" }}>Powered by BodyMorph&#8482;</div>
+          </div>
+        )}
+        <button onClick={saveBrand} style={{ ...S.btnPri, borderColor:"#e8ff00", color:"#e8ff00" }}>{savedBrand ? "Saved ✓" : "Save branding"}</button>
       </div>
 
       <div style={card}>
@@ -11104,6 +11187,7 @@ export default function BodyMorph() {
   const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
   const [inviteSeed, setInviteSeed] = useState(null);     // intake from a coach invite, to pre-fill the wizard
   const [coachCues, setCoachCues] = useState({});         // MY coach's authored form cues, keyed by lowercased exercise
+  const [coachBrand, setCoachBrand] = useState(null);     // MY coach's app branding (null = default BodyMorph look)
 
   // Load the coach's authored form cues for this client (voice coach prefers these
   // over video-derived cues). Refreshes on sign-in; harmless {} offline.
@@ -11111,6 +11195,17 @@ export default function BodyMorph() {
     if (!hasBackend || !user?.id) { setCoachCues({}); return; }
     let on = true;
     fetchMyCoachCues(user.id).then(m => { if (on) setCoachCues(m || {}); });
+    return () => { on = false; };
+  }, [user?.id]);
+
+  // My coach's branding — cached locally so the branded header paints instantly
+  // (and offline), then refreshed from the cloud. Cache is under bodymorph_* so
+  // sign-out wipes it with everything else.
+  useEffect(() => {
+    if (!hasBackend || !user?.id) { setCoachBrand(null); return; }
+    let on = true;
+    Store.get(BRAND_KEY).then(b => { if (on && b) setCoachBrand(b); });
+    fetchMyCoachBranding(user.id).then(b => { if (!on) return; setCoachBrand(b); Store.set(BRAND_KEY, b); });
     return () => { on = false; };
   }, [user?.id]);
 
@@ -11562,7 +11657,13 @@ export default function BodyMorph() {
   }, []);
 
   // Client links to their coach via the coach's invite code.
-  const linkToCoach = useCallback(async (code) => redeemCoachInvite(code), []);
+  const linkToCoach = useCallback(async (code) => {
+    const res = await redeemCoachInvite(code);
+    if (res?.ok && userRef.current?.id) {   // new coach may have branding — apply right away
+      fetchMyCoachBranding(userRef.current.id).then(b => { setCoachBrand(b); Store.set(BRAND_KEY, b); });
+    }
+    return res;
+  }, []);
 
   // Coach ⇄ personal toggle: coaches train too. "My Training" drops them into their own
   // client-side app (same account, same data; no wizard done yet → wizard first). Coaches
@@ -11925,7 +12026,7 @@ export default function BodyMorph() {
         onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} sleepEntries={sleepEntries} onSaveSleep={setSleepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
-        onMenu={()=>setPhase("menu")}
+        onMenu={()=>setPhase("menu")} brand={coachBrand}
         onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
