@@ -10129,7 +10129,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
       <button onClick={onClick} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14, flexShrink:0 }}>{text}</button>
     );
     return (
-      <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", padding:"16px 5% 12px", boxSizing:"border-box" }}>
+      <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", padding:"calc(env(safe-area-inset-top) + 14px) 5% calc(env(safe-area-inset-bottom) + 12px)", boxSizing:"border-box" }}>
         <style>{GLOBAL_CSS + COACH_CSS}</style>
         <div aria-hidden="true" className="coach-wm-base" />
         {msgThread ? (
@@ -10144,7 +10144,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
             </div>
             <div style={{ flex:1, minHeight:0, display:"flex", flexDirection:"column" }}>
               <ChatThread coachId={uid} clientId={msgThread} meRole="coach" initialDraft={chatPrefill}
-                maxHeight={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 210)} />
+                maxHeight={Math.max(280, (typeof window !== "undefined" ? window.innerHeight : 700) - 280)} />
             </div>
           </>
         ) : composeOpen ? (
@@ -10298,11 +10298,14 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
         </aside>
 
         <main className="coach-main" style={{ position:"relative" }}>
-          {/* Phone: big ✕ across from every section's title — one tap back to the home page.
+          {/* Phone: big ✕ for every section — STICKY so it pins just below the iOS status
+              bar (date/battery) and the content scrolls UNDERNEATH it; always tappable.
               (Settings has its own ✕; Overview IS home.) */}
           {section !== "overview" && section !== "settings" && !(section === "messages" && (msgThread || composeOpen)) && (
-            <button className="coach-mobileonly" onClick={()=>go("overview")} aria-label="Back to home"
-              style={{ position:"absolute", top:14, right:14, zIndex:5, background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>✕</button>
+            <div className="coach-mobileonly" style={{ position:"sticky", top:"calc(env(safe-area-inset-top) + 8px)", zIndex:120, height:0, textAlign:"right" }}>
+              <button onClick={()=>go("overview")} aria-label="Back to home"
+                style={{ background:"rgba(10,10,15,0.82)", border:"1px solid #2a2a3d", borderRadius:"50%", width:40, height:40, color:"#c8c8e0", fontSize:23, lineHeight:"38px", textAlign:"center", cursor:"pointer", padding:0, fontFamily:"'DM Sans'" }}>✕</button>
+            </div>
           )}
           {/* OVERVIEW */}
           {section==="overview" && (
