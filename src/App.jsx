@@ -3947,8 +3947,18 @@ function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8f
   const [draft, setDraft] = useState(initialDraft);
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef(null);
+  const taRef = useRef(null);
   // A drafted nudge/follow-up handed in from the dashboard drops into the composer.
   useEffect(() => { if (initialDraft) setDraft(initialDraft); }, [initialDraft]);
+  // The composer GROWS with its content (like every messaging app) — no inner
+  // scrollbar. Caps at ~6 lines, only then does it scroll.
+  useEffect(() => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = "auto";
+    const cap = 150;
+    el.style.height = Math.min(el.scrollHeight, cap) + "px";
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
+  }, [draft]);
 
   const load = useCallback(async () => {
     const t = await fetchThread(coachId, clientId);
@@ -4015,7 +4025,7 @@ function ChatThread({ coachId, clientId, meRole, maxHeight = 360, accent = "#e8f
         })}
       </div>
       <div style={{ display:"flex", gap:8, marginTop:10 }}>
-        <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={1} placeholder="Type a message…"
+        <textarea ref={taRef} value={draft} onChange={e=>setDraft(e.target.value)} rows={1} placeholder="Type a message…"
           onKeyDown={e=>{ if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
           style={{ flex:1, resize:"none", background:"#0e0e16", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"10px 12px", fontSize:14, outline:"none", fontFamily:"inherit", lineHeight:1.4 }} />
         <button onClick={send} disabled={busy || !draft.trim()}
@@ -10102,6 +10112,105 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   // mobile all console text gets ×1.3 — EXCEPT the big numbers inside the nine cards.
   const F = (n) => isMobile ? Math.round(n * 1.3 * 10) / 10 : n;
 
+  // ── MESSENGER — its OWN full screen (not a card tucked under the dashboard). ──
+  if (section === "messages") {
+    const nameFor = (id) => roster.find(c => c.id === id)?.name || "Client";
+    const when = (iso) => {
+      const d = new Date(iso), now = new Date();
+      return d.toDateString() === now.toDateString()
+        ? d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" })
+        : d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+    };
+    const closeBtn = (onClick, label="Close messages") => (
+      <button onClick={onClick} aria-label={label} style={{ background:"transparent", border:"none", color:"#8a8aa4", fontSize:30, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'", flexShrink:0 }}>&#10005;</button>
+    );
+    const backBtn = (onClick, text) => (
+      <button onClick={onClick} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14, flexShrink:0 }}>{text}</button>
+    );
+    return (
+      <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", padding:"16px 5% 12px", boxSizing:"border-box" }}>
+        <style>{GLOBAL_CSS + COACH_CSS}</style>
+        <div aria-hidden="true" className="coach-wm-base" />
+        {msgThread ? (
+          <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:8 }}>
+              {backBtn(()=>{ setMsgThread(null); setChatPrefill(""); loadConvs(); }, "‹ Inbox")}
+              {closeBtn(()=>go("overview"))}
+            </div>
+            <div style={{ display:"flex", alignItems:"baseline", gap:12, marginBottom:10 }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:28, letterSpacing:1 }}>{nameFor(msgThread).toUpperCase()}</div>
+              <button onClick={()=>{ setSection("clients"); openClient(msgThread); setMsgThread(null); }} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:12.5, padding:0 }}>View client ›</button>
+            </div>
+            <div style={{ flex:1, minHeight:0, display:"flex", flexDirection:"column" }}>
+              <ChatThread coachId={uid} clientId={msgThread} meRole="coach" initialDraft={chatPrefill}
+                maxHeight={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 210)} />
+            </div>
+          </>
+        ) : composeOpen ? (
+          <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:12 }}>
+              {backBtn(()=>setComposeOpen(false), "‹ Inbox")}
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1, flex:1 }}>NEW MESSAGE</div>
+              {closeBtn(()=>go("overview"))}
+            </div>
+            <input autoFocus value={composeSearch} onChange={e=>setComposeSearch(e.target.value)} placeholder="Search your clients…"
+              style={{ width:"100%", boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:10, color:C.text, padding:"11px 13px", fontSize:14.5, outline:"none", marginBottom:12 }} />
+            <div style={{ display:"flex", flexDirection:"column", gap:6, overflowY:"auto" }}>
+              {roster.filter(c => !composeSearch || (c.name||"").toLowerCase().includes(composeSearch.toLowerCase())).length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No clients match.</div>}
+              {roster.filter(c => !composeSearch || (c.name||"").toLowerCase().includes(composeSearch.toLowerCase())).map(c => (
+                <button key={c.id} onClick={()=>{ setChatPrefill(""); setMsgThread(c.id); setComposeOpen(false); }}
+                  style={{ display:"flex", alignItems:"center", gap:12, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
+                  <span style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:15, color:"#0a0a0f" }}>
+                    {(c.name||"?").trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase() || "?"}
+                  </span>
+                  <span style={{ color:C.text, fontSize:14.5, fontWeight:600 }}>{c.name}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:14 }}>
+              <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>MESSAGES{unreadTotal > 0 ? <span style={{ color:"#e8ff00" }}> ({unreadTotal})</span> : null}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <button onClick={()=>{ setComposeSearch(""); setComposeOpen(true); }} aria-label="New message"
+                  style={{ background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:10, padding:"9px 14px", fontSize:15, fontWeight:700, cursor:"pointer" }}>&#9998; New</button>
+                {closeBtn(()=>go("overview"))}
+              </div>
+            </div>
+            {convs === null ? <div style={{ color:C.muted, fontSize:13 }}>Loading conversations…</div>
+            : convs.length === 0 ? (
+              <div style={{ color:C.muted, fontSize:13.5, lineHeight:1.6 }}>
+                No conversations yet. Tap <b style={{ color:"#e8ff00" }}>&#9998; New</b> to message a client — it lands inside their app, and their AI coach stays in the loop.
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6, overflowY:"auto" }}>
+                {convs.map(cv => (
+                  <button key={cv.clientId} onClick={()=>{ setChatPrefill(""); setMsgThread(cv.clientId); }}
+                    style={{ display:"flex", alignItems:"center", gap:12, background: cv.unread ? "rgba(232,255,0,0.06)" : C.card, border:`1px solid ${cv.unread ? "rgba(232,255,0,0.4)" : C.border}`, borderRadius:12, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
+                    <span style={{ width:42, height:42, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:17, color:"#0a0a0f" }}>
+                      {nameFor(cv.clientId).trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase()}
+                    </span>
+                    <span style={{ flex:1, minWidth:0 }}>
+                      <span style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"baseline" }}>
+                        <span style={{ color:C.text, fontSize:14.5, fontWeight: cv.unread ? 800 : 600 }}>{nameFor(cv.clientId)}</span>
+                        <span style={{ color: cv.unread ? "#e8ff00" : C.muted, fontSize:11.5, flexShrink:0 }}>{when(cv.last.created_at)}</span>
+                      </span>
+                      <span style={{ display:"block", color: cv.unread ? C.text : C.muted, fontSize:13, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontWeight: cv.unread ? 600 : 400 }}>
+                        {cv.last.sender === "coach" ? "You: " : ""}{cv.last.body}
+                      </span>
+                    </span>
+                    {cv.unread > 0 && <span style={{ flexShrink:0, background:"#e8ff00", color:"#0a0a0f", borderRadius:11, padding:"2px 9px", fontSize:12, fontWeight:800 }}>{cv.unread}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ position:"relative" }}>
       <style>{GLOBAL_CSS + COACH_CSS}</style>
@@ -10367,91 +10476,6 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               onBack={()=>{ setSelected(null); setDetail(null); setChatPrefill(""); }} />
           )}
 
-          {/* MESSENGER — phone-style inbox: conversations newest-first, tap → thread,
-              ✏️ → pick a client and start a new one. */}
-          {section==="messages" && (() => {
-            const nameFor = (id) => roster.find(c => c.id === id)?.name || "Client";
-            const when = (iso) => {
-              const d = new Date(iso), now = new Date();
-              return d.toDateString() === now.toDateString()
-                ? d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" })
-                : d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
-            };
-            if (msgThread) return (
-              <>
-                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12 }}>
-                  <button onClick={()=>{ setMsgThread(null); setChatPrefill(""); loadConvs(); }} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Inbox</button>
-                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>{nameFor(msgThread).toUpperCase()}</div>
-                  <button onClick={()=>{ setSection("clients"); openClient(msgThread); setMsgThread(null); }} style={{ marginLeft:"auto", background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:12.5 }}>View client ›</button>
-                </div>
-                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 14px", maxWidth:640 }}>
-                  <ChatThread coachId={uid} clientId={msgThread} meRole="coach" initialDraft={chatPrefill}
-                    maxHeight={Math.max(300, (typeof window !== "undefined" ? window.innerHeight : 700) - 320)} />
-                </div>
-              </>
-            );
-            if (composeOpen) {
-              const pick = roster.filter(c => !composeSearch || (c.name||"").toLowerCase().includes(composeSearch.toLowerCase()));
-              return (
-                <>
-                  <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12 }}>
-                    <button onClick={()=>setComposeOpen(false)} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
-                    <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>NEW MESSAGE</div>
-                  </div>
-                  <input autoFocus value={composeSearch} onChange={e=>setComposeSearch(e.target.value)} placeholder="Search your clients…"
-                    style={{ width:"100%", maxWidth:520, boxSizing:"border-box", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:10, color:C.text, padding:"11px 13px", fontSize:14.5, outline:"none", marginBottom:12 }} />
-                  <div style={{ display:"flex", flexDirection:"column", gap:6, maxWidth:520 }}>
-                    {pick.length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No clients match.</div>}
-                    {pick.map(c => (
-                      <button key={c.id} onClick={()=>{ setChatPrefill(""); setMsgThread(c.id); setComposeOpen(false); }}
-                        style={{ display:"flex", alignItems:"center", gap:12, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
-                        <span style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:15, color:"#0a0a0f" }}>
-                          {(c.name||"?").trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase() || "?"}
-                        </span>
-                        <span style={{ color:C.text, fontSize:14.5, fontWeight:600 }}>{c.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              );
-            }
-            return (
-              <>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, maxWidth:640, paddingRight:44 }}>
-                  <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>MESSAGES{unreadTotal > 0 ? <span style={{ color:"#e8ff00" }}> ({unreadTotal})</span> : null}</div>
-                  <button onClick={()=>{ setComposeSearch(""); setComposeOpen(true); }} aria-label="New message"
-                    style={{ background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:10, padding:"9px 14px", fontSize:15, fontWeight:700, cursor:"pointer" }}>✏️ New</button>
-                </div>
-                {convs === null ? <div style={{ color:C.muted, fontSize:13 }}>Loading conversations…</div>
-                : convs.length === 0 ? (
-                  <div style={{ color:C.muted, fontSize:13.5, lineHeight:1.6, maxWidth:480 }}>
-                    No conversations yet. Tap <b style={{ color:"#e8ff00" }}>✏️ New</b> to message a client — it lands inside their app, and their AI coach stays in the loop.
-                  </div>
-                ) : (
-                  <div style={{ display:"flex", flexDirection:"column", gap:6, maxWidth:640 }}>
-                    {convs.map(cv => (
-                      <button key={cv.clientId} onClick={()=>{ setChatPrefill(""); setMsgThread(cv.clientId); }}
-                        style={{ display:"flex", alignItems:"center", gap:12, background: cv.unread ? "rgba(232,255,0,0.06)" : C.card, border:`1px solid ${cv.unread ? "rgba(232,255,0,0.4)" : C.border}`, borderRadius:12, padding:"13px 14px", cursor:"pointer", textAlign:"left" }}>
-                        <span style={{ width:42, height:42, borderRadius:"50%", flexShrink:0, background:"linear-gradient(135deg,#e8ff00,#aebe00)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:17, color:"#0a0a0f" }}>
-                          {nameFor(cv.clientId).trim().split(/\s+/).map(s=>s[0]).slice(0,2).join("").toUpperCase()}
-                        </span>
-                        <span style={{ flex:1, minWidth:0 }}>
-                          <span style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"baseline" }}>
-                            <span style={{ color:C.text, fontSize:14.5, fontWeight: cv.unread ? 800 : 600 }}>{nameFor(cv.clientId)}</span>
-                            <span style={{ color: cv.unread ? "#e8ff00" : C.muted, fontSize:11.5, flexShrink:0 }}>{when(cv.last.created_at)}</span>
-                          </span>
-                          <span style={{ display:"block", color: cv.unread ? C.text : C.muted, fontSize:13, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontWeight: cv.unread ? 600 : 400 }}>
-                            {cv.last.sender === "coach" ? "You: " : ""}{cv.last.body}
-                          </span>
-                        </span>
-                        {cv.unread > 0 && <span style={{ flexShrink:0, background:"#e8ff00", color:"#0a0a0f", borderRadius:11, padding:"2px 9px", fontSize:12, fontWeight:800 }}>{cv.unread}</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            );
-          })()}
 
           {/* FOLLOW-UPS */}
           {section==="followups" && (
