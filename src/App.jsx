@@ -10053,9 +10053,6 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
   // One-tap check-in text for an at-risk client (coach's device sends it, so no emoji rules).
   const firstOf = (n) => (n || "").trim().split(/\s+/)[0] || "there";
   const checkInMsg = (c) => `Hey ${firstOf(c.name)}, it's Coach — haven't seen you log in a few days. Everything good? Let's get a session in this week.`;
-  const messageHref = (c) => c.phone ? `sms:${c.phone}?&body=${encodeURIComponent(checkInMsg(c))}`
-                          : c.email ? `mailto:${c.email}?subject=${encodeURIComponent("Checking in")}&body=${encodeURIComponent(checkInMsg(c))}`
-                          : null;
   const filteredRoster = roster.filter(c => !search || (c.name||"").toLowerCase().includes(search.toLowerCase()));
   const attention = roster.filter(c => {
     const d = daysSince(c.lastActive);
@@ -10160,7 +10157,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 ))}
               </div>
             )}
-            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"rgba(232,255,0,0.14)", color:"#e8ff00", border:"1px solid rgba(232,255,0,0.5)", borderRadius:10, padding:"11px 14px", fontSize:28, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite Client</button>
+            <button onClick={()=>openInvite()} style={{ width:"100%", marginTop:8, background:"rgba(232,255,0,0.14)", color:"#e8ff00", border:"1px solid rgba(232,255,0,0.5)", borderRadius:10, padding:"7px 14px", fontSize:28, fontWeight:700, fontFamily:"'DM Sans'", cursor:"pointer" }}>+ Invite Client</button>
             {/* Brand plate sits BELOW the action bars on phone (swapped with the welcome header). */}
             <div style={{ textAlign:"center", marginTop:16 }}>
               <div style={{ fontFamily:"'Bebas Neue'", fontSize:31, letterSpacing:1.5, lineHeight:1 }}>BODY<span style={{ color:"#e8ff00" }}>MORPH</span></div>
@@ -10277,7 +10274,6 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {attention.map(c => {
-                    const href = messageHref(c);
                     return (
                       <div key={c.id} style={{ display:"flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap:10, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding: isMobile ? "12px 12px" : "9px 12px 9px 14px" }}>
                         {/* Row 1 (phone): name + status. Row 2: the actions, full width. Desktop: one line. */}
@@ -10286,16 +10282,12 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                           <span style={{ color:C.red, fontSize:F(12.5), marginLeft:9 }}>{c.lastActive ? `${daysSince(c.lastActive)} days quiet` : "never active"}</span>
                         </div>
                         <div style={{ display:"flex", gap:8, flexShrink:0 }}>
-                          <button onClick={()=>openClientChat(c.id, checkInMsg(c))} style={{ background:"rgba(232,255,0,0.12)", border:"1px solid rgba(232,255,0,0.4)", color:"#e8ff00", borderRadius:8, padding:"7px 13px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>
-                            💬 Message
+                          <button onClick={()=>openClientChat(c.id, checkInMsg(c))} aria-label={`Message ${c.name}`} title="Message in app"
+                            style={{ background:"transparent", border:"none", color:"#e8ff00", padding:"4px 6px", fontSize:F(19), lineHeight:1, cursor:"pointer", ...(isMobile ? { flex:"0 0 auto" } : {}) }}>
+                            💬
                           </button>
-                          {href && (
-                            <a href={href} title="Text their phone (for clients who've stopped opening the app)" style={{ textDecoration:"none", background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"7px 11px", fontSize:F(12.5), textAlign:"center", ...(isMobile ? { flex:1 } : {}) }}>
-                              {c.phone ? "Text phone" : "Email"}
-                            </a>
-                          )}
-                          <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"7px 11px", fontSize:F(12.5), cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Open</button>
-                          <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"7px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Resolve</button>
+                          <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"5px 11px", fontSize:F(12.5), cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Open</button>
+                          <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"5px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Resolve</button>
                         </div>
                       </div>
                     );
