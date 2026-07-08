@@ -10363,7 +10363,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
           )}
           {section==="clients" && selected && (
             <CoachClientView coachId={uid} clientId={selected} detail={detail} loading={detailLoading}
-              clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load} msgPrefill={chatPrefill}
+              clientFee={(roster.find(c=>c.id===selected)||{}).consultingFee} onFeeSaved={load} onOpenChat={()=>openClientChat(selected)}
               onBack={()=>{ setSelected(null); setDetail(null); setChatPrefill(""); }} />
           )}
 
@@ -11026,10 +11026,7 @@ function CoachCuesEditor({ coachId, clientId }) {
   );
 }
 
-function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved, msgPrefill }) {
-  const msgCardRef = useRef(null);
-  // Opened from an at-risk nudge / follow-up "Message" → jump to the thread.
-  useEffect(() => { if (msgPrefill && msgCardRef.current) msgCardRef.current.scrollIntoView({ behavior:"smooth", block:"center" }); }, [msgPrefill, clientId]);
+function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved, onOpenChat }) {
   const [fee, setFee] = useState(clientFee == null ? "" : String(clientFee));
   const [feeSaved, setFeeSaved] = useState(false);
   useEffect(() => { setFee(clientFee == null ? "" : String(clientFee)); }, [clientFee, clientId]);
@@ -11435,12 +11432,15 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
         <Stat label="Coins" value={detail.rewards?.coins || 0} />
       </div>
 
-      {/* In-app chat — lands in the client's app (MESSAGES), and the AI voice coach
-          reads the recent thread so it coaches in line with what you tell them. */}
-      <div ref={msgCardRef} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
-        <div style={{ ...S.inputLabel, marginBottom:10 }}>Messages</div>
-        <ChatThread coachId={coachId} clientId={clientId} meRole="coach" initialDraft={msgPrefill} />
-      </div>
+      {/* Messaging lives in ONE place — the main Messenger inbox. This just links there. */}
+      <button onClick={onOpenChat} style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16, cursor:"pointer", display:"flex", alignItems:"center", gap:12, textAlign:"left" }}>
+        <MsgIcon size={22} color="#e8ff00" />
+        <span style={{ flex:1 }}>
+          <span style={{ display:"block", color:C.text, fontSize:14.5, fontWeight:600, fontFamily:"'DM Sans'" }}>Messages</span>
+          <span style={{ display:"block", color:C.muted, fontSize:12.5, marginTop:2, fontFamily:"'DM Sans'" }}>Open your conversation with {(detail.name||"this client").split(" ")[0]}</span>
+        </span>
+        <span style={{ color:"#8a8aa4", fontSize:20 }}>›</span>
+      </button>
 
       <ClientEvaluation coachId={coachId} clientId={clientId} clientName={detail.name} />
 
