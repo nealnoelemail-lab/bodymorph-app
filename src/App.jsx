@@ -10139,8 +10139,9 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               the yellow invite bar lives OUTSIDE it (always visible). */}
           <div className="coach-mobilebar">
             <div style={{ display:"flex", gap:8 }}>
-              <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:"none", color:C.text, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center" }}>
-                {mobileMenu ? "✕ CLOSE" : "☰ MENU"}
+              <button onClick={()=>setMobileMenu(o=>!o)} style={{ flex:1, background:"transparent", border:"none", color:C.text, padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                <span style={{ fontSize:25, lineHeight:1, display:"inline-flex", alignItems:"center" }}>{mobileMenu ? "✕" : "☰"}</span>
+                <span>{mobileMenu ? "CLOSE" : "MENU"}</span>
               </button>
               <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:"none", color:"#e8ff00", padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center", position:"relative" }}>
                 MESSAGES
