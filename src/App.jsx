@@ -10140,16 +10140,20 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 <span style={{ fontSize:25, lineHeight:1, display:"inline-flex", alignItems:"center" }}>{mobileMenu ? "✕" : "☰"}</span>
                 <span>{mobileMenu ? "CLOSE" : "MENU"}</span>
               </button>
-              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} style={{ flex:1, background:"transparent", border:"none", color:"#e8ff00", padding:"14px 6px", fontSize:21, fontWeight:700, letterSpacing:1.5, fontFamily:"'DM Sans'", cursor:"pointer", textAlign:"center", position:"relative" }}>
-                MESSAGES
-                {unreadTotal > 0 && (
-                  <span aria-label={`${unreadTotal} unread`} style={{ position:"absolute", top:10, right:2, width:10, height:10, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.9)" }} />
-                )}
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 6px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <span style={{ position:"relative", display:"inline-flex" }}>
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#e8ff00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
+                  {unreadTotal > 0 && (
+                    <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
+                  )}
+                </span>
               </button>
             </div>
             {mobileMenu && (
               <div style={{ background:"#12121a", border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, overflow:"hidden" }}>
-                {NAV.map(([k,label]) => (
+                {NAV.filter(([k]) => k !== "messages").map(([k,label]) => (
                   <button key={k} onClick={()=>{ go(k); setMobileMenu(false); }}
                     style={{ display:"block", width:"100%", textAlign:"left", background: section===k && !selected ? "rgba(232,255,0,0.10)" : "transparent", border:"none", borderBottom:"1px solid #1f1f2e", color: section===k && !selected ? "#e8ff00" : C.text, fontWeight: section===k && !selected ? 700 : 400, fontSize:19, fontFamily:"'DM Sans'", padding:"14px 15px", cursor:"pointer" }}>
                     {label}
@@ -10173,7 +10177,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
         <main className="coach-main" style={{ position:"relative" }}>
           {/* Phone: big ✕ across from every section's title — one tap back to the home page.
               (Settings has its own ✕; Overview IS home.) */}
-          {section !== "overview" && section !== "settings" && (
+          {section !== "overview" && section !== "settings" && !(section === "messages" && (msgThread || composeOpen)) && (
             <button className="coach-mobileonly" onClick={()=>go("overview")} aria-label="Back to home"
               style={{ position:"absolute", top:14, right:14, zIndex:5, background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>✕</button>
           )}
