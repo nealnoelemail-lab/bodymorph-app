@@ -9528,7 +9528,7 @@ const COACH_CSS = `
   .ctable td{ padding:11px 10px; border-bottom:1px solid #1f1f2e; font-size:14px; color:#f0f0f8; }
   .ctable tr.clk{ cursor:pointer; }
   .ctable tr.clk:hover td{ background:#16161f; }
-  @media(max-width:760px){ .coach-shell{ flex-direction:column; } .coach-side{ width:100%; min-height:0; position:static; border-right:none; border-bottom:1px solid #2a2a3d; } .coach-nav{ flex-direction:row; flex-wrap:wrap; } .coach-main{ padding:18px 16px 50px; } }
+  @media(max-width:760px){ .coach-shell{ flex-direction:column; padding-top:env(safe-area-inset-top); } .coach-side{ width:100%; min-height:0; position:static; border-right:none; border-bottom:1px solid #2a2a3d; } .coach-nav{ flex-direction:row; flex-wrap:wrap; } .coach-main{ padding:18px 16px 50px; } }
   /* Phone console (Neal's spec): ONE "MENU" bar that drops the nav down, yellow invite bar
      below it, welcome header under that, the nine-card grid scaled to fit the screen in one
      view, silhouette centered, sign-out at the very bottom. Desktop keeps the sidebar. */
@@ -10265,7 +10265,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 <span style={{ fontSize:25, lineHeight:1, display:"inline-flex", alignItems:"center" }}>{mobileMenu ? "✕" : "☰"}</span>
                 <span>{mobileMenu ? "CLOSE" : "MENU"}</span>
               </button>
-              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 4px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 22px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
                 <span style={{ position:"relative", display:"inline-flex" }}>
                   <MsgIcon size={30} color="#e8ff00" />
                   {unreadTotal > 0 && (
