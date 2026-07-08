@@ -12441,9 +12441,9 @@ export default function BodyMorph() {
     <><Toast />
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
         <style>{GLOBAL_CSS}</style><WatermarkPlain />
-        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 0 12px" }}>
-          <button onClick={()=>setPhase("home")} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, padding:"16px 0 12px" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1 }}>{(coachBrand?.brand_name || "YOUR COACH").toUpperCase()}</div>
+          <button onClick={()=>setPhase("home")} aria-label="Close messages" style={{ background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>&#10005;</button>
         </div>
         <div style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 14px" }}>
           <ChatThread coachId={myCoach} clientId={user?.id} meRole="client" maxHeight={Math.max(260, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)} />
