@@ -1,12 +1,17 @@
 // ── AI call router ────────────────────────────────────────────────────────────
-// Sends Claude / Grok calls through our server proxy (keys held server-side) when
-// VITE_API_BASE is set. Until then, falls back to calling the vendor DIRECTLY with
-// the bundled VITE key — so the app keeps working unchanged during the migration.
-// Flip the switch by setting VITE_API_BASE to the deployed Vercel URL.
+// PROXY-ONLY. Every Claude / Grok call goes through our server proxy, which holds the
+// vendor keys server-side and gates on a signed-in Supabase user. There is NO direct-
+// to-vendor path and NO vendor key in the browser bundle — so a scraped bundle can't
+// be used to spend money. Requires VITE_API_BASE (the deployed proxy URL); without it
+// the AI helpers throw rather than fall back to a bundled key.
+// (History: a bundled Anthropic key WAS scraped from the web bundle and abused — hence
+// proxy-only. Never reintroduce a direct-vendor branch here.)
 import { supabase } from "./supabase.js";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 export const USE_PROXY = !!API_BASE;
+
+const NO_PROXY = "AI proxy not configured (VITE_API_BASE unset). Refusing to call the vendor directly — set the proxy URL.";
 
 // The user's Supabase access token — the proxy's auth gate.
 async function authHeader() {
@@ -20,22 +25,10 @@ async function authHeader() {
 // Anthropic Messages. Pass the request body object (not stringified). Returns the raw
 // fetch Response so callers can `.json()` it OR stream it (body.getReader()) unchanged.
 export async function anthropicFetch(body, opts = {}) {
-  if (USE_PROXY) {
-    return fetch(`${API_BASE}/api/anthropic`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    });
-  }
-  return fetch("https://api.anthropic.com/v1/messages", {
+  if (!USE_PROXY) throw new Error(NO_PROXY);
+  return fetch(`${API_BASE}/api/anthropic`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers: { "content-type": "application/json", ...(await authHeader()) },
     body: JSON.stringify(body),
     signal: opts.signal,
   });
@@ -43,17 +36,10 @@ export async function anthropicFetch(body, opts = {}) {
 
 // Grok speech-to-text. Pass a FormData (the audio clip). Returns the Response.
 export async function grokSttFetch(formData, opts = {}) {
-  if (USE_PROXY) {
-    return fetch(`${API_BASE}/api/grok-stt`, {
-      method: "POST",
-      headers: { ...(await authHeader()) }, // let the browser set the multipart boundary
-      body: formData,
-      signal: opts.signal,
-    });
-  }
-  return fetch("https://api.x.ai/v1/stt", {
+  if (!USE_PROXY) throw new Error(NO_PROXY);
+  return fetch(`${API_BASE}/api/grok-stt`, {
     method: "POST",
-    headers: { authorization: `Bearer ${import.meta.env.VITE_XAI_KEY}` },
+    headers: { ...(await authHeader()) }, // let the browser set the multipart boundary
     body: formData,
     signal: opts.signal,
   });
@@ -61,17 +47,10 @@ export async function grokSttFetch(formData, opts = {}) {
 
 // Grok batch text-to-speech. Pass the request body object. Returns the Response (audio).
 export async function grokTtsFetch(body, opts = {}) {
-  if (USE_PROXY) {
-    return fetch(`${API_BASE}/api/grok-tts`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    });
-  }
-  return fetch("https://api.x.ai/v1/tts", {
+  if (!USE_PROXY) throw new Error(NO_PROXY);
+  return fetch(`${API_BASE}/api/grok-tts`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${import.meta.env.VITE_XAI_KEY}` },
+    headers: { "content-type": "application/json", ...(await authHeader()) },
     body: JSON.stringify(body),
     signal: opts.signal,
   });

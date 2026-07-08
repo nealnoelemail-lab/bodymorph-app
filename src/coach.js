@@ -1,8 +1,6 @@
 import { supabase } from "./supabase";
 import { anthropicFetch, USE_PROXY } from "./aiproxy";
 
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
-
 // ── COACH (client data layer) ───────────────────────────────────────────────────
 // Role lookup, coach-access / invite-code redemption (Postgres RPCs), and the
 // coach-side reads of client data (allowed by the is_coach_of() RLS policies).
@@ -279,7 +277,7 @@ export function buildReportData(detail) {
 // watchouts, adjustment recommendations) rendered as cards next to the charts.
 // Sonnet: this is the flagship coach deliverable and it has to reason across trends.
 export async function generateClientSummary(detail) {
-  if (!USE_PROXY && !ANTHROPIC_KEY) return { error: "No AI key configured." };
+  if (!USE_PROXY) return { error: "No AI key configured." };
   const data = buildReportData(detail);
   const prompt =
     "You are the analyst behind a fitness coach's weekly client report. From the metrics below, return ONLY a JSON object (no markdown fence, no prose around it) with exactly these keys:\n" +
@@ -575,7 +573,7 @@ export async function saveEvaluation(coachId, clientId, intake, evaluation) {
 // Guardrail: fitness-coaching scope only; respects allergies + injuries; flags
 // medical red flags for physician clearance; it's a coach-reviewed DRAFT.
 export async function generateEvaluation(intake) {
-  if (!USE_PROXY && !ANTHROPIC_KEY) return { error: "No AI key configured." };
+  if (!USE_PROXY) return { error: "No AI key configured." };
   const prompt =
     "You are an experienced fitness coach's assistant producing a DRAFT evaluation for the COACH to review (not shown to the client, not medical advice). " +
     "Stay strictly within fitness-coaching scope. Respect the client's food allergies and dietary preferences in any diet guidance. Accommodate past/current injuries in the exercise plan. " +

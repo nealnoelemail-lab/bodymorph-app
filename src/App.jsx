@@ -146,18 +146,19 @@ const COACH_SUMMARY_KEY = "bodymorph_coachsummary_v2"; // rolling daily summarie
 const TODO_CHECKED_KEY = "bodymorph_todochecked_v2"; // checked-off to-do items, keyed by date:section:id
 const HYDRATION_KEY = "bodymorph_hydration_v2";
 const YT_API_KEY   = "AIzaSyBCLlF5keXpH7pd_sFtdQGnrJ_W_eUhvWU";
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
+// SECURITY: no vendor API keys live in the browser anymore. Every paid call (Claude
+// brain, Grok STT/TTS) goes through the server proxy (USE_PROXY / aiproxy.js), which
+// holds the keys server-side. A scraped bundle can't spend money. Only USDA (free gov
+// API) keeps a bundled key. Do NOT reintroduce import.meta.env.VITE_*_KEY for a paid
+// vendor here. (History: a bundled Anthropic key was scraped from the bundle + abused.)
 const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
-const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
 // ── Voice provider abstraction ──────────────────────────────────────────────
 // One switch selects the whole voice stack so we're never vendor-locked:
-//   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)       [single-vendor, lower latency]
-//   "grok"     → xAI Grok STT + TTS (+ cloning)                 [single-vendor, ~10x cheaper]
-const CARTESIA_KEY = import.meta.env.VITE_CARTESIA_KEY;
-const XAI_KEY = import.meta.env.VITE_XAI_KEY;
+//   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)   [RETIRED — direct-key, no proxy]
+//   "grok"     → xAI Grok STT + TTS (+ cloning) via proxy    [current]
 const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
-const USE_CARTESIA = VOICE_PROVIDER === "cartesia" && !!CARTESIA_KEY;
-const USE_GROK = VOICE_PROVIDER === "grok" && (USE_PROXY || !!XAI_KEY); // proxy mode holds the key server-side
+const USE_CARTESIA = false;   // retired: Cartesia ran on a bundled key; proxy-only now
+const USE_GROK = VOICE_PROVIDER === "grok" && USE_PROXY; // Grok runs entirely through the proxy
 const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
@@ -167,7 +168,7 @@ const GROK_TTS_SPEED = 1.1; // coach speaking pace (Grok allows 0.7–1.5); 1.1 
 // LLM (the coach's brain) is independently swappable: "claude" (Anthropic) | "grok" (xAI).
 // Set both VITE_VOICE_PROVIDER=grok and VITE_LLM_PROVIDER=grok for a full single-vendor xAI stack.
 const LLM_PROVIDER = (import.meta.env.VITE_LLM_PROVIDER || "claude").toLowerCase();
-const USE_GROK_LLM = LLM_PROVIDER === "grok" && !!XAI_KEY;
+const USE_GROK_LLM = false;   // retired: Grok-brain-direct ran on a bundled key; Claude via proxy is the brain
 const GROK_LLM_MODEL = import.meta.env.VITE_GROK_LLM_MODEL || "grok-4.3"; // confirm exact id via /v1/models once credits are active
 // Native iOS/Android shell (Capacitor). On a real device the WebView mic is dead,
 // so the voice coach captures audio through the native VoiceCapture plugin instead.
@@ -1975,7 +1976,7 @@ function orderedTrainingDays(profile) {
 // full program object (same shape buildProgram returns) merged with locally
 // computed nutrition + stretching. Throws on any failure so callers fall back.
 async function generateProgram(profile) {
-  if (!USE_PROXY && !ANTHROPIC_KEY) throw new Error("no-key");
+  if (!USE_PROXY) throw new Error("no-key");
   const dayNames = orderedTrainingDays(profile);
   const exCount = exercisesForTime(profile.sessionTime);
   const { stretch } = pickFocusGroups(profile);
@@ -4211,7 +4212,7 @@ function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoO
         // Proxy mode: hand native a Supabase token (STT proxy) + an ephemeral xAI token
         // (TTS) instead of relying on the raw key, so the Grok key can leave the device.
         const [ttsTok, authTok] = USE_PROXY ? await Promise.all([grokEphemeralToken(), supabaseAccessToken()]) : [null, null];
-        await VoiceCapture.configure({ openaiKey: OPENAI_KEY, cartesiaKey: CARTESIA_KEY, xaiKey: XAI_KEY, provider: VOICE_PROVIDER, apiBase: USE_PROXY ? PROXY_BASE : "", authToken: authTok || "", ttsToken: ttsTok || "" });
+        await VoiceCapture.configure({ openaiKey: "", cartesiaKey: "", xaiKey: "", provider: VOICE_PROVIDER, apiBase: USE_PROXY ? PROXY_BASE : "", authToken: authTok || "", ttsToken: ttsTok || "" });
         lastTickRef.current = performance.now(); // seed the watchdog so it can't fire a spurious restart at startup
         setArmed(true);
         closedRef.current = false;
@@ -4632,7 +4633,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         const res = await fetch("https://api.cartesia.ai/tts/bytes", {
           method: "POST",
           signal: signalTimeout(12000),
-          headers: { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION, "Content-Type": "application/json" },
+          headers: { "Authorization": "Bearer ", "Cartesia-Version": CARTESIA_VERSION, "Content-Type": "application/json" }, // RETIRED direct path (proxy-only); never invoked
           body: JSON.stringify({
             model_id: CARTESIA_TTS_MODEL,
             transcript: text,
@@ -4821,7 +4822,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           res = await grokSttFetch(formData, { signal: signalTimeout(15000) });
         } else {
           const sttUrl = USE_CARTESIA ? "https://api.cartesia.ai/stt" : "https://api.openai.com/v1/audio/transcriptions";
-          const sttHeaders = USE_CARTESIA ? { "Authorization": `Bearer ${CARTESIA_KEY}`, "Cartesia-Version": CARTESIA_VERSION } : { "Authorization": `Bearer ${OPENAI_KEY}` };
+          const sttHeaders = { "Authorization": "Bearer " }; // RETIRED direct path (proxy-only STT via grokSttFetch); never invoked
           res = await fetch(sttUrl, { signal: signalTimeout(15000), method: "POST", headers: sttHeaders, body: formData });
         }
         if (!res.ok) { log("STT HTTP " + res.status); }
@@ -4986,7 +4987,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           const res = await fetch("https://api.x.ai/v1/chat/completions", {
             signal: signalTimeout(15000),
             method: "POST",
-            headers: { "Authorization": `Bearer ${XAI_KEY}`, "content-type": "application/json" },
+            headers: { "Authorization": "Bearer ", "content-type": "application/json" }, // RETIRED direct path (proxy-only); never invoked
             body: JSON.stringify({ model: GROK_LLM_MODEL, max_tokens: 140, messages: [{ role: "system", content: buildSysPrompt() }, ...msgs] }),
           });
           if (closedRef.current || turnRef.current !== myTurn) return;
@@ -11784,7 +11785,7 @@ export default function BodyMorph() {
   // profile (then persist + sync). Guarded by signature so the same structural
   // inputs aren't generated twice. On failure we silently keep the template.
   const generateAndCacheProgram = useCallback(async (prof) => {
-    if (!prof || (!USE_PROXY && !ANTHROPIC_KEY) || !isAIProgramEligible(prof)) return;
+    if (!prof || !USE_PROXY || !isAIProgramEligible(prof)) return;
     const sig = programSignature(prof);
     if (aiGenSigRef.current === sig) return;     // already generating/generated this signature
     aiGenSigRef.current = sig;
@@ -11832,7 +11833,7 @@ export default function BodyMorph() {
       if (userRef.current) pushProfileDebounced(userRef.current.id, profile);
       // Auto-personalize: eligible client + no cached AI program for these inputs ->
       // generate in the background and swap it in live when ready.
-      if ((USE_PROXY || ANTHROPIC_KEY) && isAIProgramEligible(profile) &&
+      if (USE_PROXY && isAIProgramEligible(profile) &&
           profile.aiProgramSig !== programSignature(profile)) {
         generateAndCacheProgram(profile);
       }
