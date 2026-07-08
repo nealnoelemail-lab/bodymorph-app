@@ -3778,14 +3778,19 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         <Logo small onSettings={onSettings} align="left" brand={brand} />
       </div>
 
-      {/* Greeting */}
-      <div style={{ padding:"6px 0 0" }}>
+      {/* Greeting + messages icon (far right, red light when the coach has messaged) */}
+      <div style={{ padding:"6px 0 0", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1 }}>Welcome back, <span style={{ color:accent }}>{profile.name}</span></div>
-        {unreadMsgs > 0 && onMessages && (
-          <button onClick={onMessages} style={{ width:"100%", marginTop:10, background:"rgba(232,255,0,0.08)", border:`1px solid ${accent}`, borderRadius:12, color:"#f0f0f8", padding:"12px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:10, textAlign:"left" }}>
-            <span style={{ fontSize:20, lineHeight:1 }}>💬</span>
-            <span style={{ flex:1, fontSize:14 }}>Your coach sent you {unreadMsgs > 1 ? `${unreadMsgs} messages` : "a message"} — tap to read</span>
-            <span style={{ color:accent, fontSize:18 }}>›</span>
+        {onMessages && (
+          <button onClick={onMessages} aria-label={unreadMsgs > 0 ? `Messages, ${unreadMsgs} unread` : "Messages"} style={{ background:"transparent", border:"none", padding:2, cursor:"pointer", display:"inline-flex", flexShrink:0 }}>
+            <span style={{ position:"relative", display:"inline-flex" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              </svg>
+              {unreadMsgs > 0 && (
+                <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
+              )}
+            </span>
           </button>
         )}
       </div>
