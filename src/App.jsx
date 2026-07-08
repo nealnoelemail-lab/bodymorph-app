@@ -3785,7 +3785,10 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
           <button onClick={onMessages} aria-label={unreadMsgs > 0 ? `Messages, ${unreadMsgs} unread` : "Messages"} style={{ background:"transparent", border:"none", padding:2, cursor:"pointer", display:"inline-flex", flexShrink:0 }}>
             <span style={{ position:"relative", display:"inline-flex" }}>
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <circle cx="8" cy="10" r="1.3" fill={accent} stroke="none" />
+                <circle cx="12" cy="10" r="1.3" fill={accent} stroke="none" />
+                <circle cx="16" cy="10" r="1.3" fill={accent} stroke="none" />
               </svg>
               {unreadMsgs > 0 && (
                 <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
@@ -10148,7 +10151,10 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 6px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                 <span style={{ position:"relative", display:"inline-flex" }}>
                   <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#e8ff00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    <circle cx="8" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
+                    <circle cx="12" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
+                    <circle cx="16" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
                   </svg>
                   {unreadTotal > 0 && (
                     <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
