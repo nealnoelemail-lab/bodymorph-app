@@ -10148,7 +10148,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                 <span style={{ fontSize:25, lineHeight:1, display:"inline-flex", alignItems:"center" }}>{mobileMenu ? "✕" : "☰"}</span>
                 <span>{mobileMenu ? "CLOSE" : "MENU"}</span>
               </button>
-              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 6px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 4px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
                 <span style={{ position:"relative", display:"inline-flex" }}>
                   <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#e8ff00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
