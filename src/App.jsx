@@ -3703,6 +3703,18 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
   );
 }
 
+// The ONE in-app message icon — a chat SQUARE with three dots + tail. Used at every
+// "messages" entry point (client home, client menu, coach top bar, client cards) so
+// the icon language is identical everywhere.
+const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:"block", flexShrink:0 }}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <circle cx="8" cy="10" r="1.3" fill={color} stroke="none" />
+    <circle cx="12" cy="10" r="1.3" fill={color} stroke="none" />
+    <circle cx="16" cy="10" r="1.3" fill={color} stroke="none" />
+  </svg>
+);
+
 function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
@@ -3784,12 +3796,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
         {onMessages && (
           <button onClick={onMessages} aria-label={unreadMsgs > 0 ? `Messages, ${unreadMsgs} unread` : "Messages"} style={{ background:"transparent", border:"none", padding:2, cursor:"pointer", display:"inline-flex", flexShrink:0 }}>
             <span style={{ position:"relative", display:"inline-flex" }}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                <circle cx="8" cy="10" r="1.3" fill={accent} stroke="none" />
-                <circle cx="12" cy="10" r="1.3" fill={accent} stroke="none" />
-                <circle cx="16" cy="10" r="1.3" fill={accent} stroke="none" />
-              </svg>
+              <MsgIcon size={28} color={accent} />
               {unreadMsgs > 0 && (
                 <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
               )}
@@ -3900,7 +3907,7 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
 function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary, onMessages, unreadMsgs }) {
   const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const items = [
-    ...(onMessages ? [[`MESSAGES${unreadMsgs ? ` (${unreadMsgs} NEW)` : ""}`, <span style={{ fontSize:20, lineHeight:1 }}>💬</span>, unreadMsgs ? accent : "#f0f0f8", onMessages]] : []),
+    ...(onMessages ? [[`MESSAGES${unreadMsgs ? ` (${unreadMsgs} NEW)` : ""}`, <MsgIcon size={22} color={unreadMsgs ? accent : "#f0f0f8"} />, unreadMsgs ? accent : "#f0f0f8", onMessages]] : []),
     ["TO DO DAILY",        <IconToDo color="#3ddc84" />,    "#3ddc84", onCalendar],
     ["TRAINING",           <IconTraining color={accent} />, accent,    onTrainingWeek],
     ["CARDIO",             <IconCardio />,                  "#f0f0f8", onCardio],
@@ -10150,12 +10157,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
               </button>
               <button onClick={()=>{ setMobileMenu(false); go("messages"); }} aria-label={unreadTotal > 0 ? `Messages, ${unreadTotal} unread` : "Messages"} style={{ flex:1, background:"transparent", border:"none", padding:"14px 4px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
                 <span style={{ position:"relative", display:"inline-flex" }}>
-                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#e8ff00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    <circle cx="8" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
-                    <circle cx="12" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
-                    <circle cx="16" cy="10" r="1.3" fill="#e8ff00" stroke="none" />
-                  </svg>
+                  <MsgIcon size={30} color="#e8ff00" />
                   {unreadTotal > 0 && (
                     <span style={{ position:"absolute", top:-2, right:-3, width:11, height:11, borderRadius:"50%", background:"#ff2d2d", boxShadow:"0 0 8px rgba(255,45,45,0.95)", border:"1.5px solid #0a0a0f" }} />
                   )}
@@ -10298,8 +10300,8 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                         </div>
                         <div style={{ display:"flex", gap:8, flexShrink:0 }}>
                           <button onClick={()=>openClientChat(c.id, checkInMsg(c))} aria-label={`Message ${c.name}`} title="Message in app"
-                            style={{ background:"transparent", border:"none", color:"#e8ff00", padding:"4px 6px", fontSize:F(19), lineHeight:1, cursor:"pointer", ...(isMobile ? { flex:"0 0 auto" } : {}) }}>
-                            💬
+                            style={{ background:"transparent", border:"none", padding:"4px 6px", lineHeight:1, cursor:"pointer", display:"inline-flex", alignItems:"center", ...(isMobile ? { flex:"0 0 auto" } : {}) }}>
+                            <MsgIcon size={22} color="#e8ff00" />
                           </button>
                           <button onClick={()=>{ setSection("clients"); openClient(c.id); }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"5px 11px", fontSize:F(12.5), cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Open</button>
                           <button onClick={()=>{ setResolveNote(""); setResolveFor(c); }} style={{ background:"rgba(61,220,132,0.10)", border:"1px solid rgba(61,220,132,0.45)", color:"#3ddc84", borderRadius:8, padding:"5px 11px", fontSize:F(12.5), fontWeight:700, cursor:"pointer", ...(isMobile ? { flex:1 } : {}) }}>Resolve</button>
@@ -10346,7 +10348,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                         <td style={{ fontWeight:600 }}>
                           {c.name}
                           {unreadMap[c.id] > 0 && (
-                            <span style={{ marginLeft:8, background:"#e8ff00", color:"#0a0a0f", borderRadius:10, padding:"1px 8px", fontSize:11, fontWeight:700, verticalAlign:"middle" }}>💬 {unreadMap[c.id]}</span>
+                            <span style={{ marginLeft:8, background:"#e8ff00", color:"#0a0a0f", borderRadius:10, padding:"2px 8px", fontSize:11, fontWeight:700, display:"inline-flex", alignItems:"center", gap:4, verticalAlign:"middle" }}><MsgIcon size={13} color="#0a0a0f" />{unreadMap[c.id]}</span>
                           )}
                         </td>
                         <td style={{ color:C.muted }}>{c.lastActive || "—"}</td>
@@ -10473,7 +10475,7 @@ function CoachApp({ user, profile, onSignOut, onMyTraining }) {
                         <textarea value={msg} onChange={e=>setFuMsg(p=>({ ...p, [key]:e.target.value }))} rows={2}
                           style={{ width:"100%", background:"#0e0e16", border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13.5, fontFamily:"'DM Sans'", outline:"none", resize:"vertical", lineHeight:1.5 }} />
                         <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
-                          <button onClick={()=>openClientChat(f.clientId, msg)} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", padding:"7px 14px" }}>💬 Message</button>
+                          <button onClick={()=>openClientChat(f.clientId, msg)} style={{ ...S.btnPri, background:"#e8ff00", color:"#000", border:"none", padding:"7px 14px", display:"inline-flex", alignItems:"center", gap:7 }}><MsgIcon size={16} color="#000" />Message</button>
                           <button onClick={()=>navigator.clipboard?.writeText(msg)} style={{ ...S.btnSec, padding:"7px 12px" }}>Copy</button>
                           <button onClick={()=>setFuDone(p=>({ ...p, [key]:true }))} style={{ ...S.btnSec, padding:"7px 12px" }}>Done</button>
                         </div>
