@@ -9407,7 +9407,7 @@ function AccessGate({ onLink, onCoach, onLinked, onSignOut }) {
     const res = mode === "coach" ? await onCoach(c) : await onLink(c);
     setBusy(false);
     if (!res || !res.ok) { setError((res && res.error) || "That code isn't valid. Check it with your trainer."); return; }
-    if (mode === "client") onLinked?.();   // coach path routes itself to the dashboard
+    if (mode === "client" && !res.handled) onLinked?.();   // coach path routes itself; a guided-intake invite already routed too
   };
 
   return (
@@ -12078,9 +12078,26 @@ export default function BodyMorph() {
     return res;
   }, []);
 
-  // Client links to their coach via the coach's invite code.
+  // Client links to their coach. The gate accepts EITHER code type: the coach's
+  // reusable invite code, or a per-client invite code (the kind the texted link
+  // carries — coaches read those to clients over the phone, so rejecting them at
+  // the gate was a trap). A per-client invite also brings the coach's guided-intake
+  // profile: if it's complete, skip the questionnaire and build everything now.
   const linkToCoach = useCallback(async (code) => {
-    const res = await redeemCoachInvite(code);
+    let res = await redeemCoachInvite(code);
+    if (!res?.ok) {
+      const r2 = await redeemClientInvite(code);
+      if (r2?.ok) {
+        res = { ...r2 };
+        const intake = r2.intake || null;
+        setInviteSeed(intake);
+        if (intake?.complete) {
+          const { complete, ...prof } = intake;
+          handleWizardDone(prof);
+          res.handled = true;   // we routed already — the gate shouldn't re-route
+        }
+      }
+    }
     if (res?.ok && userRef.current?.id) {   // new coach may have branding — apply right away
       fetchMyCoachBranding(userRef.current.id).then(b => { setCoachBrand(b); Store.set(BRAND_KEY, b); });
     }
