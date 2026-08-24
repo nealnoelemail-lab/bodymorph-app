@@ -39,6 +39,9 @@ export default async function handler(req, res) {
   const fields = [
     "product_name", "brands", "nova_group", "nutriscore_grade", "ingredients_text",
     "nutriments", "serving_size", "image_front_small_url",
+    // Diet flags: labels_tags carries certifications (gluten-free, non-GMO, organic);
+    // allergens_tags/traces_tags carry declared allergens.
+    "labels_tags", "allergens_tags", "traces_tags",
   ].join(",");
 
   try {
@@ -58,10 +61,56 @@ export default async function handler(req, res) {
     const novaRaw = parseInt(p.nova_group, 10);
     const nova = novaRaw >= 1 && novaRaw <= 4 ? novaRaw : null;
 
+    // ── Diet flags + allergens ────────────────────────────────────────────────
+    // SAFETY: only report "free of" when the product CARRIES that certification.
+    // Empty allergen data means "not declared", NOT "free of" — a celiac or a peanut
+    // allergy reading a wrong "free" claim is a real harm, so silence is the only
+    // safe default, and the UI always tells people to check the package.
+    const labels = (p.labels_tags || []).map((t) => String(t).toLowerCase());
+    const rawContains = (p.allergens_tags || []).map((t) => String(t).toLowerCase());
+    const rawTraces = (p.traces_tags || []).map((t) => String(t).toLowerCase());
+    const has = (list, ...needles) => needles.some((n) => list.some((t) => t.includes(n)));
+
+    // OFF tag -> plain English. Covers the FDA "Big 9" plus the EU additions.
+    const ALLERGEN_NAMES = [
+      ["peanut", "peanuts"], ["nuts", "tree nuts"], ["milk", "milk"], ["egg", "eggs"],
+      ["gluten", "wheat/gluten"], ["soybean", "soy"], ["soy", "soy"], ["fish", "fish"],
+      ["crustacean", "shellfish"], ["mollusc", "shellfish"], ["sesame", "sesame"],
+      ["sulphite", "sulphites"], ["sulfite", "sulphites"], ["celery", "celery"],
+      ["mustard", "mustard"], ["lupin", "lupin"],
+    ];
+    const toNames = (tags) => {
+      const out = [];
+      tags.forEach((t) => {
+        const hit = ALLERGEN_NAMES.find(([k]) => t.includes(k));
+        // Unknown tag: strip the "en:" prefix rather than dropping it silently —
+        // an unrecognized allergen must still reach the user.
+        const name = hit ? hit[1] : t.replace(/^[a-z]{2}:/, "").replace(/-/g, " ");
+        if (name && !out.includes(name)) out.push(name);
+      });
+      return out;
+    };
+
+    const contains = toNames(rawContains);
+    const mayContain = toNames(rawTraces).filter((n) => !contains.includes(n));
+
+    const diet = {
+      // "free" / "contains" / null(unknown) — the client renders nothing for null.
+      gluten: has(labels, "gluten-free", "no-gluten") ? "free"
+            : has(rawContains, "gluten") ? "contains" : null,
+      gmo: has(labels, "non-gmo", "no-gmo", "sans-ogm") ? "free"
+         : has(labels, "contains-gmo") ? "contains" : null,
+      organic: has(labels, "organic", "bio") ? true : null,
+      vegan: has(labels, "vegan") ? true : null,
+      contains,          // declared ingredients
+      mayContain,        // cross-contamination ("may contain") warnings
+    };
+
     return res.status(200).json({
       ok: true,
       found: true,
       barcode,
+      diet,
       name: (p.product_name || "").trim() || null,
       brand: (p.brands || "").split(",")[0].trim() || null,
       nova,

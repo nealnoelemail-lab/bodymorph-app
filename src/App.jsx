@@ -8105,6 +8105,9 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
       fats: String(m.fats ?? 0),
       nova: bcResult.nova ?? undefined,   // undefined when unknown -> no badge, never a guess
       barcode: bcResult.barcode,
+      // Keep the declared allergens on the logged item so the warning survives in
+      // the day's log (and can feed coach/AI context later).
+      allergens: (bcResult.diet?.contains || []).length ? bcResult.diet.contains : undefined,
       logged: false,
     }]);
     setBcResult(null); setBcError(null); setBcManual(false); setBcTyped("");
@@ -8293,6 +8296,54 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
                       )}
                     </div>
                   )}
+
+                  {/* Diet certifications — shown ONLY when the product actually carries
+                      the claim. Missing data is silence, never an implied "free of". */}
+                  {(() => {
+                    const d = bcResult.diet || {};
+                    const chips = [];
+                    if (d.gluten === "free")     chips.push(["Gluten free", "#3ddc84"]);
+                    if (d.gluten === "contains") chips.push(["Contains gluten", "#ff9d5c"]);
+                    if (d.gmo === "free")        chips.push(["Non-GMO", "#3ddc84"]);
+                    if (d.gmo === "contains")    chips.push(["Contains GMOs", "#ff9d5c"]);
+                    if (d.organic)               chips.push(["Organic", "#3ddc84"]);
+                    if (d.vegan)                 chips.push(["Vegan", "#3ddc84"]);
+                    if (!chips.length) return null;
+                    return (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginBottom:12 }}>
+                        {chips.map(([t,c]) => (
+                          <span key={t} style={{ background:`${c}1e`, border:`1px solid ${c}`, color:c, borderRadius:20, padding:"5px 12px", fontSize:14.5, fontWeight:700 }}>{t}</span>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Allergens — "contains" (declared) vs "may contain" (cross-contact).
+                      Always paired with a check-the-package caution: this is crowd-sourced
+                      data and an allergy mistake is not a recoverable one. */}
+                  {(() => {
+                    const d = bcResult.diet || {};
+                    const c = d.contains || [], m = d.mayContain || [];
+                    if (!c.length && !m.length) return null;
+                    return (
+                      <div style={{ background:"rgba(255,157,92,0.08)", border:"1px solid rgba(255,157,92,0.45)", borderRadius:10, padding:"11px 13px", marginBottom:12 }}>
+                        <div style={{ color:"#ff9d5c", fontSize:15.5, fontWeight:700, marginBottom:5 }}>⚠ Allergens</div>
+                        {c.length > 0 && (
+                          <div style={{ color:"#f0f0f8", fontSize:15.5, lineHeight:1.5 }}>
+                            <b>Contains:</b> {c.join(", ")}
+                          </div>
+                        )}
+                        {m.length > 0 && (
+                          <div style={{ color:"#c8c8e0", fontSize:15, lineHeight:1.5, marginTop:3 }}>
+                            <b>May contain:</b> {m.join(", ")}
+                          </div>
+                        )}
+                        <div style={{ color:"#9898b8", fontSize:13, lineHeight:1.45, marginTop:6 }}>
+                          Always check the package — this comes from a public food database and can be incomplete.
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
                     <span style={{ color:"#c8c8e0", fontSize:17, fontWeight:600 }}>Amount</span>
