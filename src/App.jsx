@@ -4,7 +4,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode } from "./aiproxy";
-import { decodeBarcodeFromFile, novaInfo, processedBreakdown } from "./barcode";
+import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -7989,6 +7989,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [pickedMeasureIdx, setPickedMeasureIdx] = useState(0);
   const [pickedQty, setPickedQty] = useState("1");
   const searchTimer = useRef(null);
+  const searchInputRef = useRef(null);   // so we can dismiss the iOS keyboard on demand
 
   // ── Food Facts (barcode) ──
   const [bcBusy, setBcBusy] = useState(false);
@@ -8167,47 +8168,56 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
       {/* Scrollable content */}
       <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
 
-        {/* Three ways in — identical cards: blue photo, yellow search, green barcode. */}
-        {(() => {
+        {/* Three ways in — COMPACT horizontal rows: half the height of the old stacked
+            cards (so results aren't pushed off-screen) with much larger type.
+            They collapse while a flow is running, so the scan result / search lands at
+            the TOP of the screen instead of buried under three big buttons. */}
+        {!(bcBusy || bcError || bcResult || bcManual || searchActive || imgSrc) && (() => {
           const card = (accent, active) => ({
-            background: active ? `rgba(${accent.rgb},0.15)` : `rgba(${accent.rgb},0.09)`,
+            background: active ? `rgba(${accent.rgb},0.18)` : `rgba(${accent.rgb},0.09)`,
             border: `1px solid rgba(${accent.rgb},0.5)`,
-            borderRadius: 18,
+            borderRadius: 14,
             color: accent.hex,
-            padding: "26px 16px",
-            minHeight: 152,
+            padding: "13px 16px",
+            width: "100%",
             boxSizing: "border-box",
             cursor: "pointer",
             fontFamily: "'DM Sans'",
             fontWeight: 700,
             display: "flex",
-            flexDirection: "column",
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
+            gap: 14,
+            textAlign: "left",
           });
           const BLUE   = { hex:"#3d8eff", rgb:"61,142,255" };
           const YELLOW = { hex:"#e8ff00", rgb:"232,255,0" };
           const GREEN  = { hex:"#3ddc84", rgb:"61,220,132" };
-          const icon = { fontSize:38, lineHeight:1 };
-          const name = { fontSize:19 };
-          const sub  = { fontSize:13, fontWeight:400, color:"#9898b8", textAlign:"center", lineHeight:1.35 };
+          const icon = { fontSize:32, lineHeight:1, flexShrink:0 };
+          const name = { display:"block", fontSize:26, lineHeight:1.15 };
+          const sub  = { display:"block", fontSize:16, fontWeight:400, color:"#9898b8", marginTop:2 };
           return (
-            <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:16 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
               <button onClick={()=>fileRef.current.click()} style={card(BLUE, !!imgSrc)}>
                 <span style={icon}>📷</span>
-                <span style={name}>Macro AI</span>
-                <span style={sub}>Snap a photo of your meal</span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={name}>Macro AI</span>
+                  <span style={sub}>Snap your meal</span>
+                </span>
               </button>
               <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={card(YELLOW, searchActive)}>
                 <span style={icon}>🔍</span>
-                <span style={name}>Search Food</span>
-                <span style={sub}>Add it manually from the USDA database</span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={name}>Search Food</span>
+                  <span style={sub}>Type it in</span>
+                </span>
               </button>
               <button onClick={startScan} style={card(GREEN, !!(bcResult || bcManual || bcBusy))}>
                 <span style={icon}>🏷️</span>
-                <span style={name}>Food Facts</span>
-                <span style={sub}>Photograph a barcode — macros + how processed it is</span>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={name}>Food Facts</span>
+                  <span style={sub}>Scan a barcode</span>
+                </span>
               </button>
             </div>
           );
@@ -8216,15 +8226,22 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
         {/* Food Facts panel — scan result, manual entry, errors */}
         {(bcBusy || bcError || bcResult || bcManual) && (
           <div style={{ marginBottom:16, background:"#12121a", border:"1px solid rgba(61,220,132,0.35)", borderRadius:14, padding:"14px 14px" }}>
+            {/* Header so there's always a way back to the three options */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:12 }}>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#3ddc84" }}>FOOD FACTS</span>
+              <button onClick={()=>{ setBcResult(null); setBcError(null); setBcManual(false); setBcTyped(""); setBcBusy(false); }}
+                style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", padding:"8px 16px", fontSize:16, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans'" }}>Close</button>
+            </div>
+
             {bcBusy && (
-              <div style={{ display:"flex", alignItems:"center", gap:9, color:"#3ddc84", fontSize:13.5 }}>
-                <div style={{ width:14, height:14, border:"2px solid #2a2a3d", borderTop:"2px solid #3ddc84", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
-                Looking up the product…
+              <div style={{ display:"flex", alignItems:"center", gap:10, color:"#3ddc84", fontSize:17 }}>
+                <div style={{ width:16, height:16, border:"2px solid #2a2a3d", borderTop:"2px solid #3ddc84", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+                Reading the barcode…
               </div>
             )}
 
             {!bcBusy && bcError && (
-              <div style={{ color:"#ff9d5c", fontSize:13.5, lineHeight:1.5, marginBottom: bcManual ? 10 : 0 }}>{bcError}</div>
+              <div style={{ color:"#ff9d5c", fontSize:17, lineHeight:1.5, marginBottom: bcManual ? 12 : 0 }}>{bcError}</div>
             )}
 
             {/* Web (or scanner unavailable): type the number under the barcode */}
@@ -8232,9 +8249,9 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
               <div style={{ display:"flex", gap:8, marginTop: bcError ? 0 : 2 }}>
                 <input value={bcTyped} onChange={e=>setBcTyped(e.target.value.replace(/\D/g,""))}
                   inputMode="numeric" placeholder="Type the barcode number"
-                  style={{ flex:1, minWidth:0, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" }} />
+                  style={{ flex:1, minWidth:0, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"13px 14px", fontSize:18, fontFamily:"'DM Sans'", outline:"none" }} />
                 <button onClick={()=>bcTyped.length >= 6 && runLookup(bcTyped)} disabled={bcTyped.length < 6}
-                  style={{ background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"0 16px", fontWeight:700, fontSize:14, cursor: bcTyped.length<6?"default":"pointer", opacity: bcTyped.length<6?0.5:1 }}>Look up</button>
+                  style={{ background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"0 18px", fontWeight:700, fontSize:17, cursor: bcTyped.length<6?"default":"pointer", opacity: bcTyped.length<6?0.5:1 }}>Look up</button>
               </div>
             )}
 
@@ -8242,6 +8259,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
             {!bcBusy && bcResult && (() => {
               const m = bcScaled();
               const ni = novaInfo(bcResult.nova);
+              const verdict = foodVerdict(bcResult);
               return (
                 <div>
                   <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 }}>
@@ -8249,45 +8267,58 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
                       <img src={bcResult.image} alt="" style={{ width:52, height:52, borderRadius:8, objectFit:"cover", flexShrink:0, background:"#1a1a26" }} />
                     )}
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ color:"#f0f0f8", fontSize:15, fontWeight:700, lineHeight:1.3 }}>
+                      <div style={{ color:"#f0f0f8", fontSize:20, fontWeight:700, lineHeight:1.25 }}>
                         {productLabel(bcResult)}
                       </div>
-                      {/* Processing level — only when the database actually classifies it */}
-                      {ni ? (
-                        <span style={{ display:"inline-block", marginTop:6, background:`${ni.color}22`, border:`1px solid ${ni.color}`, color:ni.color, borderRadius:20, padding:"3px 10px", fontSize:11.5, fontWeight:700 }}>
-                          {ni.label}
+                      {/* Verdict FIRST — "should I eat this?" is the actual question.
+                          Processing level is a supporting detail, not the headline. */}
+                      {verdict ? (
+                        <span style={{ display:"inline-block", marginTop:7, background:`${verdict.color}22`, border:`1px solid ${verdict.color}`, color:verdict.color, borderRadius:20, padding:"5px 13px", fontSize:16, fontWeight:700 }}>
+                          {verdict.label}{verdict.nutriscore ? ` · grade ${verdict.nutriscore}` : ""}
                         </span>
                       ) : (
-                        <div style={{ color:"#74748a", fontSize:12, marginTop:5 }}>No processing rating for this product</div>
+                        <div style={{ color:"#9898b8", fontSize:15, marginTop:6 }}>No nutrition rating for this product</div>
+                      )}
+                      {ni && (
+                        <div style={{ color:ni.color, fontSize:14.5, marginTop:6 }}>{ni.label}</div>
                       )}
                     </div>
                   </div>
 
+                  {verdict && (
+                    <div style={{ background:"#1a1a26", borderRadius:10, padding:"10px 12px", marginBottom:12 }}>
+                      <div style={{ color:"#c8c8e0", fontSize:15, lineHeight:1.5 }}>{verdict.why}</div>
+                      {verdict.proteinNote && (
+                        <div style={{ color:"#3ddc84", fontSize:15, marginTop:4, fontWeight:600 }}>{verdict.proteinNote}</div>
+                      )}
+                    </div>
+                  )}
+
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <span style={{ color:"#9898b8", fontSize:13 }}>Amount</span>
+                    <span style={{ color:"#c8c8e0", fontSize:17, fontWeight:600 }}>Amount</span>
                     <input value={bcGrams} onChange={e=>setBcGrams(e.target.value.replace(/[^\d.]/g,""))}
                       inputMode="decimal"
-                      style={{ width:78, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" }} />
-                    <span style={{ color:"#9898b8", fontSize:13 }}>g</span>
+                      style={{ width:92, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"11px 12px", fontSize:19, fontFamily:"'DM Sans'", outline:"none" }} />
+                    <span style={{ color:"#c8c8e0", fontSize:17, fontWeight:600 }}>g</span>
                     {bcResult.servingLabel && (
-                      <span style={{ color:"#74748a", fontSize:11.5, marginLeft:2 }}>serving: {bcResult.servingLabel}</span>
+                      <span style={{ color:"#9898b8", fontSize:14, marginLeft:2 }}>serving: {bcResult.servingLabel}</span>
                     )}
                   </div>
 
                   <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
                     {[["cal", m.cal, ""], ["protein", m.protein, "g"], ["carbs", m.carbs, "g"], ["fats", m.fats, "g"]].map(([k,v,u]) => (
                       <div key={k} style={{ flex:"1 1 60px", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"7px 4px", textAlign:"center" }}>
-                        <div style={{ color:"#f0f0f8", fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:16 }}>{v == null ? "—" : v}{u}</div>
-                        <div style={{ color:"#74748a", fontSize:10, textTransform:"uppercase", letterSpacing:0.5 }}>{k}</div>
+                        <div style={{ color:"#f0f0f8", fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:22 }}>{v == null ? "—" : v}{u}</div>
+                        <div style={{ color:"#9898b8", fontSize:12.5, textTransform:"uppercase", letterSpacing:0.5 }}>{k}</div>
                       </div>
                     ))}
                   </div>
 
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={()=>{ setBcResult(null); setBcError(null); setBcManual(false); setBcTyped(""); }}
-                      style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", padding:"10px", fontSize:14, cursor:"pointer", fontFamily:"'DM Sans'" }}>Cancel</button>
+                      style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", padding:"13px", fontSize:17, cursor:"pointer", fontFamily:"'DM Sans'" }}>Cancel</button>
                     <button onClick={confirmBarcode}
-                      style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"10px", fontSize:14.5, fontWeight:700, cursor:"pointer", fontFamily:"'DM Sans'" }}>Add to {slotLabel}</button>
+                      style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"13px", fontSize:18, fontWeight:700, cursor:"pointer", fontFamily:"'DM Sans'" }}>Add to {slotLabel}</button>
                   </div>
                 </div>
               );
@@ -8300,14 +8331,28 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
         {/* USDA Search panel */}
         {searchActive && !imgSrc && (
           <div style={{ marginBottom:16 }}>
+            {/* Header: title + a way OUT (the keyboard covers everything otherwise) */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:10 }}>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#e8ff00" }}>SEARCH FOOD</span>
+              <button onClick={()=>{ searchInputRef.current?.blur(); setSearchActive(false); setSearchQuery(""); setSearchResults([]); setPickedFood(null); setSearchError(null); }}
+                style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", padding:"8px 16px", fontSize:16, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans'" }}>Close</button>
+            </div>
             <div style={{ position:"relative", marginBottom:10 }}>
-              <input autoFocus value={searchQuery} onChange={e=>onSearchChange(e.target.value)}
+              <input ref={searchInputRef} autoFocus value={searchQuery} onChange={e=>onSearchChange(e.target.value)}
+                enterKeyHint="search"
+                onKeyDown={e=>{ if (e.key === "Enter") e.currentTarget.blur(); }}
                 placeholder="Type a food, e.g. grilled chicken…"
-                style={{ width:"100%", background:"#1a1a26", border:"1px solid #3d8eff", borderRadius:10, color:"#f0f0f8", padding:"10px 36px 10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
-              {searchQuery.length > 0 && (
-                <button onClick={()=>{ setSearchQuery(""); setSearchResults([]); setPickedFood(null); setSearchError(null); }}
-                  style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", color:"#9898b8", fontSize:18, cursor:"pointer", padding:0 }}>✕</button>
-              )}
+                style={{ width:"100%", background:"#1a1a26", border:"1px solid #3d8eff", borderRadius:10, color:"#f0f0f8", padding:"13px 80px 13px 14px", fontSize:18, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
+              <div style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:2 }}>
+                {searchQuery.length > 0 && (
+                  <button onClick={()=>{ setSearchQuery(""); setSearchResults([]); setPickedFood(null); setSearchError(null); searchInputRef.current?.focus(); }}
+                    aria-label="Clear"
+                    style={{ background:"transparent", border:"none", color:"#9898b8", fontSize:22, cursor:"pointer", padding:"4px 6px", lineHeight:1 }}>✕</button>
+                )}
+                {/* Dismiss the keyboard — iOS gives no built-in way out of this field. */}
+                <button onClick={()=>searchInputRef.current?.blur()} aria-label="Hide keyboard"
+                  style={{ background:"#2a2a3d", border:"none", borderRadius:8, color:"#e8ff00", fontSize:20, cursor:"pointer", padding:"4px 10px", lineHeight:1.1 }}>⌄</button>
+              </div>
             </div>
 
             {searchLoading && (

@@ -49,6 +49,65 @@ export const NOVA_LABEL = {
 
 export const novaInfo = (nova) => NOVA_LABEL[nova] || null;
 
+// ── "Should I eat this?" ─────────────────────────────────────────────────────
+// NOVA alone is a bad shopping guide: most barcoded food is NOVA 4, so it flags
+// nearly everything and tells you nothing. NOVA answers "how was it made"; it does
+// NOT answer "is this a good pick." So we combine two signals that cover each
+// other's blind spots — this pairing is the accepted approach, not our invention:
+//
+//   • Nutri-Score (A–E)  — nutritional quality. Good at ranking similar products,
+//     but ignores processing and is easy on diet soda / harsh on nuts and olive oil.
+//   • NOVA (1–4)         — degree of processing. Catches what Nutri-Score misses.
+//
+// Neither is gospel, so the verdict is deliberately about FREQUENCY ("everyday" vs
+// "occasional"), never a moral judgement of the food or the person eating it.
+const GRADE_RANK = { a: 0, b: 1, c: 2, d: 3, e: 4 };
+
+export function foodVerdict({ nutriscore, nova, per100g } = {}) {
+  const g = GRADE_RANK[String(nutriscore || "").toLowerCase()];
+  const hasGrade = g !== undefined;
+  const n = parseInt(nova, 10);
+  const hasNova = n >= 1 && n <= 4;
+  if (!hasGrade && !hasNova) return null;              // no data -> say nothing
+
+  // Protein density: the number that actually matters for a fat-loss or
+  // muscle client, and something neither public score captures.
+  const cal = per100g?.cal, prot = per100g?.protein;
+  const proteinPer100Cal = cal > 0 && prot != null ? Math.round((prot / cal) * 100 * 10) / 10 : null;
+
+  let tier, label, color, why;
+  if (hasGrade && g <= 1 && (!hasNova || n <= 3)) {
+    tier = "everyday"; label = "Everyday food"; color = "#3ddc84";
+    why = "Good nutritional quality.";
+  } else if (hasGrade && g <= 2) {
+    tier = "sometimes"; label = "Fine regularly"; color = "#3ddc84";
+    why = "Middling quality — fine as part of a balanced day.";
+  } else if (hasGrade && g === 3) {
+    tier = "sometimes"; label = "Keep it occasional"; color = "#ff9d5c";
+    why = "Below-average nutritional quality.";
+  } else if (hasGrade) {
+    tier = "treat"; label = "Treat food"; color = "#ff7070";
+    why = "Poor nutritional quality — worth keeping small and infrequent.";
+  } else {
+    // No Nutri-Score: fall back to processing alone, and say so.
+    tier = n <= 2 ? "everyday" : n === 3 ? "sometimes" : "treat";
+    label = n <= 2 ? "Everyday food" : n === 3 ? "Keep it occasional" : "Treat food";
+    color = n <= 2 ? "#3ddc84" : n === 3 ? "#ff9d5c" : "#ff7070";
+    why = "Based on processing level only — no nutrition grade for this product.";
+  }
+
+  // Protein density can upgrade the read for a training client: a NOVA-4 protein
+  // powder is not the same decision as a NOVA-4 candy bar.
+  let proteinNote = null;
+  if (proteinPer100Cal != null) {
+    if (proteinPer100Cal >= 10) proteinNote = `High protein — ${proteinPer100Cal}g per 100 cal.`;
+    else if (proteinPer100Cal >= 5) proteinNote = `Decent protein — ${proteinPer100Cal}g per 100 cal.`;
+    else proteinNote = `Low protein — ${proteinPer100Cal}g per 100 cal.`;
+  }
+
+  return { tier, label, color, why, proteinNote, proteinPer100Cal, nutriscore: hasGrade ? String(nutriscore).toUpperCase() : null };
+}
+
 // Calorie-weighted share of ultra-processed (NOVA 4) food across logged items.
 // Items WITHOUT a nova score are excluded from both sides of the fraction — and
 // `scoredCal` / `totalCal` are returned so the UI can state its own coverage
