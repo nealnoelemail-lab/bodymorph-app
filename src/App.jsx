@@ -4,7 +4,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode } from "./aiproxy";
-import { scanBarcode, barcodeSupported, novaInfo, processedBreakdown } from "./barcode";
+import { decodeBarcodeFromFile, novaInfo, processedBreakdown } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -7960,6 +7960,17 @@ Reply ONLY with JSON, no markdown, no commentary:
   out.grocery = buildGroceryList(out);   // aisle-grouped weekly shopping list
   return out;
 }
+// "Coca-Cola" + "Coca-Cola" -> "Coca-Cola". Open Food Facts often repeats the brand
+// inside the product name, and the two fields are crowd-sourced, so join them only
+// when the name doesn't already carry the brand.
+function productLabel(p) {
+  const brand = (p?.brand || "").trim();
+  const name = (p?.name || "").trim();
+  if (!brand) return name || "Scanned item";
+  if (!name) return brand;
+  return name.toLowerCase().includes(brand.toLowerCase()) ? name : `${brand} ${name}`;
+}
+
 function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
   const fileRef = useRef();
@@ -7986,6 +7997,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [bcGrams, setBcGrams] = useState("100");    // how much they actually ate
   const [bcManual, setBcManual] = useState(false);  // typing the number instead of scanning
   const [bcTyped, setBcTyped] = useState("");
+  const barcodeRef = useRef();                      // hidden camera input for barcode photos
 
   const setField = (i, field, val) => {
     setLocalItems(prev => { const a=[...prev]; a[i]={...a[i],[field]:val}; return a; });
@@ -8041,15 +8053,27 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
     setBcBusy(false);
   };
 
-  const startScan = async () => {
+  // Opens the OS camera (same proven path as Macro AI), then decodes the barcode
+  // from the photo in JS. No native plugin — see src/barcode.js for why.
+  const startScan = () => {
     setBcManual(false); setBcError(null); setBcResult(null);
-    if (!barcodeSupported()) { setBcManual(true); return; }   // web: type it instead
+    barcodeRef.current?.click();
+  };
+
+  const handleBarcodePhoto = async (file) => {
+    setBcBusy(true); setBcError(null); setBcResult(null);
     try {
-      const code = await scanBarcode();
-      if (!code) return;                                       // user cancelled
-      runLookup(code);
+      const code = await decodeBarcodeFromFile(file);
+      if (!code) {
+        setBcBusy(false);
+        setBcError("Couldn't read that barcode — get closer, hold steady, or type the number below.");
+        setBcManual(true);
+        return;
+      }
+      await runLookup(code);                                   // sets its own busy state
     } catch (e) {
-      setBcError(e.message || "Couldn't open the scanner.");
+      setBcBusy(false);
+      setBcError("Couldn't read that barcode — type the number below instead.");
       setBcManual(true);
     }
   };
@@ -8071,7 +8095,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const confirmBarcode = () => {
     const m = bcScaled();
     if (!m || !bcResult) return;
-    const name = [bcResult.brand, bcResult.name].filter(Boolean).join(" ") || "Scanned item";
+    const name = productLabel(bcResult);
     setLocalItems(prev => [...prev, {
       food: `${name} (${bcGrams}g)`,
       cal: String(m.cal ?? 0),
@@ -8183,7 +8207,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
               <button onClick={startScan} style={card(GREEN, !!(bcResult || bcManual || bcBusy))}>
                 <span style={icon}>🏷️</span>
                 <span style={name}>Food Facts</span>
-                <span style={sub}>Scan a barcode — macros + how processed it is</span>
+                <span style={sub}>Photograph a barcode — macros + how processed it is</span>
               </button>
             </div>
           );
@@ -8226,7 +8250,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
                     )}
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ color:"#f0f0f8", fontSize:15, fontWeight:700, lineHeight:1.3 }}>
-                        {[bcResult.brand, bcResult.name].filter(Boolean).join(" ") || "Scanned item"}
+                        {productLabel(bcResult)}
                       </div>
                       {/* Processing level — only when the database actually classifies it */}
                       {ni ? (
@@ -8270,6 +8294,7 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
             })()}
           </div>
         )}
+        <input ref={barcodeRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handleBarcodePhoto(e.target.files[0]); barcodeRef.current.value=""; } }} />
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />
 
         {/* USDA Search panel */}

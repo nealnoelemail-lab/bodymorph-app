@@ -1,63 +1,38 @@
-// Barcode scanning via ML Kit (on-device — no image ever leaves the phone).
-// Native iOS/Android only; on the web the caller falls back to typing the number,
-// so this module never throws just because it's running in a browser.
-import { Capacitor } from "@capacitor/core";
+// Barcode decoding — JS/WASM (ZXing via `barcode-detector`), NOT a native plugin.
+//
+// WHY NOT THE NATIVE PLUGIN: @capacitor-mlkit/barcode-scanning ships CocoaPods only
+// (no Package.swift). This project builds iOS through Swift Package Manager, so
+// `cap sync` silently SKIPPED it — the native class never linked and every call threw
+// "not implemented on iOS". Forcing it in would also drag Google's MLKit binary
+// framework into SPM and would break again on any npm reinstall.
+//
+// This approach instead reuses the pattern Macro AI already proves works in this app:
+// the OS camera via <input type="file" capture>, then decode the still image in JS.
+// Works identically on native and web, survives npm installs, nothing to link.
+// Trade-off: one deliberate snapshot rather than continuous live scanning.
 
-const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
-
-// Loaded lazily so the web bundle never pulls the native plugin in at startup.
-// Returns both the scanner and the format enum — the plugin only accepts values
-// from its own BarcodeFormat enum ("EAN_13"), NOT the TS key names ("Ean13"):
-// passing the key names matches no format and the camera silently never opens.
-async function plugin() {
-  const m = await import("@capacitor-mlkit/barcode-scanning");
-  return { BarcodeScanner: m.BarcodeScanner, BarcodeFormat: m.BarcodeFormat };
+// Decoder is loaded lazily (it pulls a WASM blob) so it never slows app startup.
+let _detector = null;
+async function detector() {
+  if (_detector) return _detector;
+  const { BarcodeDetector } = await import("barcode-detector/pure");
+  _detector = new BarcodeDetector({
+    // Product barcodes only — keeps it from locking onto a QR code on the same box.
+    formats: ["ean_13", "ean_8", "upc_a", "upc_e"],
+  });
+  return _detector;
 }
 
-export const barcodeSupported = () => IS_NATIVE;
+// Always available now — decoding is pure JS, no native dependency.
+export const barcodeSupported = () => true;
 
-// Scan one barcode. Resolves to the digits, or null if the user cancelled.
-// Throws with a plain-language message on permission denial / real failures.
-export async function scanBarcode() {
-  if (!IS_NATIVE) throw new Error("Barcode scanning needs the phone app.");
-  const { BarcodeScanner, BarcodeFormat } = await plugin();
-
-  // Bail early with a clear message if the device can't scan at all, rather than
-  // letting scan() fail opaquely.
-  try {
-    const { supported } = await BarcodeScanner.isSupported();
-    if (!supported) throw new Error("This device can't scan barcodes.");
-  } catch (e) {
-    if (/can't scan barcodes/.test(e.message)) throw e;
-    // isSupported unavailable on this version — continue and let scan() speak.
-  }
-
-  // Permission: only ask when we don't already have it, so repeat scans are instant.
-  try {
-    const { camera } = await BarcodeScanner.checkPermissions();
-    if (camera !== "granted") {
-      const req = await BarcodeScanner.requestPermissions();
-      if (req.camera !== "granted") {
-        throw new Error("Camera access is off. Settings → BodyMorph → Camera → On.");
-      }
-    }
-  } catch (e) {
-    if (/Camera access is off/.test(e.message)) throw e;
-    // checkPermissions can throw on some OS versions — fall through and let the
-    // scan itself surface the real problem rather than blocking on a probe.
-  }
-
-  // Product barcodes only (EAN/UPC) — keeps the scanner from locking onto QR codes
-  // on the same package. MUST use the plugin's enum values ("EAN_13"), not the key
-  // names: an unrecognized format list means the camera never opens.
-  const formats = BarcodeFormat
-    ? [BarcodeFormat.Ean13, BarcodeFormat.Ean8, BarcodeFormat.UpcA, BarcodeFormat.UpcE]
-    : ["EAN_13", "EAN_8", "UPC_A", "UPC_E"];
-
-  const { barcodes } = await BarcodeScanner.scan({ formats });
-
-  if (!barcodes || !barcodes.length) return null;            // user backed out
-  const raw = barcodes[0].rawValue || barcodes[0].displayValue || "";
+// Decode a barcode from an image File/Blob (what the camera input hands us).
+// Returns the digits, or null when no barcode is found in the photo.
+export async function decodeBarcodeFromFile(file) {
+  const det = await detector();
+  const results = await det.detect(file);
+  if (!results || !results.length) return null;
+  const raw = results[0].rawValue || "";
   const digits = String(raw).replace(/\D/g, "");
   return digits || null;
 }
