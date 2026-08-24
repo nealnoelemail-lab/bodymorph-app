@@ -6,9 +6,12 @@ import { Capacitor } from "@capacitor/core";
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
 
 // Loaded lazily so the web bundle never pulls the native plugin in at startup.
+// Returns both the scanner and the format enum — the plugin only accepts values
+// from its own BarcodeFormat enum ("EAN_13"), NOT the TS key names ("Ean13"):
+// passing the key names matches no format and the camera silently never opens.
 async function plugin() {
   const m = await import("@capacitor-mlkit/barcode-scanning");
-  return m.BarcodeScanner;
+  return { BarcodeScanner: m.BarcodeScanner, BarcodeFormat: m.BarcodeFormat };
 }
 
 export const barcodeSupported = () => IS_NATIVE;
@@ -17,7 +20,17 @@ export const barcodeSupported = () => IS_NATIVE;
 // Throws with a plain-language message on permission denial / real failures.
 export async function scanBarcode() {
   if (!IS_NATIVE) throw new Error("Barcode scanning needs the phone app.");
-  const BarcodeScanner = await plugin();
+  const { BarcodeScanner, BarcodeFormat } = await plugin();
+
+  // Bail early with a clear message if the device can't scan at all, rather than
+  // letting scan() fail opaquely.
+  try {
+    const { supported } = await BarcodeScanner.isSupported();
+    if (!supported) throw new Error("This device can't scan barcodes.");
+  } catch (e) {
+    if (/can't scan barcodes/.test(e.message)) throw e;
+    // isSupported unavailable on this version — continue and let scan() speak.
+  }
 
   // Permission: only ask when we don't already have it, so repeat scans are instant.
   try {
@@ -35,10 +48,13 @@ export async function scanBarcode() {
   }
 
   // Product barcodes only (EAN/UPC) — keeps the scanner from locking onto QR codes
-  // on the same package.
-  const { barcodes } = await BarcodeScanner.scan({
-    formats: ["Ean13", "Ean8", "UpcA", "UpcE"],
-  });
+  // on the same package. MUST use the plugin's enum values ("EAN_13"), not the key
+  // names: an unrecognized format list means the camera never opens.
+  const formats = BarcodeFormat
+    ? [BarcodeFormat.Ean13, BarcodeFormat.Ean8, BarcodeFormat.UpcA, BarcodeFormat.UpcE]
+    : ["EAN_13", "EAN_8", "UPC_A", "UPC_E"];
+
+  const { barcodes } = await BarcodeScanner.scan({ formats });
 
   if (!barcodes || !barcodes.length) return null;            // user backed out
   const raw = barcodes[0].rawValue || barcodes[0].displayValue || "";

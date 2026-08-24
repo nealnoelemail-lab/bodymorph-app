@@ -8474,7 +8474,17 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   return (
     <div style={{ marginTop:10, background:"#0e0e16", borderRadius:10, padding:10 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-        <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700 }}>ITEM {index+1}{looking && <span style={{ color:"#3d8eff", fontWeight:600, marginLeft:8 }}>· looking up…</span>}</span>
+        <span style={{ color:"#e8ff00", fontSize:12, fontWeight:700, display:"inline-flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          ITEM {index+1}
+          {looking && <span style={{ color:"#3d8eff", fontWeight:600 }}>· looking up…</span>}
+          {/* Processing badge — only for Food Facts scans that carry a real rating. */}
+          {(() => {
+            const ni = novaInfo(it.nova);
+            return ni ? (
+              <span style={{ background:`${ni.color}22`, border:`1px solid ${ni.color}`, color:ni.color, borderRadius:20, padding:"2px 8px", fontSize:10.5, fontWeight:700 }}>{ni.label}</span>
+            ) : null;
+          })()}
+        </span>
         {canRemove && <button onClick={onRemove} style={{ background:"transparent", border:"none", color:"#ff7070", fontSize:32, cursor:"pointer", padding:0, lineHeight:1 }}>&times;</button>}
       </div>
       <input value={it.food||""} onChange={e=>onName(e.target.value)} placeholder="Type a food, e.g. boiled egg" style={{ width:"100%", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:13, fontFamily:"'DM Sans'", outline:"none", boxSizing:"border-box" }} />
@@ -8773,6 +8783,17 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     snackList.filter(s=>s.logged).forEach(s => { totalCal+=parseInt(s.cal)||0; totalP+=parseInt(s.protein)||0; totalC+=parseInt(s.carbs)||0; totalF+=parseInt(s.fats)||0; });
   }
   const calLeft = Math.max(calGoal-totalCal,0);
+
+  // Whole vs processed, calorie-weighted across everything logged today. Only items
+  // scanned via Food Facts carry a `nova` rating, so this returns null until at least
+  // one is logged — and it reports its own coverage rather than implying it scored
+  // the whole day (see docs/barcode-processed-food-spec.md).
+  const processed = (() => {
+    const logged = [];
+    MEAL_SLOTS.filter(s=>s.id!=="snacks").forEach(s => slotList(s.id).filter(x=>x.logged).forEach(x => logged.push(x)));
+    if (snackHasData) snackList.filter(s=>s.logged).forEach(s => logged.push(s));
+    return processedBreakdown(logged);
+  })();
   const calOver = totalCal > calGoal;
 
   const saveFoodLogger = (slotId, newItems) => {
@@ -8926,6 +8947,28 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
             ))}
           </div>
         </div>
+
+        {/* Whole vs processed — only once something scanned via Food Facts is logged. */}
+        {processed && (
+          <div style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"12px 14px", marginBottom:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+              <span style={{ color:"#c8c8e0", fontSize:12.5, fontWeight:600, letterSpacing:0.5 }}>WHOLE VS PROCESSED</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:17, color: processed.ultraPct >= 50 ? "#ff7070" : processed.ultraPct >= 25 ? "#ff9d5c" : "#3ddc84" }}>
+                {processed.ultraPct}% ultra-processed
+              </span>
+            </div>
+            {/* Green = whole/basic, amber = processed, red = ultra-processed */}
+            <div style={{ display:"flex", height:8, borderRadius:5, overflow:"hidden", background:"#1a1a26", marginBottom:7 }}>
+              <div style={{ width:`${processed.wholePct}%`, background:"#3ddc84" }} />
+              <div style={{ width:`${Math.max(0, 100 - processed.wholePct - processed.ultraPct)}%`, background:"#ff9d5c" }} />
+              <div style={{ width:`${processed.ultraPct}%`, background:"#ff7070" }} />
+            </div>
+            <div style={{ color:"#74748a", fontSize:11.5, lineHeight:1.45 }}>
+              {processed.wholePct}% whole food · based on {processed.scoredCal.toLocaleString()} of {processed.totalCal.toLocaleString()} logged cal
+              {processed.partial && " — scan more items with Food Facts for a fuller picture"}
+            </div>
+          </div>
+        )}
 
         {/* Meal Plan */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
