@@ -7367,7 +7367,6 @@ const DAY_AB = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 
 function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
   const [adding, setAdding] = useState(null);
-  const [sel, setSel] = useState(new Date().getDay());
   const title = kind === "peptide" ? "PEPTIDES" : "SUPPLEMENTS";
   const accent = "#e8ff00";
 
@@ -7380,8 +7379,6 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
   }
 
   const isOn = (id) => entries.some(e=>e.id===id);
-  // Items scheduled for the selected day
-  const todayEntries = entries.filter(e => (e.days||[]).includes(sel));
 
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
@@ -7392,40 +7389,7 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{title}</div>
       </div>
 
-      {/* Day selector */}
-      <div style={{ display:"flex", gap:5, padding:"4px 20px 12px" }}>
-        {DAY_AB.map((ab,di) => {
-          const on = di === sel;
-          const has = entries.some(e=>(e.days||[]).includes(di));
-          return (
-            <button key={di} onClick={()=>setSel(di)} style={{ flex:1, position:"relative", background: on?"#e8ff00":"#1a1a26", border:"1px solid "+(on?"#e8ff00":"#2a2a3d"), color: on?"#000":"#f0f0f8", borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, fontWeight:700 }}>
-              {ab}
-              {has && !on && <span style={{ position:"absolute", top:3, right:4, width:5, height:5, borderRadius:"50%", background:"#e8ff00" }} />}
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ padding:"0 20px 0" }}>
-
-        {/* Today's items for selected day — compact single-line display */}
-        {todayEntries.length > 0 && (
-          <>
-            <div style={S.sectionTitle}>{DAY_NAMES[sel].toUpperCase()}</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
-              {todayEntries.map(e => (
-                <div key={e.id} style={{ display:"flex", alignItems:"center", gap:10, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"8px 12px" }}>
-                  <span style={{ color:accent, fontSize:13, flexShrink:0 }}>●</span>
-                  <span style={{ fontSize:14, fontWeight:600, flex:1 }}>{e.name}</span>
-                  <span style={{ color:"#9898b8", fontSize:12, flexShrink:0 }}>{(e.timing||[]).join(" & ")} {e.dosage ? "· "+e.dosage : ""}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {todayEntries.length === 0 && entries.length > 0 && (
-          <div style={{ color:"#9898b8", fontSize:13, textAlign:"center", padding:"12px 0 18px" }}>Nothing scheduled for {DAY_NAMES[sel]}.</div>
-        )}
+      <div style={{ padding:"12px 20px 0" }}>
 
         {/* Full list */}
         {entries.length > 0 && (
