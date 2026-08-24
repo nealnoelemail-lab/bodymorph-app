@@ -56,6 +56,26 @@ export async function grokTtsFetch(body, opts = {}) {
   });
 }
 
+// Barcode -> food facts (Open Food Facts, via our proxy). Returns the normalized
+// object the endpoint builds: { found:false } or { found:true, name, nova, per100g, … }.
+// `nova` is null when the product has no processing classification — callers must show
+// no badge in that case rather than guessing.
+export async function lookupBarcode(barcode, opts = {}) {
+  if (!USE_PROXY) throw new Error(NO_PROXY);
+  const res = await fetch(`${API_BASE}/api/openfoodfacts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ barcode }),
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    let msg = `Lookup failed (${res.status})`;
+    try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* keep default */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export const PROXY_BASE = API_BASE;
 
 // Keep the proxy's serverless functions warm during a voice session so a turn never

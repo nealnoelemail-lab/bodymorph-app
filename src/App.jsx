@@ -3,7 +3,8 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth, startPhoneVerify, confirmPhoneVerify, sendPhoneCode, verifyPhoneCode, updatePassword, normalizePhone } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy } from "./aiproxy";
+import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode } from "./aiproxy";
+import { scanBarcode, barcodeSupported, novaInfo, processedBreakdown } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
   createClientInvite, listClientInvites, redeemClientInvite, inviteLink,
@@ -7978,6 +7979,14 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   const [pickedQty, setPickedQty] = useState("1");
   const searchTimer = useRef(null);
 
+  // ── Food Facts (barcode) ──
+  const [bcBusy, setBcBusy] = useState(false);
+  const [bcError, setBcError] = useState(null);
+  const [bcResult, setBcResult] = useState(null);   // normalized product from the proxy
+  const [bcGrams, setBcGrams] = useState("100");    // how much they actually ate
+  const [bcManual, setBcManual] = useState(false);  // typing the number instead of scanning
+  const [bcTyped, setBcTyped] = useState("");
+
   const setField = (i, field, val) => {
     setLocalItems(prev => { const a=[...prev]; a[i]={...a[i],[field]:val}; return a; });
   };
@@ -8011,6 +8020,70 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
   };
 
   const done = () => { onSave(localItems.filter(x=>x.food||x.cal)); };
+
+  // ── Food Facts: barcode -> product, macros, processing level ──
+  const runLookup = async (code) => {
+    setBcBusy(true); setBcError(null); setBcResult(null);
+    try {
+      const r = await lookupBarcode(code);
+      if (!r.found) {
+        setBcError("Not in the food database — try Search Food instead.");
+      } else if (r.per100g?.cal == null) {
+        // Found, but no nutrition data — logging it would create a 0-calorie entry.
+        setBcError("Found it, but this product has no nutrition data — try Search Food.");
+      } else {
+        setBcResult(r);
+        setBcGrams(r.servingG ? String(r.servingG) : "100");
+      }
+    } catch (e) {
+      setBcError(e.message || "Lookup failed.");
+    }
+    setBcBusy(false);
+  };
+
+  const startScan = async () => {
+    setBcManual(false); setBcError(null); setBcResult(null);
+    if (!barcodeSupported()) { setBcManual(true); return; }   // web: type it instead
+    try {
+      const code = await scanBarcode();
+      if (!code) return;                                       // user cancelled
+      runLookup(code);
+    } catch (e) {
+      setBcError(e.message || "Couldn't open the scanner.");
+      setBcManual(true);
+    }
+  };
+
+  // Scale the product's per-100g nutrition to the amount they actually ate.
+  const bcScaled = () => {
+    if (!bcResult) return null;
+    const g = parseFloat(bcGrams) || 0;
+    const f = g / 100;
+    const r1 = (v) => (v == null ? null : Math.round(v * f * 10) / 10);
+    return {
+      cal: bcResult.per100g.cal == null ? null : Math.round(bcResult.per100g.cal * f),
+      protein: r1(bcResult.per100g.protein),
+      carbs: r1(bcResult.per100g.carbs),
+      fats: r1(bcResult.per100g.fats),
+    };
+  };
+
+  const confirmBarcode = () => {
+    const m = bcScaled();
+    if (!m || !bcResult) return;
+    const name = [bcResult.brand, bcResult.name].filter(Boolean).join(" ") || "Scanned item";
+    setLocalItems(prev => [...prev, {
+      food: `${name} (${bcGrams}g)`,
+      cal: String(m.cal ?? 0),
+      protein: String(m.protein ?? 0),
+      carbs: String(m.carbs ?? 0),
+      fats: String(m.fats ?? 0),
+      nova: bcResult.nova ?? undefined,   // undefined when unknown -> no badge, never a guess
+      barcode: bcResult.barcode,
+      logged: false,
+    }]);
+    setBcResult(null); setBcError(null); setBcManual(false); setBcTyped("");
+  };
 
   const onSearchChange = (val) => {
     setSearchQuery(val); setSearchResults([]); setSearchError(null);
@@ -8070,19 +8143,133 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
       {/* Scrollable content */}
       <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
 
-        {/* Two main options — stacked: big photo on top, search below */}
-        <div style={{ display:"flex", flexDirection:"column", gap:14, marginBottom:16 }}>
-          <button onClick={()=>fileRef.current.click()} style={{ background:"rgba(61,142,255,0.12)", border:"1px solid rgba(61,142,255,0.5)", borderRadius:18, color:"#3d8eff", padding:"40px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-            <span style={{ fontSize:50 }}>📷</span>
-            <span style={{ fontSize:23 }}>Macro AI</span>
-            <span style={{ fontSize:14, fontWeight:400, color:"#9898b8" }}>Snap a photo of your meal</span>
-          </button>
-          <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={{ background: searchActive ? "rgba(232,255,0,0.15)" : "rgba(232,255,0,0.07)", border:"1px solid rgba(232,255,0,0.5)", borderRadius:18, color:"#e8ff00", padding:"30px 16px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
-            <span style={{ fontSize:40 }}>🔍</span>
-            <span style={{ fontSize:20 }}>Search Food</span>
-            <span style={{ fontSize:14, fontWeight:400, color:"#9898b8" }}>Add it manually from the USDA database</span>
-          </button>
-        </div>
+        {/* Three ways in — identical cards: blue photo, yellow search, green barcode. */}
+        {(() => {
+          const card = (accent, active) => ({
+            background: active ? `rgba(${accent.rgb},0.15)` : `rgba(${accent.rgb},0.09)`,
+            border: `1px solid rgba(${accent.rgb},0.5)`,
+            borderRadius: 18,
+            color: accent.hex,
+            padding: "26px 16px",
+            minHeight: 152,
+            boxSizing: "border-box",
+            cursor: "pointer",
+            fontFamily: "'DM Sans'",
+            fontWeight: 700,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          });
+          const BLUE   = { hex:"#3d8eff", rgb:"61,142,255" };
+          const YELLOW = { hex:"#e8ff00", rgb:"232,255,0" };
+          const GREEN  = { hex:"#3ddc84", rgb:"61,220,132" };
+          const icon = { fontSize:38, lineHeight:1 };
+          const name = { fontSize:19 };
+          const sub  = { fontSize:13, fontWeight:400, color:"#9898b8", textAlign:"center", lineHeight:1.35 };
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:16 }}>
+              <button onClick={()=>fileRef.current.click()} style={card(BLUE, !!imgSrc)}>
+                <span style={icon}>📷</span>
+                <span style={name}>Macro AI</span>
+                <span style={sub}>Snap a photo of your meal</span>
+              </button>
+              <button onClick={()=>{ setSearchActive(true); setPickedFood(null); setSearchQuery(""); setSearchResults([]); }} style={card(YELLOW, searchActive)}>
+                <span style={icon}>🔍</span>
+                <span style={name}>Search Food</span>
+                <span style={sub}>Add it manually from the USDA database</span>
+              </button>
+              <button onClick={startScan} style={card(GREEN, !!(bcResult || bcManual || bcBusy))}>
+                <span style={icon}>🏷️</span>
+                <span style={name}>Food Facts</span>
+                <span style={sub}>Scan a barcode — macros + how processed it is</span>
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* Food Facts panel — scan result, manual entry, errors */}
+        {(bcBusy || bcError || bcResult || bcManual) && (
+          <div style={{ marginBottom:16, background:"#12121a", border:"1px solid rgba(61,220,132,0.35)", borderRadius:14, padding:"14px 14px" }}>
+            {bcBusy && (
+              <div style={{ display:"flex", alignItems:"center", gap:9, color:"#3ddc84", fontSize:13.5 }}>
+                <div style={{ width:14, height:14, border:"2px solid #2a2a3d", borderTop:"2px solid #3ddc84", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+                Looking up the product…
+              </div>
+            )}
+
+            {!bcBusy && bcError && (
+              <div style={{ color:"#ff9d5c", fontSize:13.5, lineHeight:1.5, marginBottom: bcManual ? 10 : 0 }}>{bcError}</div>
+            )}
+
+            {/* Web (or scanner unavailable): type the number under the barcode */}
+            {!bcBusy && bcManual && !bcResult && (
+              <div style={{ display:"flex", gap:8, marginTop: bcError ? 0 : 2 }}>
+                <input value={bcTyped} onChange={e=>setBcTyped(e.target.value.replace(/\D/g,""))}
+                  inputMode="numeric" placeholder="Type the barcode number"
+                  style={{ flex:1, minWidth:0, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"10px 12px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" }} />
+                <button onClick={()=>bcTyped.length >= 6 && runLookup(bcTyped)} disabled={bcTyped.length < 6}
+                  style={{ background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"0 16px", fontWeight:700, fontSize:14, cursor: bcTyped.length<6?"default":"pointer", opacity: bcTyped.length<6?0.5:1 }}>Look up</button>
+              </div>
+            )}
+
+            {/* Found it — confirm the amount, then add */}
+            {!bcBusy && bcResult && (() => {
+              const m = bcScaled();
+              const ni = novaInfo(bcResult.nova);
+              return (
+                <div>
+                  <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 }}>
+                    {bcResult.image && (
+                      <img src={bcResult.image} alt="" style={{ width:52, height:52, borderRadius:8, objectFit:"cover", flexShrink:0, background:"#1a1a26" }} />
+                    )}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ color:"#f0f0f8", fontSize:15, fontWeight:700, lineHeight:1.3 }}>
+                        {[bcResult.brand, bcResult.name].filter(Boolean).join(" ") || "Scanned item"}
+                      </div>
+                      {/* Processing level — only when the database actually classifies it */}
+                      {ni ? (
+                        <span style={{ display:"inline-block", marginTop:6, background:`${ni.color}22`, border:`1px solid ${ni.color}`, color:ni.color, borderRadius:20, padding:"3px 10px", fontSize:11.5, fontWeight:700 }}>
+                          {ni.label}
+                        </span>
+                      ) : (
+                        <div style={{ color:"#74748a", fontSize:12, marginTop:5 }}>No processing rating for this product</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                    <span style={{ color:"#9898b8", fontSize:13 }}>Amount</span>
+                    <input value={bcGrams} onChange={e=>setBcGrams(e.target.value.replace(/[^\d.]/g,""))}
+                      inputMode="decimal"
+                      style={{ width:78, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, color:"#f0f0f8", padding:"8px 10px", fontSize:14, fontFamily:"'DM Sans'", outline:"none" }} />
+                    <span style={{ color:"#9898b8", fontSize:13 }}>g</span>
+                    {bcResult.servingLabel && (
+                      <span style={{ color:"#74748a", fontSize:11.5, marginLeft:2 }}>serving: {bcResult.servingLabel}</span>
+                    )}
+                  </div>
+
+                  <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+                    {[["cal", m.cal, ""], ["protein", m.protein, "g"], ["carbs", m.carbs, "g"], ["fats", m.fats, "g"]].map(([k,v,u]) => (
+                      <div key={k} style={{ flex:"1 1 60px", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:8, padding:"7px 4px", textAlign:"center" }}>
+                        <div style={{ color:"#f0f0f8", fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:16 }}>{v == null ? "—" : v}{u}</div>
+                        <div style={{ color:"#74748a", fontSize:10, textTransform:"uppercase", letterSpacing:0.5 }}>{k}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>{ setBcResult(null); setBcError(null); setBcManual(false); setBcTyped(""); }}
+                      style={{ flex:1, background:"transparent", border:"1px solid #2a2a3d", borderRadius:10, color:"#c8c8e0", padding:"10px", fontSize:14, cursor:"pointer", fontFamily:"'DM Sans'" }}>Cancel</button>
+                    <button onClick={confirmBarcode}
+                      style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:10, color:"#0a0a0f", padding:"10px", fontSize:14.5, fontWeight:700, cursor:"pointer", fontFamily:"'DM Sans'" }}>Add to {slotLabel}</button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />
 
         {/* USDA Search panel */}
