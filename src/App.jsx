@@ -6798,6 +6798,101 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
   );
 }
 
+// ── GUIDED STRETCH: follow-along video ──────────────────────────────────────
+// The voice coach already reports which stretch it's on (the |||STRETCH:{i}||| tag
+// -> stretchProgress.index, 1-based). This panel just follows that index and shows
+// the matching video, so the session becomes watch-and-follow instead of audio-only.
+// A pinned video (chosen by the user on the stretch card) always wins; otherwise we
+// look one up and let them swap it, because an auto-picked clip is a guess.
+function GuidedStretchVideo({ session, progress, gender, videoOverrides, onSaveVideo, onStop }) {
+  const items = (session && session.items) || [];
+  // progress.index is 1-based and only for THIS routine; fall back to the first stretch.
+  const idx = (progress && progress.name === session.name && progress.index > 0)
+    ? Math.min(progress.index, items.length) - 1
+    : 0;
+  const current = items[idx];
+
+  const pinned = videoOverrides && videoOverrides[current];
+  const [found, setFound] = useState(null);       // auto-looked-up video id
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const YOGA_BIAS = "Yoga with Adriene OR Boho Beautiful OR SarahBethYoga OR Fightmaster Yoga OR Kassandra Yoga";
+
+  // Look up a clip whenever the coach moves to a stretch that has no pinned video.
+  useEffect(() => {
+    let on = true;
+    setFound(null); setErr(null); setShowPicker(false);
+    if (!current || pinned) return;
+    setLoading(true);
+    const q = encodeURIComponent(`${current} stretch how to ${gender === "Male" ? MALE_DEMO_BIAS : YOGA_BIAS}`);
+    fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=1&q=${q}&key=${YT_API_KEY}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!on) return;
+        const id = d?.items?.[0]?.id?.videoId;
+        if (id) setFound(id); else setErr("No video found for this one.");
+        setLoading(false);
+      })
+      .catch(() => { if (on) { setErr("Couldn't load a video."); setLoading(false); } });
+    return () => { on = false; };
+  }, [current, pinned, gender]);
+
+  if (!current) return null;
+  const videoId = pinned || found;
+
+  return (
+    <div style={{ background:"#12121a", border:"1px solid rgba(232,255,0,0.35)", borderRadius:14, padding:"14px 14px", marginBottom:16 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:10 }}>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#e8ff00", lineHeight:1.1 }}>{session.name.toUpperCase()}</div>
+          <div style={{ color:"#9898b8", fontSize:14, marginTop:2 }}>Stretch {idx + 1} of {items.length}</div>
+        </div>
+        <button onClick={onStop} style={{ flexShrink:0, background:"rgba(255,90,90,0.10)", border:"1px solid rgba(255,90,90,0.45)", borderRadius:10, color:"#ff7070", padding:"9px 15px", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"'DM Sans'" }}>Stop</button>
+      </div>
+
+      <div style={{ color:"#f0f0f8", fontSize:19, fontWeight:700, marginBottom:10 }}>{current}</div>
+
+      <div style={{ position:"relative", width:"100%", paddingTop:"56.25%", background:"#0a0a0f", borderRadius:10, overflow:"hidden", marginBottom:10 }}>
+        {videoId ? (
+          <iframe
+            key={videoId}
+            src={`https://www.youtube.com/embed/${videoId}?rel=0&playsinline=1`}
+            title={current}
+            allow="accelerometer; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            style={{ position:"absolute", inset:0, width:"100%", height:"100%", border:"none" }}
+          />
+        ) : (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", color:"#9898b8", fontSize:15, textAlign:"center", padding:"0 20px" }}>
+            {loading ? "Finding a video…" : (err || "No video yet")}
+          </div>
+        )}
+      </div>
+
+      {/* Auto-picked clips are a guess — always offer a swap, and let them pin a keeper. */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
+        <span style={{ color:"#74748a", fontSize:13 }}>
+          {pinned ? "Your saved video" : "Auto-picked — tap Change if it's not right"}
+        </span>
+        <button onClick={()=>setShowPicker(true)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:9, color:"#3d8eff", padding:"8px 14px", fontSize:14.5, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans'" }}>Change video</button>
+      </div>
+
+      {showPicker && (
+        <div style={{ marginTop:10 }}>
+          <StretchVideoPanel exName={current} gender={gender} videoOverrides={videoOverrides}
+            onSaveVideo={onSaveVideo} onClose={()=>setShowPicker(false)} />
+        </div>
+      )}
+
+      <div style={{ color:"#74748a", fontSize:13, lineHeight:1.45, marginTop:10 }}>
+        The coach keeps guiding you by voice — the video follows along as you move through the routine.
+      </div>
+    </div>
+  );
+}
+
 function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender, videoOverrides, onSaveVideo, onGuidedStretch, activeStretch, stretchProgress, onStopStretch }) {
   const startGuided = (routineId, label, fresh) => {
     const ids = (routines && routines[routineId]) || DEFAULT_ROUTINES[routineId] || [];
@@ -6848,6 +6943,13 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
             );
           })}
         </div>
+
+        {/* Guided session running -> follow-along video, pinned to the top so it's
+            the thing you're looking at while the coach talks you through. */}
+        {activeStretch && (
+          <GuidedStretchVideo session={activeStretch} progress={stretchProgress} gender={gender}
+            videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} onStop={onStopStretch} />
+        )}
 
         {/* ROUTINES subsection */}
         <div style={{ ...S.sectionTitle }}>SELECT STRETCHES</div>
