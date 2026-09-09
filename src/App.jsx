@@ -3717,6 +3717,34 @@ const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
   </svg>
 );
 
+// ── THE nutrition engine ─────────────────────────────────────────────────────
+// ONE implementation of "what did they eat on this day", used by the Home hero, the
+// Nutrition screen and the voice coach's context. There used to be three separate
+// copies and they DRIFTED — Nutrition parsed with parseInt (truncating 10.6 -> 10)
+// while the others used parseFloat, and snacks were gated differently — so the same
+// day could show different intake totals depending on which screen you looked at.
+// Never re-implement this inline; call it.
+//
+// Counts ONLY items marked `logged` (an item added but not confirmed eaten is a plan,
+// not a meal). Old single-object slot data is auto-wrapped so nothing is lost.
+function dayNutrition(foodLog, dateKey) {
+  const day = (foodLog && foodLog[dateKey]) || {};
+  let cal = 0, protein = 0, carbs = 0, fats = 0;
+  ["breakfast", "lunch", "dinner", "snacks"].forEach((slot) => {
+    const raw = day[slot];
+    if (!raw) return;
+    const items = Array.isArray(raw) ? raw : [raw];
+    items.forEach((it) => {
+      if (!it || !it.logged) return;
+      cal     += parseFloat(it.cal)     || 0;
+      protein += parseFloat(it.protein) || 0;
+      carbs   += parseFloat(it.carbs)   || 0;
+      fats    += parseFloat(it.fats)    || 0;
+    });
+  });
+  return { cal: Math.round(cal), protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats) };
+}
+
 function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
@@ -3764,19 +3792,9 @@ function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, o
     setEditingHyd(false);
   };
 
-  // Today's nutrition totals from food log
-  const todayLog = (foodLog && foodLog[today]) || {};
-  let totalCal=0, totalP=0, totalC=0, totalF=0;
-  ["breakfast","lunch","dinner","snacks"].forEach(slot => {
-    const e = todayLog[slot];
-    if (!e) return;
-    const items = Array.isArray(e) ? e : [e];
-    items.forEach(item => { if (item && item.logged) {
-      totalCal += parseFloat(item.cal)||0; totalP += parseFloat(item.protein)||0;
-      totalC   += parseFloat(item.carbs)||0; totalF += parseFloat(item.fats)||0;
-    }});
-  });
-  totalCal=Math.round(totalCal); totalP=Math.round(totalP); totalC=Math.round(totalC); totalF=Math.round(totalF);
+  // Today's nutrition totals — single shared engine (see dayNutrition).
+  const _n = dayNutrition(foodLog, today);
+  const totalCal = _n.cal, totalP = _n.protein, totalC = _n.carbs, totalF = _n.fats;
   const macros = macrosFor(profile, dietPref||"mediterranean");
   const calGoal = macros.cals || 2000;
   const calPct = Math.min(100, Math.round((totalCal/calGoal)*100));
@@ -9038,21 +9056,11 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
     fats:    Math.round(sug.fats*sc.fats),
   }) : null;
 
-  // Totals: only count meals marked as logged
-  let totalCal=0, totalP=0, totalC=0, totalF=0;
-  MEAL_SLOTS.filter(s=>s.id!=="snacks").forEach(s => {
-    slotList(s.id).filter(x=>x.logged).forEach(x => {
-      totalCal += parseInt(x.cal)||0;
-      totalP += parseInt(x.protein)||0;
-      totalC += parseInt(x.carbs)||0;
-      totalF += parseInt(x.fats)||0;
-    });
-  });
-  // Add logged snacks
+  // Totals: single shared engine (see dayNutrition) — same math as the Home hero
+  // and the voice coach, so the number can never disagree between screens.
+  const _n = dayNutrition(foodLog, dateKey);
+  const totalCal = _n.cal, totalP = _n.protein, totalC = _n.carbs, totalF = _n.fats;
   const snackHasData = snackList.some(s=>s.food||s.cal);
-  if (snackHasData) {
-    snackList.filter(s=>s.logged).forEach(s => { totalCal+=parseInt(s.cal)||0; totalP+=parseInt(s.protein)||0; totalC+=parseInt(s.carbs)||0; totalF+=parseInt(s.fats)||0; });
-  }
   const calLeft = Math.max(calGoal-totalCal,0);
 
   // Whole vs processed, calorie-weighted across everything logged today. Only items
@@ -12828,11 +12836,10 @@ export default function BodyMorph() {
       if (!done.length) return { logged:false };
       return { logged:true, name: done.map(x=>x.food).filter(Boolean).join(", ") || slot, cal: Math.round(done.reduce((s,x)=>s+(parseFloat(x.cal)||0),0)) };
     };
-    let calTotal=0, pTotal=0, cTotal=0, fTotal=0;
-    ["breakfast","lunch","dinner","snacks"].forEach(s => {
-      const e = tLog[s]; if (!e) return;
-      (Array.isArray(e)?e:[e]).forEach(it => { if (it && it.logged) { calTotal += parseFloat(it.cal)||0; pTotal += parseFloat(it.protein)||0; cTotal += parseFloat(it.carbs)||0; fTotal += parseFloat(it.fats)||0; } });
-    });
+    // Same shared engine as Home + Nutrition, so what the coach says out loud can
+    // never contradict what the screen shows.
+    const _n = dayNutrition(foodLog, today);
+    const calTotal = _n.cal, pTotal = _n.protein, cTotal = _n.carbs, fTotal = _n.fats;
     const cMacros = macrosFor(profile, dietPref||"mediterranean");
     const hrs = new Date().getHours();
     const todayIdx = new Date().getDay();
