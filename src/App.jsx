@@ -16,7 +16,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   pushHealthSummary, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt, listConversations } from "./messaging";
-import { syncHealth, healthInsights, healthDaily } from "./healthkit";
+import { syncHealth, healthInsights, healthDaily, todayEnergyBurned } from "./healthkit";
 
 const C = {
   bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26", border: "#2a2a3d",
@@ -3717,7 +3717,7 @@ const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
   </svg>
 );
 
-function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3810,61 +3810,109 @@ function Home({ profile, program, rewards, onPickDay, onProgress, onNutrition, o
       {/* Radial dashboard: Voice Coach hero centered, metrics tucked around it */}
       <div style={{ marginTop:43, marginBottom:8 }}>
 
-        {/* 2x2 metric grid: MENU + STEPS, CALORIES + WATER */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+        {/* 3x2 metric grid (Neal's layout):
+              row 1  SLEEP | WATER | STEPS
+              row 2  CALORIES INTAKE | CALORIES BURNED | NET CALORIES
+            Burned comes from Apple Health and is the FULL day's burn (active +
+            resting), not the Move ring's active-only number. */}
+        {(() => {
+          const cellH = 76;
+          const cell = { height:cellH, background:"transparent", border:"none", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, boxSizing:"border-box", padding:"0 2px" };
+          const lbl = { fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.6, color:"#dcdcf0", lineHeight:1.05, textAlign:"center" };
+          const big = (c) => ({ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:23, color:c, lineHeight:1.1 });
+          const sub = { fontSize:11, color:"#9898b8", textAlign:"center", lineHeight:1.2 };
+
+          // Total burned today (active + resting) straight from Apple Health.
+          const measuredBurn = burnedToday && burnedToday.total > 0 ? burnedToday.total : null;
+          // Fallback when Health has nothing yet (no permission, no watch, or the day
+          // just started): the same Mifflin-St Jeor TDEE the calorie targets are built
+          // on. It's an ESTIMATE, so it's labelled as one — never passed off as measured.
+          const estBurn = (() => {
+            try { const t = calorieTargets(profile, profile?.deficit || "moderate"); return t && t.tdee > 0 ? t.tdee : null; }
+            catch { return null; }
+          })();
+          const burned = measuredBurn ?? estBurn;
+          const burnIsEstimate = measuredBurn == null && estBurn != null;
+          // Net = what you ate minus what you burned. Negative = deficit.
+          const net = burned == null ? null : totalCal - burned;
+
+          return (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+
+          {/* ── ROW 1: SLEEP | WATER | STEPS ── */}
 
           {/* SLEEP (tap to enter hours slept last night) */}
           {editingSleep ? (
-            <div style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"1px solid #9b5de5", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <input autoFocus type="number" inputMode="decimal" step="0.5" value={sleepInput} onChange={e=>setSleepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSleep(); }} style={{ width:56, background:"#0e0e16", border:"1px solid #9b5de5", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveSleep} style={{ background:"#9b5de5", border:"none", borderRadius:6, color:"#fff", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
+            <div style={{ ...cell, border:"1px solid #9b5de5", borderRadius:14, flexDirection:"row", gap:5 }}>
+              <input autoFocus type="number" inputMode="decimal" step="0.5" value={sleepInput} onChange={e=>setSleepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSleep(); }} style={{ width:44, background:"#0e0e16", border:"1px solid #9b5de5", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <button onClick={saveSleep} style={{ background:"#9b5de5", border:"none", borderRadius:6, color:"#fff", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
             </div>
           ) : (
-            <button onClick={()=>{ setSleepInput(String(todaySleep||"")); setEditingSleep(true); }} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:1 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#dcdcf0" }}>&#128564; SLEEP</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#9b5de5" }}>{todaySleep||0}</span>
-              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todaySleep||0} / {SLEEP_GOAL} hrs</span>
+            <button onClick={()=>{ setSleepInput(String(todaySleep||"")); setEditingSleep(true); }} style={{ ...cell, cursor:"pointer" }}>
+              <span style={lbl}>&#128564; SLEEP</span>
+              <span style={big("#9b5de5")}>{todaySleep||0}</span>
+              <span style={sub}>of {SLEEP_GOAL} hrs</span>
+            </button>
+          )}
+
+          {/* WATER */}
+          {editingHyd ? (
+            <div style={{ ...cell, border:"1px solid #3d8eff", borderRadius:14, flexDirection:"row", gap:5 }}>
+              <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:40, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
+            </div>
+          ) : (
+            <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ ...cell, cursor:"pointer" }}>
+              <span style={lbl}>&#128167; WATER</span>
+              <span style={big("#3d8eff")}>{todayCups}</span>
+              <span style={sub}>of {HYD_GOAL} cups</span>
             </button>
           )}
 
           {/* STEPS */}
           {editingSteps ? (
-            <div style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"1px solid #e8ff00", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:66, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
+            <div style={{ ...cell, border:"1px solid #e8ff00", borderRadius:14, flexDirection:"row", gap:5 }}>
+              <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:54, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
+              <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
             </div>
           ) : (
-            <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ height:74, transform:"translateY(-12px)", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", paddingTop:6, gap:1 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#dcdcf0" }}>&#128095; STEPS</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#3ddc84" }}>{todaySteps.toLocaleString()}</span>
-              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todaySteps.toLocaleString()} / {STEP_GOAL.toLocaleString()}</span>
+            <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ ...cell, cursor:"pointer" }}>
+              <span style={lbl}>&#128095; STEPS</span>
+              <span style={big("#3ddc84")}>{todaySteps.toLocaleString()}</span>
+              <span style={sub}>of {STEP_GOAL.toLocaleString()}</span>
             </button>
           )}
 
-          {/* Divider under MENU + STEPS (watermark-gray) */}
+          {/* Divider between the two rows */}
           <div style={{ gridColumn:"1 / -1", height:1, background:"#3a3a4a", borderRadius:1, margin:"2px 6px" }} />
 
-          {/* CALORIES */}
-          <div style={{ height:74, background:"transparent", border:"none", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
-            <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:0.5, color:"#dcdcf0" }}>&#128293; CALORIES</span>
-            <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color: calOver?"#ff7070":"#e8ff00" }}>{totalCal.toLocaleString()}</span>
-            <span style={{ fontSize:12.6, color:"#9898b8" }}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`${totalCal.toLocaleString()} of ${calGoal.toLocaleString()}`}</span>
+          {/* ── ROW 2: CALORIES INTAKE | CALORIES BURNED | NET CALORIES ── */}
+
+          {/* CALORIES INTAKE — what they've logged today */}
+          <div style={cell}>
+            <span style={lbl}>CALORIES<br/>INTAKE</span>
+            <span style={big(calOver?"#ff7070":"#e8ff00")}>{totalCal.toLocaleString()}</span>
+            <span style={sub}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`of ${calGoal.toLocaleString()}`}</span>
           </div>
 
-          {/* WATER */}
-          {editingHyd ? (
-            <div style={{ height:74, background:"transparent", border:"1px solid #3d8eff", borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:48, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 6px", fontSize:19.2, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"5px 9px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
-            </div>
-          ) : (
-            <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ height:74, background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:0.5, color:"#dcdcf0" }}>&#128167; WATER</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:26.4, color:"#3d8eff" }}>{todayCups}</span>
-              <span style={{ fontSize:12.6, color:"#9898b8" }}>{todayCups} / {HYD_GOAL} cups</span>
-            </button>
-          )}
+          {/* CALORIES BURNED — Apple Health, active + resting for the whole day */}
+          <div style={cell}>
+            <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
+            <span style={big(burned == null ? "#4a4a6a" : "#ff9d5c")}>{burned == null ? "—" : burned.toLocaleString()}</span>
+            <span style={sub}>{burned == null ? "Apple Health" : (burnIsEstimate ? "estimated" : "total today")}</span>
+          </div>
+
+          {/* NET CALORIES — intake minus burned. Negative = deficit (green). */}
+          <div style={cell}>
+            <span style={lbl}>NET<br/>CALORIES</span>
+            <span style={big(net == null ? "#4a4a6a" : net <= 0 ? "#3ddc84" : "#ff9d5c")}>
+              {net == null ? "—" : (net > 0 ? "+" : "") + net.toLocaleString()}
+            </span>
+            <span style={sub}>{net == null ? "—" : net <= 0 ? "deficit" : "surplus"}</span>
+          </div>
         </div>
+          );
+        })()}
 
         {/* Voice Coach circle, sitting on top of Today's Macros */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:9 }}>
@@ -11953,7 +12001,8 @@ export default function BodyMorph() {
   const [stepEntries, setStepEntries] = useState([]);
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
   const [watchInsights, setWatchInsights] = useState(null); // weekly watch summary (background; reports only)
-  const [watchDaily, setWatchDaily] = useState(null);       // daily watch history for the trend charts
+  const [watchDaily, setWatchDaily] = useState(null);
+  const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null       // daily watch history for the trend charts
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -12342,6 +12391,9 @@ export default function BodyMorph() {
       // coach's Weekly Report can chart trends without device access.
       const daily = await healthDaily(365);
       if (daily) setWatchDaily(daily);
+      // Today's TOTAL burn (active + resting) for the hero grid. null = unavailable
+      // or permission denied -> the tile shows a dash rather than a fake number.
+      setBurnedToday(await todayEnergyBurned());
       if (insights && userRef.current?.id) {
         setWatchInsights(insights);
         pushHealthSummary(userRef.current.id, insights, daily);
@@ -12883,7 +12935,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}

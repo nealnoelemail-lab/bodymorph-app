@@ -98,3 +98,22 @@ export async function syncHealth() {
     return { steps: Math.max(0, parseInt(st?.steps) || 0), hours: Math.max(0, parseFloat(sl?.hours) || 0) };
   } catch { return null; }
 }
+
+// Today's TOTAL calories burned = active (movement) + resting (basal metabolism).
+// Apple's Move ring is active-only, which looks broken next to food intake; the number
+// people mean by "burned today" is the sum. Returns null when Health is unavailable or
+// the read wasn't authorized — callers must show a dash, never a fabricated 0.
+export async function todayEnergyBurned() {
+  if (!IS_NATIVE || !IS_IOS) return null;
+  try {
+    if (!(await HealthKit.isAvailable())?.available) return null;
+    await HealthKit.requestAuthorization();
+    const r = await HealthKit.getTodayEnergy();
+    if (!r || r.totalKcal == null || r.totalKcal < 0) return null;   // -1 = no data/denied
+    return {
+      total: Math.max(0, parseInt(r.totalKcal) || 0),
+      active: r.activeKcal >= 0 ? Math.max(0, parseInt(r.activeKcal) || 0) : null,
+      resting: r.restingKcal >= 0 ? Math.max(0, parseInt(r.restingKcal) || 0) : null,
+    };
+  } catch { return null; }
+}

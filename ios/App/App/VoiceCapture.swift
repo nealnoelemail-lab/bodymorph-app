@@ -880,6 +880,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getTodaySteps", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getTodayEnergy", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getLastNightSleep", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDailyMetrics", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDailySleep", returnType: CAPPluginReturnPromise),
@@ -899,6 +900,9 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         // Watch-grade metrics for the weekly progress reports (read-only, aggregates only).
         if let rhr = HKObjectType.quantityType(forIdentifier: .restingHeartRate) { s.insert(rhr) }
         if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { s.insert(energy) }
+        // Resting/basal burn — the OTHER half of "total calories burned". The Move ring
+        // only shows active; a day's real total is active + resting (~1800-2000 kcal).
+        if let basal = HKObjectType.quantityType(forIdentifier: .basalEnergyBurned) { s.insert(basal) }
         if let exmin = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) { s.insert(exmin) }
         if let dist = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) { s.insert(dist) }
         if let hrv = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) { s.insert(hrv) }
@@ -927,6 +931,43 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["steps": Int(steps.rounded())])
         }
         store.execute(q)
+    }
+
+    // TODAY'S TOTAL CALORIES BURNED = active (movement) + basal (resting metabolism).
+    // Apple's Move ring shows ACTIVE only, which reads absurdly low next to food intake;
+    // the number people mean by "calories burned today" is the sum. Returns both parts
+    // plus the total so the UI can explain itself, and -1 when a type is unavailable /
+    // unauthorized so the caller can show a dash instead of a fake 0.
+    @objc func getTodayEnergy(_ call: CAPPluginCall) {
+        let start = Calendar.current.startOfDay(for: Date())
+        let pred = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+        let group = DispatchGroup()
+        var active: Double = -1
+        var basal: Double = -1
+
+        func sum(_ id: HKQuantityTypeIdentifier, into store2: @escaping (Double) -> Void) {
+            guard let t = HKObjectType.quantityType(forIdentifier: id) else { return }
+            group.enter()
+            let q = HKStatisticsQuery(quantityType: t, quantitySamplePredicate: pred, options: .cumulativeSum) { _, stats, _ in
+                if let kcal = stats?.sumQuantity()?.doubleValue(for: .kilocalorie()) { store2(kcal) }
+                group.leave()
+            }
+            self.store.execute(q)
+        }
+
+        sum(.activeEnergyBurned) { active = $0 }
+        sum(.basalEnergyBurned) { basal = $0 }
+
+        group.notify(queue: .main) {
+            let a = active >= 0 ? active : 0
+            let b = basal >= 0 ? basal : 0
+            let haveAny = active >= 0 || basal >= 0
+            call.resolve([
+                "activeKcal": active >= 0 ? Int(a.rounded()) : -1,
+                "restingKcal": basal >= 0 ? Int(b.rounded()) : -1,
+                "totalKcal": haveAny ? Int((a + b).rounded()) : -1,
+            ])
+        }
     }
 
     // Hours ASLEEP for "last night" — samples overlapping the window from 6pm yesterday
