@@ -3730,19 +3730,36 @@ const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
 function dayNutrition(foodLog, dateKey) {
   const day = (foodLog && foodLog[dateKey]) || {};
   let cal = 0, protein = 0, carbs = 0, fats = 0;
+  const bySlot = {};
   ["breakfast", "lunch", "dinner", "snacks"].forEach((slot) => {
     const raw = day[slot];
     if (!raw) return;
     const items = Array.isArray(raw) ? raw : [raw];
+    let slotCal = 0;
     items.forEach((it) => {
       if (!it || !it.logged) return;
-      cal     += parseFloat(it.cal)     || 0;
+      slotCal += parseFloat(it.cal)     || 0;
       protein += parseFloat(it.protein) || 0;
       carbs   += parseFloat(it.carbs)   || 0;
       fats    += parseFloat(it.fats)    || 0;
     });
+    cal += slotCal;
+    if (slotCal > 0) bySlot[slot] = Math.round(slotCal);
   });
-  return { cal: Math.round(cal), protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats) };
+  // bySlot rides along so the intake breakdown parses food through THIS function too —
+  // a second walker over the same log is exactly how the totals drifted apart before.
+  //
+  // Rounding each slot independently can leave the parts summing to ±1 of the rounded
+  // total (two 10.4s round to 20, the total rounds to 21). The breakdown is shown
+  // directly under that total, so put any drift on the biggest slot — where one
+  // calorie is invisible — rather than letting the numbers visibly disagree.
+  const calRounded = Math.round(cal);
+  const slots = Object.keys(bySlot);
+  if (slots.length) {
+    const drift = calRounded - slots.reduce((s, k) => s + bySlot[k], 0);
+    if (drift) bySlot[slots.reduce((a, b) => (bySlot[b] > bySlot[a] ? b : a))] += drift;
+  }
+  return { cal: calRounded, protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats), bySlot };
 }
 
 // What the CALORIES BURNED tile says under the dash when there's no number. Each maps
@@ -3757,7 +3774,7 @@ const BURN_STATE_LABEL = {
   unsupported: "Apple Health",
 };
 
-function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3814,6 +3831,43 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
   const calPct = Math.min(100, Math.round((totalCal/calGoal)*100));
   const calOver = totalCal > calGoal;
 
+  // Total burned today (active + resting) straight from Apple Health.
+  // MEASURED ONLY — no estimate. Neal: "I want the accurate numbers, I don't
+  // want estimated numbers for calories burned." A TDEE guess dressed up as a
+  // measurement is worse than no number, because it's what he'd make decisions on.
+  // Note `?? null` not `> 0`: a real 0 just after midnight IS accurate and should
+  // read as 0, not as "no data".
+  const burned = burnedToday ? (burnedToday.total ?? null) : null;
+  // Net = what you ate minus what you burned. Negative = deficit.
+  const net = burned == null ? null : totalCal - burned;
+
+  // ── Tap-to-explain flashes over the Voice Coach circle ──────────────────────
+  // Each hero tile shows one number; the flash answers the question that number
+  // raises. Everything here comes from dayNutrition and the Health read already
+  // on screen — nothing is recomputed, so a flash can never disagree with its tile.
+  const SLOT_ORDER = ["breakfast", "lunch", "dinner", "snacks"];
+  const showIntakeFlash = () => {
+    const slots = SLOT_ORDER.filter((s) => _n.bySlot[s] > 0)
+                            .map((s) => `${_n.bySlot[s].toLocaleString()} ${s}`);
+    onFlash({
+      emoji: "\u{1F374}", title: "EATEN TODAY", color: calOver ? "#ff7070" : "#e8ff00",
+      total: totalCal.toLocaleString(),
+      // Nothing logged is a real state, not an empty list — say so plainly.
+      lines: slots.length
+        ? [...slots, calOver ? `${(totalCal - calGoal).toLocaleString()} over goal`
+                             : `${(calGoal - totalCal).toLocaleString()} left today`]
+        : ["nothing logged yet"],
+    });
+  };
+  const showNetFlash = () => {
+    onFlash({
+      emoji: "\u{2696}\u{FE0F}", title: net <= 0 ? "IN A DEFICIT" : "IN A SURPLUS",
+      color: net <= 0 ? "#3ddc84" : "#ff9d5c",
+      total: (net > 0 ? "+" : "") + net.toLocaleString(),
+      lines: [`${totalCal.toLocaleString()} eaten`, `${burned.toLocaleString()} burned`],
+    });
+  };
+
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
@@ -3853,16 +3907,6 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
           const lbl = { fontFamily:"'Bebas Neue'", fontSize:15, letterSpacing:0.6, color:"#dcdcf0", lineHeight:1.05, textAlign:"center" };
           const big = (c) => ({ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:23, color:c, lineHeight:1.1 });
           const sub = { fontSize:11, color:"#9898b8", textAlign:"center", lineHeight:1.2 };
-
-          // Total burned today (active + resting) straight from Apple Health.
-          // MEASURED ONLY — no estimate. Neal: "I want the accurate numbers, I don't
-          // want estimated numbers for calories burned." A TDEE guess dressed up as a
-          // measurement is worse than no number, because it's what he'd make decisions on.
-          // Note `?? null` not `> 0`: a real 0 just after midnight IS accurate and should
-          // read as 0, not as "no data".
-          const burned = burnedToday ? (burnedToday.total ?? null) : null;
-          // Net = what you ate minus what you burned. Negative = deficit.
-          const net = burned == null ? null : totalCal - burned;
 
           return (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
@@ -3916,12 +3960,14 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
 
           {/* ── ROW 2: CALORIES INTAKE | CALORIES BURNED | NET CALORIES ── */}
 
-          {/* CALORIES INTAKE — what they've logged today */}
-          <div style={cell}>
+          {/* CALORIES INTAKE — what they've logged today. Tap breaks it down by meal,
+              which is the question the total raises: not "how much" but "from where". */}
+          <button onClick={showIntakeFlash} type="button"
+                  style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
             <span style={lbl}>CALORIES<br/>INTAKE</span>
             <span style={big(calOver?"#ff7070":"#e8ff00")}>{totalCal.toLocaleString()}</span>
             <span style={sub}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`of ${calGoal.toLocaleString()}`}</span>
-          </div>
+          </button>
 
           {/* CALORIES BURNED — Apple Health, active + resting for the whole day.
               A real <button>, not a div+onClick: iOS is unreliable about synthesising
@@ -3936,14 +3982,18 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
             <span style={sub}>{burned == null ? (BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health")) : "total today"}</span>
           </button>
 
-          {/* NET CALORIES — intake minus burned. Negative = deficit (green). */}
-          <div style={cell}>
+          {/* NET CALORIES — intake minus burned. Negative = deficit (green). Tap shows
+              the arithmetic, because a bare "-478" doesn't say which side moved. With no
+              burn number there's no net to explain, so the tap goes where the missing
+              piece actually is: the Health connection. */}
+          <button onClick={net == null ? onConnectHealth : showNetFlash} type="button"
+                  style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
             <span style={lbl}>NET<br/>CALORIES</span>
             <span style={big(net == null ? "#4a4a6a" : net <= 0 ? "#3ddc84" : "#ff9d5c")}>
               {net == null ? "—" : (net > 0 ? "+" : "") + net.toLocaleString()}
             </span>
-            <span style={sub}>{net == null ? "—" : net <= 0 ? "deficit" : "surplus"}</span>
-          </div>
+            <span style={sub}>{net == null ? "needs burned" : net <= 0 ? "deficit" : "surplus"}</span>
+          </button>
         </div>
           );
         })()}
@@ -3953,26 +4003,37 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
             the top of the screen — it's the biggest empty target on the dashboard, and
             Neal's eyes are already on the tile he just tapped, not the status bar. */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:9, position:"relative" }}>
-          {burnFlash && (
+          {dashFlash && (
             // TWO elements on purpose. Centering lives on the OUTER wrapper (inset:0 +
             // flex), never on transform: the fadeIn keyframes animate `transform`, which
             // overrides an inline translateX(-50%) for the length of the animation — the
             // circle drew half a width to the right, then snapped to centre when the
             // animation ended. The INNER circle owns the animation and nothing else.
-            <div onClick={() => onCloseBurnFlash(burnFlash)}
+            <div onClick={() => onCloseFlash(dashFlash)}
                  style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", zIndex:4, cursor:"pointer" }}>
-              <div style={{ width:196, height:196, boxSizing:"border-box", padding:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:"1px solid #ff9d5c", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
-                <span style={{ fontSize:26, lineHeight:1 }}>&#128293;</span>
-                <span style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0" }}>{burnFlash.title || "BURNED TODAY"}</span>
-                {burnFlash.total && (
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:38, lineHeight:1, color:"#ff9d5c" }}>{burnFlash.total}</span>
+              {/* Each tile brings its own colour and icon, so the flash reads as "this
+                  came from the tile I just tapped" rather than as a generic popup.
+                  DENSE: a full day of eating is 4 meal lines plus the goal line, which
+                  overflows the circle at the roomy sizes. Step everything down a notch
+                  once there are 4+ lines rather than let text spill past the edge. */}
+              {(() => {
+                const n = (dashFlash.lines || []).length;
+                const dense = n >= 4;
+                return (
+              <div style={{ width:196, height:196, boxSizing:"border-box", padding:dense?11:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+                <span style={{ fontSize:dense?18:24, lineHeight:1 }}>{dashFlash.emoji || "\u{1F525}"}</span>
+                <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title || "BURNED TODAY"}</span>
+                {dashFlash.total && (
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
                 )}
                 {/* One per line — a single "X active + Y resting" row runs to the circle's
                     edge at four digits and reads cramped. */}
-                {(burnFlash.lines || []).map((s) => (
-                  <span key={s} style={{ color:"#9898b8", fontSize:12.5, lineHeight:1.3, maxWidth:164, textAlign:"center" }}>{s}</span>
+                {(dashFlash.lines || []).map((s) => (
+                  <span key={s} style={{ color:"#9898b8", fontSize:dense?11.5:12.5, lineHeight:1.25, maxWidth:dense?150:164, textAlign:"center" }}>{s}</span>
                 ))}
               </div>
+                );
+              })()}
             </div>
           )}
           <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ width:196, height:196, borderRadius:"50%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, overflow:"hidden", padding:"10px", position:"relative", zIndex:2 }}>
@@ -12053,19 +12114,19 @@ export default function BodyMorph() {
   const [watchDaily, setWatchDaily] = useState(null);     // daily watch history for the trend charts
   const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null
   const [burnState, setBurnState]     = useState(null);   // why there's no number, for the tile's sub-label
-  const [burnFlash, setBurnFlash]     = useState(null);   // 5s readout over the Voice Coach circle
-  const burnFlashTimer = useRef(null);
+  const [dashFlash, setDashFlash]     = useState(null);   // 5s readout over the Voice Coach circle
+  const flashTimer = useRef(null);
   // Re-tapping restarts the 5s rather than letting the first timer cut the second one short.
-  const showBurnFlash = (payload) => {
-    clearTimeout(burnFlashTimer.current);
-    setBurnFlash(payload);
-    burnFlashTimer.current = setTimeout(() => setBurnFlash(null), 5000);
+  const showFlash = (payload) => {
+    clearTimeout(flashTimer.current);
+    setDashFlash(payload);
+    flashTimer.current = setTimeout(() => setDashFlash(null), 5000);
   };
   // Tapping the flash dismisses it — and when the flash IS the "turn it on in Health"
   // message, the tap is also the shortcut there, since that's the only real fix.
-  const closeBurnFlash = (flash) => {
-    clearTimeout(burnFlashTimer.current);
-    setBurnFlash(null);
+  const closeFlash = (flash) => {
+    clearTimeout(flashTimer.current);
+    setDashFlash(null);
     if (flash?.health) window.open("x-apple-health://", "_system");
   };
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
@@ -12476,7 +12537,7 @@ export default function BodyMorph() {
   // been answered the only real fix is the Health app itself — say so, and open it.
   const connectHealth = useCallback(async () => {
     if (!IS_NATIVE) {
-      showBurnFlash({ title:"IPHONE ONLY", lines:["Apple Health lives", "on your iPhone"] });
+      showFlash({ title:"IPHONE ONLY", lines:["Apple Health lives", "on your iPhone"] });
       return;
     }
     // NO "checking..." indicator. The read is a background process and Neal's rule is
@@ -12495,7 +12556,7 @@ export default function BodyMorph() {
       const parts = [];
       if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
       if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
-      showBurnFlash({ total: e.total.toLocaleString(), lines: parts.length ? parts : ["from Apple Health"] });
+      showFlash({ total: e.total.toLocaleString(), lines: parts.length ? parts : ["from Apple Health"] });
       return;
     }
     setBurnState(e?.reason || "error");            // leave the reason on the tile too
@@ -12510,7 +12571,7 @@ export default function BodyMorph() {
       unsupported: { title:"IPHONE ONLY",     lines:["open the iPhone app"] },
       notlinked:   { title:"NOT LINKED",      lines:["close BodyMorph fully", "and reopen it"] },
     };
-    showBurnFlash(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] });
+    showFlash(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] });
   }, [syncAppleHealth]);
 
   useEffect(() => {
@@ -13089,7 +13150,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} burnState={burnState} burnFlash={burnFlash} onCloseBurnFlash={closeBurnFlash} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
