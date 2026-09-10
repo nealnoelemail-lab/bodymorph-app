@@ -3863,6 +3863,24 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
     });
   };
 
+  // Same flash the BURNED and NET tiles use, for the three macro columns. The row shows
+  // "147/122g", which says you're over but not by how much or what it means; the flash
+  // answers both. Calories-per-gram is what turns grams into a share of the day: the
+  // number a client actually steers by when deciding what to eat next.
+  const MACRO_KCAL = { PROTEIN: 4, CARBS: 4, FATS: 9 };
+  const showMacroFlash = (label, val, goalNum, color) => {
+    const over = goalNum > 0 && val > goalNum;
+    const lines = [];
+    if (goalNum > 0) {
+      lines.push(`of ${goalNum}g goal`);
+      lines.push(over ? `${val - goalNum}g over` : `${goalNum - val}g to go`);
+    }
+    if (totalCal > 0 && MACRO_KCAL[label]) {
+      lines.push(`${Math.round((val * MACRO_KCAL[label] / totalCal) * 100)}% of calories`);
+    }
+    onFlash({ title: label, color: over ? "#ff7070" : color, total: `${val}g`, lines });
+  };
+
   // The camera shortcut behind the CALORIES INTAKE tile. The ref is filled in by
   // QuickMacro; calling it inside the tile's onClick keeps the file-input click inside
   // the user's gesture, which iOS requires before it will open the camera.
@@ -4057,11 +4075,12 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
               const goalNum = parseFloat(goal) || 0; // goal may be like "117g"
               const over = goalNum>0 && val>goalNum;
               return (
-                <div key={label} style={{ flex:1, textAlign:"center" }}>
+                <button key={label} type="button" onClick={()=>showMacroFlash(label, val, goalNum, color)}
+                        style={{ flex:1, textAlign:"center", background:"transparent", border:"none", padding:0, cursor:"pointer", font:"inherit", WebkitAppearance:"none" }}>
                   <div style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:20.4, color: over?"#ff7070":color }}>{val}<span style={{ fontSize:12, color:"#9898b8" }}>/{goalNum}g</span></div>
                   <div style={{ background:"#1e1e2e", borderRadius:99, height:4, overflow:"hidden", margin:"3px 0" }}><div style={{ width:Math.min(100,goalNum?Math.round(val/goalNum*100):0)+"%", height:"100%", background:over?"#ff7070":color }} /></div>
                   <div style={{ color:"#9898b8", fontSize:12, letterSpacing:0.5 }}>{label}</div>
-                </div>
+                </button>
               );
             })}
           </div>
