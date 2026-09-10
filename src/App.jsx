@@ -3929,20 +3929,12 @@ function Home({ burnedToday, burnState, onConnectHealth, profile, program, rewar
               permission sheet — a tap that silently doesn't register strands the user.
               The sub-label reports the actual failure state so the tile explains itself
               without anyone having to tap it and guess. */}
-          {burned == null ? (
-            <button onClick={onConnectHealth} type="button"
-                    style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
-              <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
-              <span style={big("#4a4a6a")}>&mdash;</span>
-              <span style={sub}>{BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health")}</span>
-            </button>
-          ) : (
-            <div style={cell}>
-              <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
-              <span style={big("#ff9d5c")}>{burned.toLocaleString()}</span>
-              <span style={sub}>total today</span>
-            </div>
-          )}
+          <button onClick={onConnectHealth} type="button"
+                  style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
+            <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
+            <span style={big(burned == null ? "#4a4a6a" : "#ff9d5c")}>{burned == null ? "—" : burned.toLocaleString()}</span>
+            <span style={sub}>{burned == null ? (BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health")) : "total today"}</span>
+          </button>
 
           {/* NET CALORIES — intake minus burned. Negative = deficit (green). */}
           <div style={cell}>
@@ -12450,11 +12442,21 @@ export default function BodyMorph() {
     }
     setToast({ kind:"info", emoji:"⌚️", title:"APPLE HEALTH", body:"Checking…" });
     const e = await todayEnergyBurned();
-    if (e?.ok) {                                   // got it — show the number, drop the toast
+    if (e?.ok) {
       setBurnedToday(e);
       setBurnState(null);
-      setToast(null);
       syncAppleHealth();
+      // Show the SPLIT, not just "updated". The tile can only show one number, and the
+      // whole point of this metric is that it's active + resting — seeing both is how
+      // you check it against the Fitness app's Move ring, which counts active only.
+      const parts = [];
+      if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
+      if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
+      setToast({
+        kind:"info", emoji:"🔥", title:"CALORIES BURNED",
+        body: `${e.total.toLocaleString()} so far today${parts.length ? ` — ${parts.join(" + ")}` : ""}`,
+      });
+      setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 6000);
       return;
     }
     setBurnState(e?.reason || "error");            // leave the reason on the tile too
