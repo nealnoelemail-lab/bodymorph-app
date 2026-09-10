@@ -3850,7 +3850,9 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
     const slots = SLOT_ORDER.filter((s) => _n.bySlot[s] > 0)
                             .map((s) => `${_n.bySlot[s].toLocaleString()} ${s}`);
     onFlash({
-      emoji: "\u{1F374}", title: "EATEN TODAY", color: calOver ? "#ff7070" : "#e8ff00",
+      // No emoji, and the tile's own name — not a cute restatement of it. Neal:
+      // "do not label 'Eaten Today' with an emoji. Stick with the correct term."
+      title: "CALORIE INTAKE", color: calOver ? "#ff7070" : "#e8ff00",
       total: totalCal.toLocaleString(),
       // Nothing logged is a real state, not an empty list — say so plainly.
       lines: slots.length
@@ -3861,10 +3863,9 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
   };
   const showNetFlash = () => {
     onFlash({
-      emoji: "\u{2696}\u{FE0F}", title: net <= 0 ? "IN A DEFICIT" : "IN A SURPLUS",
-      color: net <= 0 ? "#3ddc84" : "#ff9d5c",
+      title: "NET CALORIES", color: net <= 0 ? "#3ddc84" : "#ff9d5c",
       total: (net > 0 ? "+" : "") + net.toLocaleString(),
-      lines: [`${totalCal.toLocaleString()} eaten`, `${burned.toLocaleString()} burned`],
+      lines: [`${totalCal.toLocaleString()} intake`, `${burned.toLocaleString()} burned`, net <= 0 ? "deficit" : "surplus"],
     });
   };
 
@@ -4021,8 +4022,10 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                 const dense = n >= 4;
                 return (
               <div style={{ width:196, height:196, boxSizing:"border-box", padding:dense?11:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
-                <span style={{ fontSize:dense?18:24, lineHeight:1 }}>{dashFlash.emoji || "\u{1F525}"}</span>
-                <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title || "BURNED TODAY"}</span>
+                {/* Emoji only where a tile actually carries one (the burn flame Neal
+                    asked for). No decorative default. */}
+                {dashFlash.emoji && <span style={{ fontSize:dense?18:24, lineHeight:1 }}>{dashFlash.emoji}</span>}
+                <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title}</span>
                 {dashFlash.total && (
                   <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
                 )}
@@ -12556,7 +12559,11 @@ export default function BodyMorph() {
       const parts = [];
       if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
       if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
-      showFlash({ total: e.total.toLocaleString(), lines: parts.length ? parts : ["from Apple Health"] });
+      showFlash({
+        emoji: "\u{1F525}", title: "CALORIES BURNED", color: "#ff9d5c",
+        total: e.total.toLocaleString(),
+        lines: parts.length ? parts : ["from Apple Health"],
+      });
       return;
     }
     setBurnState(e?.reason || "error");            // leave the reason on the tile too
