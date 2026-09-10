@@ -3745,7 +3745,7 @@ function dayNutrition(foodLog, dateKey) {
   return { cal: Math.round(cal), protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats) };
 }
 
-function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3843,25 +3843,12 @@ function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, o
           const sub = { fontSize:11, color:"#9898b8", textAlign:"center", lineHeight:1.2 };
 
           // Total burned today (active + resting) straight from Apple Health.
-          const measuredBurn = burnedToday && burnedToday.total > 0 ? burnedToday.total : null;
-          // Fallback when Health has nothing yet (no permission, no watch, or the day
-          // just started): the same Mifflin-St Jeor TDEE the calorie targets are built
-          // on. It's an ESTIMATE, so it's labelled as one — never passed off as measured.
-          // PRO-RATED by how much of the day has actually elapsed. A full-day TDEE shown
-          // at 12:01am would claim you'd already burned ~1,900 calories, which is false
-          // and made "net" nonsense right after the midnight reset. Burn accrues through
-          // the day, so the estimate should too.
-          const estBurn = (() => {
-            try {
-              const t = calorieTargets(profile, profile?.deficit || "moderate");
-              if (!t || !(t.tdee > 0)) return null;
-              const n = new Date();
-              const elapsed = (n.getHours()*3600 + n.getMinutes()*60 + n.getSeconds()) / 86400;
-              return Math.round(t.tdee * elapsed);
-            } catch { return null; }
-          })();
-          const burned = measuredBurn ?? (estBurn == null ? null : estBurn);
-          const burnIsEstimate = measuredBurn == null && estBurn != null;
+          // MEASURED ONLY — no estimate. Neal: "I want the accurate numbers, I don't
+          // want estimated numbers for calories burned." A TDEE guess dressed up as a
+          // measurement is worse than no number, because it's what he'd make decisions on.
+          // Note `?? null` not `> 0`: a real 0 just after midnight IS accurate and should
+          // read as 0, not as "no data".
+          const burned = burnedToday ? (burnedToday.total ?? null) : null;
           // Net = what you ate minus what you burned. Negative = deficit.
           const net = burned == null ? null : totalCal - burned;
 
@@ -3925,10 +3912,11 @@ function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, o
           </div>
 
           {/* CALORIES BURNED — Apple Health, active + resting for the whole day */}
-          <div style={cell}>
+          <div style={burned == null && onConnectHealth ? { ...cell, cursor:"pointer" } : cell}
+               onClick={burned == null && onConnectHealth ? onConnectHealth : undefined}>
             <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
             <span style={big(burned == null ? "#4a4a6a" : "#ff9d5c")}>{burned == null ? "—" : burned.toLocaleString()}</span>
-            <span style={sub}>{burned == null ? "Apple Health" : (burnIsEstimate ? "estimated" : "total today")}</span>
+            <span style={sub}>{burned == null ? (IS_NATIVE ? "tap to connect" : "Apple Health") : "total today"}</span>
           </div>
 
           {/* NET CALORIES — intake minus burned. Negative = deficit (green). */}
@@ -12982,7 +12970,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} onConnectHealth={syncAppleHealth} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
