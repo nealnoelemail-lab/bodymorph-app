@@ -257,8 +257,22 @@ function settingsField(col) {
 //   2. The domain must have been pulled and merged in THIS session. That pull is what
 //      makes local a superset of the cloud; before it, local may be a partial copy
 //      (a fresh install mid-boot) and deleting against it would wipe good rows.
+//   3. A TODAY FLOOR (see pushDomain). Day-keyed data is never deleted behind today;
+//      non-dated lists are capped per push. Reports run day / week / month / quarter /
+//      6mo / 9mo / year off this history, so it has to survive our own bugs.
 let _hydratedUser = null;
 const _hydrated = new Set();
+
+// Most rows a single push may delete from a non-dated list. A person removing a
+// supplement deletes one; a state-wipe bug would try to delete everything.
+const PRUNE_LIMIT = 8;
+
+// Local calendar date, matching the `day` values the app writes (never UTC — near
+// midnight a UTC date would be tomorrow and the floor would let today be deleted).
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 // "user_id,day" -> "day". Singletons ("user_id") own exactly one row: nothing to prune.
 function keyColumn(d) {
@@ -292,8 +306,22 @@ export async function pushDomain(name, userId, value) {
       console.warn(`sync prune ${name}: skipped — key contains a quote`);
       return { error: null };
     }
+
     let q = supabase.from(d.table).delete().eq("user_id", userId);
     if (keys.length) q = q.not(keyCol, "in", `(${keys.map((k) => `"${k}"`).join(",")})`);
+
+    // TODAY FLOOR. Deleting is only ever allowed to touch today forward. Everything
+    // behind today is the history the client's day/week/month/quarter/year reports are
+    // built from, and it is never removed as a side effect of a sync.
+    //
+    // This is about blast radius, not about the normal case. The normal case is one
+    // day. But the local value is now able to COMMAND deletion, so any future bug that
+    // empties state after hydration — a failed load, a bad reset, a merge regression —
+    // would faithfully delete a year of a client's data, and we'd have no copy. With
+    // the floor, the worst such a bug can cost is today.
+    if (keyCol === "day") q = q.gte("day", todayLocal());
+    else q = q.limit(PRUNE_LIMIT);   // non-dated lists: cap it, same reasoning
+
     const { error } = await q;
     if (error) console.warn(`sync prune ${name}:`, error.message);
   }
