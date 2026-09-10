@@ -3745,7 +3745,19 @@ function dayNutrition(foodLog, dateKey) {
   return { cal: Math.round(cal), protein: Math.round(protein), carbs: Math.round(carbs), fats: Math.round(fats) };
 }
 
-function Home({ burnedToday, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+// What the CALORIES BURNED tile says under the dash when there's no number. Each maps
+// to a genuinely different fix, so the tile names the state instead of always saying
+// "tap to connect" at someone whose real problem is a switch in the Health app.
+const BURN_STATE_LABEL = {
+  notlinked:   "not linked · reopen app",
+  noaccess:    "allow in Health",
+  unavailable: "no Apple Health",
+  timeout:     "timed out · tap",
+  error:       "error · tap",
+  unsupported: "Apple Health",
+};
+
+function Home({ burnedToday, burnState, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3911,13 +3923,26 @@ function Home({ burnedToday, onConnectHealth, profile, program, rewards, onPickD
             <span style={sub}>{calOver?`${(totalCal-calGoal).toLocaleString()} over`:`of ${calGoal.toLocaleString()}`}</span>
           </div>
 
-          {/* CALORIES BURNED — Apple Health, active + resting for the whole day */}
-          <div style={burned == null && onConnectHealth ? { ...cell, cursor:"pointer" } : cell}
-               onClick={burned == null && onConnectHealth ? onConnectHealth : undefined}>
-            <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
-            <span style={big(burned == null ? "#4a4a6a" : "#ff9d5c")}>{burned == null ? "—" : burned.toLocaleString()}</span>
-            <span style={sub}>{burned == null ? (IS_NATIVE ? "tap to connect" : "Apple Health") : "total today"}</span>
-          </div>
+          {/* CALORIES BURNED — Apple Health, active + resting for the whole day.
+              A real <button>, not a div+onClick: iOS is unreliable about synthesising
+              click on plain divs, and this tile is the ONLY way back to the Health
+              permission sheet — a tap that silently doesn't register strands the user.
+              The sub-label reports the actual failure state so the tile explains itself
+              without anyone having to tap it and guess. */}
+          {burned == null ? (
+            <button onClick={onConnectHealth} type="button"
+                    style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
+              <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
+              <span style={big("#4a4a6a")}>&mdash;</span>
+              <span style={sub}>{BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health")}</span>
+            </button>
+          ) : (
+            <div style={cell}>
+              <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
+              <span style={big("#ff9d5c")}>{burned.toLocaleString()}</span>
+              <span style={sub}>total today</span>
+            </div>
+          )}
 
           {/* NET CALORIES — intake minus burned. Negative = deficit (green). */}
           <div style={cell}>
@@ -12009,7 +12034,8 @@ export default function BodyMorph() {
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
   const [watchInsights, setWatchInsights] = useState(null); // weekly watch summary (background; reports only)
   const [watchDaily, setWatchDaily] = useState(null);
-  const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null       // daily watch history for the trend charts
+  const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null
+  const [burnState, setBurnState]     = useState(null);   // why there's no number, for the tile's sub-label       // daily watch history for the trend charts
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -12404,6 +12430,7 @@ export default function BodyMorph() {
       // or permission denied -> the tile shows a dash rather than a fake number.
       const energy = await todayEnergyBurned();
       setBurnedToday(energy?.ok ? energy : null);
+      setBurnState(energy?.ok ? null : (energy?.reason || "error"));
       if (insights && userRef.current?.id) {
         setWatchInsights(insights);
         pushHealthSummary(userRef.current.id, insights, daily);
@@ -12425,10 +12452,12 @@ export default function BodyMorph() {
     const e = await todayEnergyBurned();
     if (e?.ok) {                                   // got it — show the number, drop the toast
       setBurnedToday(e);
+      setBurnState(null);
       setToast(null);
       syncAppleHealth();
       return;
     }
+    setBurnState(e?.reason || "error");            // leave the reason on the tile too
     const BODY = {
       unavailable: "Apple Health isn't available on this device.",
       timeout:     "Apple Health didn't answer. Give it a second and tap again.",
@@ -13021,7 +13050,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} burnState={burnState} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
