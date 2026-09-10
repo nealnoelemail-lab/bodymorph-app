@@ -50,14 +50,14 @@ const strOrEmpty = (v) => (v == null ? "" : String(v));
 const DOMAINS = {
   // ── Dated arrays (PK user_id,day) ──
   steps: {
-    table: "step_entries", onConflict: "user_id,day",
+    prunable: true, table: "step_entries", onConflict: "user_id,day",
     toRows: (v, uid) => (v || []).filter(e => e && e.date)
       .map(e => ({ user_id: uid, day: e.date, steps: parseInt(e.steps) || 0 })),
     fromRows: (rows) => (rows || []).map(r => ({ date: r.day, steps: r.steps })),
     merge: byDate,
   },
   sleep: {
-    table: "sleep_entries", onConflict: "user_id,day",
+    prunable: true, table: "sleep_entries", onConflict: "user_id,day",
     toRows: (v, uid) => (v || []).filter(e => e && e.date)
       .map(e => ({ user_id: uid, day: e.date, hours: numOrNull(e.hours) })),
     fromRows: (rows) => (rows || []).map(r => ({ date: r.day, hours: r.hours })),
@@ -67,7 +67,7 @@ const DOMAINS = {
   // offline fallback) are filtered out so they never bloat the row — they stay
   // local-only; uploaded photos sync as tiny Storage paths.
   body: {
-    table: "body_entries", onConflict: "user_id,day",
+    prunable: true, table: "body_entries", onConflict: "user_id,day",
     toRows: (v, uid) => (v || []).filter(e => e && e.date).map(e => ({
       user_id: uid, day: e.date, weight: numOrNull(e.weight), body_fat: numOrNull(e.bodyFat), notes: e.notes || null,
       photos: Object.fromEntries(Object.entries(e.photos || {}).filter(([, p]) => p && !String(p).startsWith("data:"))),
@@ -78,7 +78,7 @@ const DOMAINS = {
 
   // ── Dated object (keyed by date) ──
   foodLog: {
-    table: "food_log_days", onConflict: "user_id,day",
+    prunable: true, table: "food_log_days", onConflict: "user_id,day",
     toRows: (v, uid) => Object.entries(v || {}).map(([day, slots]) => {
       let cal = 0, protein = 0, carbs = 0, fats = 0;
       ["breakfast", "lunch", "dinner", "snacks"].forEach(slot => {
@@ -119,7 +119,7 @@ const DOMAINS = {
 
   // ── Collection arrays ──
   cardio: {
-    table: "cardio_sessions", onConflict: "user_id,client_key",
+    prunable: true, table: "cardio_sessions", onConflict: "user_id,client_key",
     key: (e) => `${e.date}|${e.type || ""}|${e.minutes || 0}|${e.calories || 0}`,
     toRows: (v, uid) => (v || []).filter(e => e && e.date).map(e => ({
       user_id: uid, client_key: DOMAINS.cardio.key(e), day: e.date, type: e.type || null,
@@ -129,7 +129,7 @@ const DOMAINS = {
     merge: (l, c, p) => unionByKey(l, c, DOMAINS.cardio.key, p),
   },
   supplements: {
-    table: "supplements", onConflict: "user_id,client_key",
+    prunable: true, table: "supplements", onConflict: "user_id,client_key",
     toRows: (v, uid) => (v || []).filter(e => e && e.id).map(e => ({
       user_id: uid, client_key: String(e.id), name: e.name || null, timing: e.timing || null,
       days: e.days || null, dose: e.dose || null, notes: e.notes || null })),
@@ -137,7 +137,7 @@ const DOMAINS = {
     merge: (l, c, p) => unionByKey(l, c, e => String(e.id), p),
   },
   peptides: {
-    table: "peptides", onConflict: "user_id,client_key",
+    prunable: true, table: "peptides", onConflict: "user_id,client_key",
     toRows: (v, uid) => (v || []).filter(e => e && e.id).map(e => ({
       user_id: uid, client_key: String(e.id), name: e.name || null, timing: e.timing || null,
       days: e.days || null, dose: e.dose || null, notes: e.notes || null })),
@@ -149,7 +149,7 @@ const DOMAINS = {
   // Workout logs: app shape is { exercise: [entry,...] }. Flatten to rows with a
   // CONTENT client_key (stable across re-syncs; identical same-day sets collapse).
   logs: {
-    table: "workout_logs", onConflict: "user_id,client_key",
+    prunable: true, table: "workout_logs", onConflict: "user_id,client_key",
     keyOf: (ex, e) => `${ex}|${e.date}|${e.weight ?? ""}|${e.reps ?? ""}`,
     toRows: (v, uid) => {
       const rows = [];
@@ -176,7 +176,7 @@ const DOMAINS = {
     },
   },
   meals: {
-    table: "meals_catalog", onConflict: "user_id,client_key",
+    prunable: true, table: "meals_catalog", onConflict: "user_id,client_key",
     toRows: (v, uid) => Object.entries(v || {}).map(([k, m]) => ({
       user_id: uid, client_key: k, description: m.description || null,
       cal: m.cal != null ? parseInt(m.cal) : null, protein: m.protein != null ? parseInt(m.protein) : null,
@@ -242,16 +242,62 @@ function settingsField(col) {
   };
 }
 
+// ── Deleting things ──────────────────────────────────────────────────────────────
+// Pushes are upserts, so a record deleted locally used to linger in the cloud and get
+// pulled back on the next load. Neal hit this with "Clear Log": the day cleared, then
+// the food returned after a reload. Clearing EVERYTHING was worse — an empty rowset
+// early-returned, so the delete never reached the database at all.
+//
+// A push now also PRUNES: cloud rows for this user whose key isn't in the local value
+// are deleted. Two guards, because a wrong delete here destroys a client's real data:
+//
+//   1. `prunable: true`, set per domain — only where the LOCAL value is the complete
+//      set. It is NOT true of hydration: the app keeps only TODAY's cups on the device
+//      while hydration_days holds every day, so pruning it would erase the history.
+//   2. The domain must have been pulled and merged in THIS session. That pull is what
+//      makes local a superset of the cloud; before it, local may be a partial copy
+//      (a fresh install mid-boot) and deleting against it would wipe good rows.
+let _hydratedUser = null;
+const _hydrated = new Set();
+
+// "user_id,day" -> "day". Singletons ("user_id") own exactly one row: nothing to prune.
+function keyColumn(d) {
+  const parts = String(d.onConflict || "").split(",").map((s) => s.trim());
+  return parts.length === 2 && parts[0] === "user_id" ? parts[1] : null;
+}
+
 // ── Engine ───────────────────────────────────────────────────────────────────────
 export async function pushDomain(name, userId, value) {
   if (!supabase || !userId) return { error: null };
   const d = DOMAINS[name];
   if (!d) { console.warn(`sync: unknown domain "${name}"`); return { error: "unknown domain" }; }
   const rows = d.toRows(value, userId);
-  if (!rows.length) return { error: null };
-  const { error } = await supabase.from(d.table).upsert(rows, { onConflict: d.onConflict });
-  if (error) console.warn(`sync push ${name}:`, error.message);
-  return { error: error?.message || null };
+
+  const keyCol = keyColumn(d);
+  const canPrune = !!(d.prunable && keyCol && _hydratedUser === userId && _hydrated.has(name));
+
+  if (rows.length) {
+    const { error } = await supabase.from(d.table).upsert(rows, { onConflict: d.onConflict });
+    if (error) { console.warn(`sync push ${name}:`, error.message); return { error: error.message }; }
+  } else if (!canPrune) {
+    return { error: null };            // nothing to write, and not cleared to delete
+  }
+
+  if (canPrune) {
+    const keys = [...new Set(rows.map((r) => r[keyCol]).filter((k) => k != null).map(String))];
+    // The filter is a quoted PostgREST list. Commas and spaces inside the quotes are
+    // fine; a quote or backslash in a key would break out of it, so bail rather than
+    // send a delete whose scope we can't be certain of.
+    if (keys.some((k) => /["\\]/.test(k))) {
+      console.warn(`sync prune ${name}: skipped — key contains a quote`);
+      return { error: null };
+    }
+    let q = supabase.from(d.table).delete().eq("user_id", userId);
+    if (keys.length) q = q.not(keyCol, "in", `(${keys.map((k) => `"${k}"`).join(",")})`);
+    const { error } = await q;
+    if (error) console.warn(`sync prune ${name}:`, error.message);
+  }
+  return { error: null };
 }
 
 // Pull a domain from the cloud and merge with the local value. Returns the merged
@@ -262,7 +308,12 @@ export async function pullMergeDomain(name, userId, local, preferCloud = false) 
   if (!d) { console.warn(`sync: unknown domain "${name}"`); return local; }
   const { data, error } = await supabase.from(d.table).select("*").eq("user_id", userId);
   if (error) { console.warn(`sync pull ${name}:`, error.message); return local; }
-  return d.merge(local, d.fromRows(data), preferCloud);
+  const merged = d.merge(local, d.fromRows(data), preferCloud);
+  // Local now contains everything the cloud had for this domain, so deletions from
+  // here on are real deletions rather than gaps in a partial copy.
+  if (_hydratedUser !== userId) { _hydrated.clear(); _hydratedUser = userId; }
+  _hydrated.add(name);
+  return merged;
 }
 
 // Debounced push — coalesces rapid changes into one network write per domain.
