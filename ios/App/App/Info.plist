@@ -56,7 +56,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>BodyMorph can save meal photos to your library.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>BodyMorph reads your steps and sleep from Apple Health so your coach can track your day automatically — no manual entry.</string>
+	<string>BodyMorph reads your steps, sleep and calories burned from Apple Health so your coach can track your day automatically — no manual entry.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

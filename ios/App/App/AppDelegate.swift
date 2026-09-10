@@ -2,32 +2,60 @@ import UIKit
 import Capacitor
 import AVFoundation
 
+// ══════════════════════════════════════════════════════════════════════════════
+// LOCAL PLUGIN REGISTRATION — must finish BEFORE the web view loads any JS.
+//
+// This used to run on a retry timer from the AppDelegate, which is a RACE we lost:
+// @capacitor/core resolves a plugin ONCE, on first use, and caches the result. If any
+// JS touched HealthKit before the timer got around to registering it, Capacitor cached
+// "no native implementation" for the entire life of the app — so every later call,
+// including a deliberate tap minutes afterwards, threw "not implemented on iOS".
+// (Same family of bug as the barcode scanner: a plugin that never linked.)
+//
+// capacitorDidLoad() is Capacitor's designated hook for exactly this: the bridge
+// exists, the web view has not loaded yet. No timer, no race, no cached failure.
+// ══════════════════════════════════════════════════════════════════════════════
+enum LocalPlugins {
+    static private(set) var registered = false
+    static func register(on bridge: CAPBridgeProtocol?) {
+        guard !registered, let bridge = bridge else { return }
+        bridge.registerPluginInstance(VoiceCapturePlugin())
+        bridge.registerPluginInstance(HealthKitPlugin())
+        registered = true
+    }
+}
+
+// NO @objc(MainViewController) rename here. The storyboard is set to customModule="App"
+// with customModuleProvider="target", so Interface Builder compiles a reference to the
+// MANGLED Swift name (_TtC3App18MainViewController). An @objc rename would replace that
+// name, IB's lookup would miss, and the app would launch a bare UIViewController — a
+// blank screen. Leave the default mangled name so the two agree.
+class MainViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        LocalPlugins.register(on: bridge)
+    }
+}
+
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-    private var didRegisterPlugins = false
     private var pluginRegisterAttempts = 0
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         configureAudioSession()
-        registerLocalPlugins()   // start trying immediately; it retries until the bridge is ready
+        registerLocalPlugins()   // safety net + web view styling; MainViewController is the real path
         return true
     }
 
-    // Register our LOCAL VoiceCapture plugin on the bridge once the root bridge
-    // controller is up. Done from the AppDelegate (not a storyboard subclass) to
-    // avoid storyboard class-resolution issues. The bridge may not exist the instant
-    // we're first called, so RETRY on a short timer until it is — otherwise the
-    // plugin silently never registers and JS sees "not implemented on iOS".
+    // BACKSTOP only. MainViewController.capacitorDidLoad() registers the plugins at the
+    // correct moment; this covers the case where the storyboard somehow hands back a
+    // plain CAPBridgeViewController. It also drives configureWebView(), which genuinely
+    // does need to wait for the web view to exist.
     private func registerLocalPlugins() {
-        configureWebView()   // also lock the scroll view / dark background once the web view is up
-        guard !didRegisterPlugins else { return }
-        if let vc = window?.rootViewController as? CAPBridgeViewController, let bridge = vc.bridge {
-            bridge.registerPluginInstance(VoiceCapturePlugin())
-            bridge.registerPluginInstance(HealthKitPlugin())
-            didRegisterPlugins = true
-            return
+        configureWebView()   // lock the scroll view / dark background once the web view is up
+        if let vc = window?.rootViewController as? CAPBridgeViewController {
+            LocalPlugins.register(on: vc.bridge)
         }
         pluginRegisterAttempts += 1
         if pluginRegisterAttempts < 60 {   // ~15s of 0.25s retries, then give up

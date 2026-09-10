@@ -8,6 +8,9 @@ const HealthKit = registerPlugin("HealthKit");
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
 const IS_IOS = (() => { try { return Capacitor.getPlatform() === "ios"; } catch { return false; } })();
 
+// Did the native HealthKit plugin actually register on the bridge?
+const pluginReady = () => { try { return Capacitor.isPluginAvailable("HealthKit"); } catch { return false; } };
+
 // Is Apple Health usable on this device? (iOS only, and not on iPad without Health.)
 export async function healthAvailable() {
   if (!IS_NATIVE || !IS_IOS) return false;
@@ -109,6 +112,11 @@ export async function syncHealth() {
 // different causes it hit, instead of leaving a dash and a dead-feeling tap.
 export async function todayEnergyBurned() {
   if (!IS_NATIVE || !IS_IOS) return { ok: false, reason: "unsupported" };
+  // Is the native plugin actually on the bridge? Capacitor resolves a plugin once and
+  // caches the answer, so if registration lost its race with the web view every call
+  // fails forever with a raw "not implemented on iOS". Name that case precisely — the
+  // user's fix (relaunch the app) is nothing like the fix for a permissions problem.
+  if (!pluginReady()) return { ok: false, reason: "notlinked" };
   try {
     if (!(await HealthKit.isAvailable())?.available) return { ok: false, reason: "unavailable" };
     await HealthKit.requestAuthorization();

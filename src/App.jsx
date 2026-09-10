@@ -12434,6 +12434,7 @@ export default function BodyMorph() {
       timeout:     "Apple Health didn't answer. Give it a second and tap again.",
       noaccess:    "No energy data came back. Tap here to open Health, then Sharing › Apps › BodyMorph and switch ON Active Energy and Resting Energy.",
       unsupported: "Apple Health only works in the iPhone app.",
+      notlinked:   "The Health connection didn't load at startup. Swipe BodyMorph closed and reopen it.",
     };
     setToast({
       kind: "info", emoji: "⌚️", title: "CALORIES BURNED",
