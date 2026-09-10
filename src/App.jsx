@@ -3783,7 +3783,9 @@ function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, o
 
   // Hydration state (mirrors Steps): tap to type cups, check to save. Goal = 8 cups/day.
   const HYD_GOAL = (hydration && hydration.goal) || 8;
-  const todayCups = (hydration && hydration.cups) || 0;
+  // Date-guarded: hydration is a single {date,cups} object (not a per-day list like
+  // steps/sleep), so without this check it kept showing yesterday's cups after midnight.
+  const todayCups = (hydration && hydration.date === today) ? (parseInt(hydration.cups) || 0) : 0;
   const [editingHyd, setEditingHyd] = useState(false);
   const [hydInput, setHydInput] = useState(String(todayCups||""));
   const hydPct = Math.min(100, Math.round((todayCups/HYD_GOAL)*100));
@@ -3845,11 +3847,20 @@ function Home({ burnedToday, profile, program, rewards, onPickDay, onProgress, o
           // Fallback when Health has nothing yet (no permission, no watch, or the day
           // just started): the same Mifflin-St Jeor TDEE the calorie targets are built
           // on. It's an ESTIMATE, so it's labelled as one — never passed off as measured.
+          // PRO-RATED by how much of the day has actually elapsed. A full-day TDEE shown
+          // at 12:01am would claim you'd already burned ~1,900 calories, which is false
+          // and made "net" nonsense right after the midnight reset. Burn accrues through
+          // the day, so the estimate should too.
           const estBurn = (() => {
-            try { const t = calorieTargets(profile, profile?.deficit || "moderate"); return t && t.tdee > 0 ? t.tdee : null; }
-            catch { return null; }
+            try {
+              const t = calorieTargets(profile, profile?.deficit || "moderate");
+              if (!t || !(t.tdee > 0)) return null;
+              const n = new Date();
+              const elapsed = (n.getHours()*3600 + n.getMinutes()*60 + n.getSeconds()) / 86400;
+              return Math.round(t.tdee * elapsed);
+            } catch { return null; }
           })();
-          const burned = measuredBurn ?? estBurn;
+          const burned = measuredBurn ?? (estBurn == null ? null : estBurn);
           const burnIsEstimate = measuredBurn == null && estBurn != null;
           // Net = what you ate minus what you burned. Negative = deficit.
           const net = burned == null ? null : totalCal - burned;
@@ -12180,7 +12191,9 @@ export default function BodyMorph() {
         if (mDiet) setDietPref(mDiet);
         if (mVoice && mVoice.id) setCoachVoice(mVoice);
         else setCoachVoice(DEFAULT_COACH_VOICE); // the coach's own voice — the recommended default
-        setHydration(mHyd || localHyd);
+        // Only accept the cloud's hydration if it's for TODAY — otherwise yesterday's
+        // synced row would overwrite the fresh-day reset computed in localHyd.
+        setHydration((mHyd && mHyd.date === todayStr) ? mHyd : localHyd);
         // Paywall gate: signed-in users without an active subscription must
         // subscribe before reaching the app. Offline/guest or billing-off = no gate.
         const subscribed = !billingEnabled || !uid || isActive(mSub);
@@ -12415,6 +12428,33 @@ export default function BodyMorph() {
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loaded, syncAppleHealth]);
+
+  // ── MIDNIGHT ROLLOVER ───────────────────────────────────────────────────────
+  // Every tracker is date-keyed, but React doesn't re-render just because the clock
+  // ticked — so an app left open (or sitting backgrounded) across midnight kept
+  // showing yesterday: water stayed put and calories-burned held yesterday's total.
+  // This watches for the calendar day changing and rolls the day over explicitly:
+  //   • water  -> back to 0 for the new day (it's a single {date,cups} object)
+  //   • burned -> cleared, then re-pulled from Health for the new day
+  //   • steps / sleep / intake / macros -> already date-keyed; the state bump below
+  //     re-renders them so they recompute against the new date
+  // Checks on a timer AND whenever the app comes back to the foreground, because
+  // background timers are unreliable on iOS.
+  const [dayKey, setDayKey] = useState(() => ymdLocal());
+  useEffect(() => {
+    const rollIfNewDay = () => {
+      const d = ymdLocal();
+      if (d === dayKey) return;
+      setDayKey(d);                                   // forces the re-render
+      setHydration(h => ({ date: d, cups: 0, goal: (h && h.goal) || 8 }));
+      setBurnedToday(null);                           // drop yesterday's burn
+      if (IS_NATIVE) syncAppleHealth();               // re-pull today's Health numbers
+    };
+    const iv = setInterval(rollIfNewDay, 30000);
+    const onVis = () => { if (document.visibilityState === "visible") rollIfNewDay(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [dayKey, syncAppleHealth]);
   useEffect(() => { if (loaded) { Store.set(MEALPLAN_KEY, mealPlan); cloudPush("mealPlan", mealPlan); } }, [mealPlan, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(SUPP_KEY, supplements); cloudPush("supplements", supplements); } }, [supplements, loaded, cloudPush]);
   useEffect(() => { if (loaded) { Store.set(PEPTIDE_KEY, peptides); cloudPush("peptides", peptides); } }, [peptides, loaded, cloudPush]);
