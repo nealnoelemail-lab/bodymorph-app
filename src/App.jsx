@@ -3757,7 +3757,7 @@ const BURN_STATE_LABEL = {
   unsupported: "Apple Health",
 };
 
-function Home({ burnedToday, burnState, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3948,8 +3948,24 @@ function Home({ burnedToday, burnState, onConnectHealth, profile, program, rewar
           );
         })()}
 
-        {/* Voice Coach circle, sitting on top of Today's Macros */}
-        <div style={{ display:"flex", justifyContent:"center", marginTop:9 }}>
+        {/* Voice Coach circle, sitting on top of Today's Macros.
+            The burn readout flashes OVER this circle for 5s rather than as a banner at
+            the top of the screen — it's the biggest empty target on the dashboard, and
+            Neal's eyes are already on the tile he just tapped, not the status bar. */}
+        <div style={{ display:"flex", justifyContent:"center", marginTop:9, position:"relative" }}>
+          {burnFlash && (
+            <div onClick={onCloseBurnFlash}
+                 style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)", width:196, height:196, boxSizing:"border-box", padding:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:"1px solid #ff9d5c", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, zIndex:4, cursor:"pointer", animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+              <span style={{ fontSize:26, lineHeight:1 }}>&#128293;</span>
+              <span style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0" }}>BURNED TODAY</span>
+              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:38, lineHeight:1, color:"#ff9d5c" }}>{burnFlash.total}</span>
+              {/* One per line — a single "X active + Y resting" row runs to the circle's
+                  edge at four digits and reads cramped. */}
+              {(burnFlash.split || []).map((s) => (
+                <span key={s} style={{ color:"#9898b8", fontSize:12.5, lineHeight:1.3 }}>{s}</span>
+              ))}
+            </div>
+          )}
           <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ width:196, height:196, borderRadius:"50%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, overflow:"hidden", padding:"10px", position:"relative", zIndex:2 }}>
             <span style={{ fontSize:43.2, lineHeight:1 }}>&#127897;&#65039;</span>
             <span style={{ fontFamily:"'Bebas Neue'", fontSize:30, letterSpacing:1.5, color:accent }}>VOICE COACH</span>
@@ -12025,9 +12041,18 @@ export default function BodyMorph() {
   const [stepEntries, setStepEntries] = useState([]);
   const [sleepEntries, setSleepEntries] = useState([]); // [{date, hours}]
   const [watchInsights, setWatchInsights] = useState(null); // weekly watch summary (background; reports only)
-  const [watchDaily, setWatchDaily] = useState(null);
+  const [watchDaily, setWatchDaily] = useState(null);     // daily watch history for the trend charts
   const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null
-  const [burnState, setBurnState]     = useState(null);   // why there's no number, for the tile's sub-label       // daily watch history for the trend charts
+  const [burnState, setBurnState]     = useState(null);   // why there's no number, for the tile's sub-label
+  const [burnFlash, setBurnFlash]     = useState(null);   // 5s readout over the Voice Coach circle
+  const burnFlashTimer = useRef(null);
+  // Re-tapping restarts the 5s rather than letting the first timer cut the second one short.
+  const showBurnFlash = (payload) => {
+    clearTimeout(burnFlashTimer.current);
+    setBurnFlash(payload);
+    burnFlashTimer.current = setTimeout(() => setBurnFlash(null), 5000);
+  };
+  const closeBurnFlash = () => { clearTimeout(burnFlashTimer.current); setBurnFlash(null); };
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -12452,11 +12477,7 @@ export default function BodyMorph() {
       const parts = [];
       if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
       if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
-      setToast({
-        kind:"info", emoji:"🔥", title:"CALORIES BURNED",
-        body: `${e.total.toLocaleString()} so far today${parts.length ? ` — ${parts.join(" + ")}` : ""}`,
-      });
-      setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 6000);
+      showBurnFlash({ total: e.total.toLocaleString(), split: parts.length ? parts : ["from Apple Health"] });
       return;
     }
     setBurnState(e?.reason || "error");            // leave the reason on the tile too
@@ -13052,7 +13073,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} burnState={burnState} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} burnState={burnState} burnFlash={burnFlash} onCloseBurnFlash={closeBurnFlash} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
