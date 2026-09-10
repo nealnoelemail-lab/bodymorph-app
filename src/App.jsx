@@ -3793,44 +3793,57 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
   const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const today = ymdLocal();
 
-  // Steps state
-  const [editingSteps, setEditingSteps] = useState(false);
+  // Steps
   const todayStepsEntry = (stepEntries||[]).find(e=>e.date===today);
   const todaySteps = todayStepsEntry ? parseInt(todayStepsEntry.steps)||0 : 0;
-  const [stepInput, setStepInput] = useState(String(todaySteps||""));
   const STEP_GOAL = stepTargetFor(profile);   // goal- & pace-aware daily step target
   const stepPct = Math.min(100, Math.round((todaySteps/STEP_GOAL)*100));
-  const saveSteps = () => {
-    const val = parseInt(stepInput)||0;
-    const updated = [...(stepEntries||[]).filter(e=>e.date!==today), { date:today, steps:val }];
-    onSaveSteps(updated);
-    setEditingSteps(false);
-  };
 
-  // Sleep state (mirrors Steps): tap to type hours slept last night, check to save. Goal = 8 hrs.
+  // Sleep. Goal = 8 hrs.
   const SLEEP_GOAL = 8;
   const todaySleepEntry = (sleepEntries||[]).find(e=>e.date===today);
   const todaySleep = todaySleepEntry ? parseFloat(todaySleepEntry.hours)||0 : 0;
-  const [editingSleep, setEditingSleep] = useState(false);
-  const [sleepInput, setSleepInput] = useState(String(todaySleep||""));
-  const saveSleep = () => {
-    const val = parseFloat(sleepInput)||0;
-    const updated = [...(sleepEntries||[]).filter(e=>e.date!==today), { date:today, hours:val }];
-    onSaveSleep && onSaveSleep(updated);
-    setEditingSleep(false);
-  };
 
-  // Hydration state (mirrors Steps): tap to type cups, check to save. Goal = 8 cups/day.
+  // Hydration. Goal = 8 cups/day.
   const HYD_GOAL = (hydration && hydration.goal) || 8;
   // Date-guarded: hydration is a single {date,cups} object (not a per-day list like
   // steps/sleep), so without this check it kept showing yesterday's cups after midnight.
   const todayCups = (hydration && hydration.date === today) ? (parseInt(hydration.cups) || 0) : 0;
-  const [editingHyd, setEditingHyd] = useState(false);
-  const [hydInput, setHydInput] = useState(String(todayCups||""));
-  const hydPct = Math.min(100, Math.round((todayCups/HYD_GOAL)*100));
-  const saveHyd = () => {
-    onSetCups(parseInt(hydInput)||0);
-    setEditingHyd(false);
+
+  // ── The big editor in the circle ────────────────────────────────────────────
+  // Sleep, water and steps are the three things you TYPE rather than read, so their
+  // tiles open an editor instead of a readout. −/+ for a quick nudge, and the number
+  // itself is an input for an exact figure: ±500 is fine for correcting steps by a few
+  // hundred, but useless for entering 9,000 from zero.
+  const EDITORS = {
+    sleep: { title:"SLEEP", color:"#9b5de5", fg:"#fff", step:0.5, dec:1, goal:`${SLEEP_GOAL} hrs`,
+             get: () => todaySleep,
+             commit: (v) => onSaveSleep && onSaveSleep([...(sleepEntries||[]).filter(e=>e.date!==today), { date:today, hours:v }]) },
+    water: { title:"WATER", color:"#3d8eff", fg:"#fff", step:1, dec:0, goal:`${HYD_GOAL} cups`,
+             get: () => todayCups,
+             commit: (v) => onSetCups(v) },
+    steps: { title:"STEPS", color:"#3ddc84", fg:"#000", step:500, dec:0, goal:STEP_GOAL.toLocaleString(),
+             get: () => todaySteps,
+             commit: (v) => onSaveSteps([...(stepEntries||[]).filter(e=>e.date!==today), { date:today, steps:v }]) },
+  };
+  const [dashEdit, setDashEdit] = useState(null);   // { key, value } — value is a string while typing
+  const openEdit = (key) => {
+    onCloseFlash && onCloseFlash();                 // a readout and an editor shouldn't share the circle
+    const v = EDITORS[key].get();
+    setDashEdit({ key, value: v ? String(v) : "" });
+  };
+  const nudgeEdit = (dir) => setDashEdit(e => {
+    if (!e) return e;
+    const cfg = EDITORS[e.key];
+    const next = Math.max(0, (parseFloat(e.value) || 0) + dir * cfg.step);
+    return { ...e, value: String(cfg.dec ? Math.round(next * 10) / 10 : Math.round(next)) };
+  });
+  const commitEdit = () => {
+    if (!dashEdit) return;
+    const cfg = EDITORS[dashEdit.key];
+    const raw = parseFloat(dashEdit.value) || 0;
+    cfg.commit(Math.max(0, cfg.dec ? Math.round(raw * 10) / 10 : Math.round(raw)));
+    setDashEdit(null);
   };
 
   // Today's nutrition totals — single shared engine (see dayNutrition).
@@ -3933,47 +3946,27 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
 
           {/* ── ROW 1: SLEEP | WATER | STEPS ── */}
 
-          {/* SLEEP (tap to enter hours slept last night) */}
-          {editingSleep ? (
-            <div style={{ ...cell, border:"1px solid #9b5de5", borderRadius:14, flexDirection:"row", gap:5 }}>
-              <input autoFocus type="number" inputMode="decimal" step="0.5" value={sleepInput} onChange={e=>setSleepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSleep(); }} style={{ width:44, background:"#0e0e16", border:"1px solid #9b5de5", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveSleep} style={{ background:"#9b5de5", border:"none", borderRadius:6, color:"#fff", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
-            </div>
-          ) : (
-            <button onClick={()=>{ setSleepInput(String(todaySleep||"")); setEditingSleep(true); }} style={{ ...cell, cursor:"pointer" }}>
-              <span style={lbl}>&#128564; SLEEP</span>
-              <span style={big("#9b5de5")}>{todaySleep||0}</span>
-              <span style={sub}>of {SLEEP_GOAL} hrs</span>
-            </button>
-          )}
+          {/* SLEEP | WATER | STEPS — each opens the big editor in the Voice Coach circle.
+              These used to shrink a number input into the 76px tile itself, which meant
+              editing the smallest target on the dashboard. The circle is the roomiest
+              space on the screen, so the adjustment happens there instead. */}
+          <button onClick={()=>openEdit("sleep")} style={{ ...cell, cursor:"pointer" }}>
+            <span style={lbl}>&#128564; SLEEP</span>
+            <span style={big("#9b5de5")}>{todaySleep||0}</span>
+            <span style={sub}>of {SLEEP_GOAL} hrs</span>
+          </button>
 
-          {/* WATER */}
-          {editingHyd ? (
-            <div style={{ ...cell, border:"1px solid #3d8eff", borderRadius:14, flexDirection:"row", gap:5 }}>
-              <input autoFocus type="number" inputMode="numeric" value={hydInput} onChange={e=>setHydInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveHyd(); }} style={{ width:40, background:"#0e0e16", border:"1px solid #3d8eff", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveHyd} style={{ background:"#3d8eff", border:"none", borderRadius:6, color:"#fff", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
-            </div>
-          ) : (
-            <button onClick={()=>{ setHydInput(String(todayCups||"")); setEditingHyd(true); }} style={{ ...cell, cursor:"pointer" }}>
-              <span style={lbl}>&#128167; WATER</span>
-              <span style={big("#3d8eff")}>{todayCups}</span>
-              <span style={sub}>of {HYD_GOAL} cups</span>
-            </button>
-          )}
+          <button onClick={()=>openEdit("water")} style={{ ...cell, cursor:"pointer" }}>
+            <span style={lbl}>&#128167; WATER</span>
+            <span style={big("#3d8eff")}>{todayCups}</span>
+            <span style={sub}>of {HYD_GOAL} cups</span>
+          </button>
 
-          {/* STEPS */}
-          {editingSteps ? (
-            <div style={{ ...cell, border:"1px solid #e8ff00", borderRadius:14, flexDirection:"row", gap:5 }}>
-              <input autoFocus type="number" inputMode="numeric" value={stepInput} onChange={e=>setStepInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveSteps(); }} style={{ width:54, background:"#0e0e16", border:"1px solid #e8ff00", borderRadius:6, color:"#f0f0f8", padding:"4px 5px", fontSize:16, fontFamily:"'Oswald',sans-serif", fontWeight:700, textAlign:"center", outline:"none" }} />
-              <button onClick={saveSteps} style={{ background:"#e8ff00", border:"none", borderRadius:6, color:"#000", padding:"4px 7px", cursor:"pointer", fontWeight:700 }}>&#10003;</button>
-            </div>
-          ) : (
-            <button onClick={()=>{ setStepInput(String(todaySteps||"")); setEditingSteps(true); }} style={{ ...cell, cursor:"pointer" }}>
-              <span style={lbl}>&#128095; STEPS</span>
-              <span style={big("#3ddc84")}>{todaySteps.toLocaleString()}</span>
-              <span style={sub}>of {STEP_GOAL.toLocaleString()}</span>
-            </button>
-          )}
+          <button onClick={()=>openEdit("steps")} style={{ ...cell, cursor:"pointer" }}>
+            <span style={lbl}>&#128095; STEPS</span>
+            <span style={big("#3ddc84")}>{todaySteps.toLocaleString()}</span>
+            <span style={sub}>of {STEP_GOAL.toLocaleString()}</span>
+          </button>
 
           {/* Divider between the two rows */}
           <div style={{ gridColumn:"1 / -1", height:1, background:"#3a3a4a", borderRadius:1, margin:"2px 6px" }} />
@@ -4025,6 +4018,34 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
             the top of the screen — it's the biggest empty target on the dashboard, and
             Neal's eyes are already on the tile he just tapped, not the status bar. */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:9, position:"relative" }}>
+          {/* EDITOR — sleep / water / steps. Stays put until you tap the check; unlike the
+              readout flashes it must never time out while someone is mid-edit. */}
+          {dashEdit && (() => {
+            const cfg = EDITORS[dashEdit.key];
+            const long = String(dashEdit.value).length > 4;   // "12,500" needs smaller type
+            const round = { width:38, height:38, flexShrink:0, borderRadius:"50%", background:"transparent", border:`1px solid ${cfg.color}`, color:cfg.color, fontSize:22, lineHeight:1, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'DM Sans'", padding:0 };
+            return (
+              <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", zIndex:5 }}>
+                <div style={{ width:196, height:196, boxSizing:"border-box", padding:12, borderRadius:"50%", background:"rgba(12,12,20,0.98)", border:`1px solid ${cfg.color}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, animation:"fadeIn 0.2s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+                  <span style={{ fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1.2, color:"#dcdcf0" }}>{cfg.title}</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <button type="button" onClick={()=>nudgeEdit(-1)} style={round}>&minus;</button>
+                    <input value={dashEdit.value} onChange={e=>setDashEdit(d=>({ ...d, value:e.target.value.replace(/[^\d.]/g,"") }))}
+                           inputMode={cfg.dec ? "decimal" : "numeric"} placeholder="0"
+                           style={{ width:78, background:"transparent", border:"none", outline:"none", textAlign:"center", fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize: long?25:32, lineHeight:1.1, color:cfg.color, padding:0 }} />
+                    <button type="button" onClick={()=>nudgeEdit(1)} style={round}>+</button>
+                  </div>
+                  <span style={{ color:"#9898b8", fontSize:11.5 }}>of {cfg.goal}</span>
+                  {/* A SAVE pill, not a check glyph in a coloured blob. The ✓ character
+                      renders heavy and off-key next to this app's type; every other
+                      primary action here is a Bebas Neue pill (MENU, VOICE COACH,
+                      Add to <meal>), so this matches them. */}
+                  <button type="button" onClick={commitEdit}
+                          style={{ marginTop:5, background:cfg.color, border:"none", borderRadius:16, color:cfg.fg, padding:"7px 26px", cursor:"pointer", fontFamily:"'Bebas Neue'", fontSize:19, letterSpacing:1.4, lineHeight:1 }}>SAVE</button>
+                </div>
+              </div>
+            );
+          })()}
           {dashFlash && (
             // TWO elements on purpose. Centering lives on the OUTER wrapper (inset:0 +
             // flex), never on transform: the fadeIn keyframes animate `transform`, which
