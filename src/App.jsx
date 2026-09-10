@@ -3784,7 +3784,7 @@ const BURN_STATE_LABEL = {
   unsupported: "Apple Health",
 };
 
-function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConnectHealth, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConnectHealth, onQuickLog, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -3855,22 +3855,6 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
   // Each hero tile shows one number; the flash answers the question that number
   // raises. Everything here comes from dayNutrition and the Health read already
   // on screen — nothing is recomputed, so a flash can never disagree with its tile.
-  const SLOT_ORDER = ["breakfast", "lunch", "dinner", "snacks"];
-  const showIntakeFlash = () => {
-    const slots = SLOT_ORDER.filter((s) => _n.bySlot[s] > 0)
-                            .map((s) => `${_n.bySlot[s].toLocaleString()} ${s}`);
-    onFlash({
-      // No emoji, and the tile's own name — not a cute restatement of it. Neal:
-      // "do not label 'Eaten Today' with an emoji. Stick with the correct term."
-      title: "CALORIE INTAKE", color: calOver ? "#ff7070" : "#e8ff00",
-      total: totalCal.toLocaleString(),
-      // Nothing logged is a real state, not an empty list — say so plainly.
-      lines: slots.length
-        ? [...slots, calOver ? `${(totalCal - calGoal).toLocaleString()} over goal`
-                             : `${(calGoal - totalCal).toLocaleString()} left today`]
-        : ["nothing logged yet"],
-    });
-  };
   const showNetFlash = () => {
     onFlash({
       title: "NET CALORIES", color: net <= 0 ? "#3ddc84" : "#ff9d5c",
@@ -3879,10 +3863,17 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
     });
   };
 
+  // The camera shortcut behind the CALORIES INTAKE tile. The ref is filled in by
+  // QuickMacro; calling it inside the tile's onClick keeps the file-input click inside
+  // the user's gesture, which iOS requires before it will open the camera.
+  const quickMacroRef = useRef(null);
+  const onQuickMacro = () => quickMacroRef.current && quickMacroRef.current();
+
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
+      <QuickMacro openRef={quickMacroRef} onLog={onQuickLog} />
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
@@ -3971,9 +3962,11 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
 
           {/* ── ROW 2: CALORIES INTAKE | CALORIES BURNED | NET CALORIES ── */}
 
-          {/* CALORIES INTAKE — what they've logged today. Tap breaks it down by meal,
-              which is the question the total raises: not "how much" but "from where". */}
-          <button onClick={showIntakeFlash} type="button"
+          {/* CALORIES INTAKE — tapping it is a SHORTCUT STRAIGHT TO THE CAMERA, not a
+              readout. Neal: "connect it directly to Macro AI ... take a picture, add it
+              to whichever meal, and keep it moving." Logging a plate is the thing you
+              actually want from this tile; the meal-by-meal breakdown lives in Nutrition. */}
+          <button onClick={onQuickMacro} type="button"
                   style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
             <span style={lbl}>CALORIES<br/>INTAKE</span>
             <span style={big(calOver?"#ff7070":"#e8ff00")}>{totalCal.toLocaleString()}</span>
@@ -7925,93 +7918,107 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
   );
 }
 
-function MacroAI({ slotLabel, onResult }) {
+// ── Meal photo -> macros ────────────────────────────────────────────────────────
+// Shared by the Nutrition food logger and the dashboard's quick-capture shortcut.
+// One prompt, one parser: two copies of this drifting apart is the same failure the
+// duplicate nutrition engines caused.
+
+// Compress the multi-MB camera photo to a ~1024px JPEG BEFORE it touches React state,
+// the DOM, or the upload. A raw iOS photo is 3-16 MB of base64; decoding and rendering
+// that synchronously is what made the camera lag for seconds.
+async function mealPhotoDataUrl(file) {
+  try { return await compressImage(file, 1024, 0.7); }
+  catch {
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = (e) => resolve(e.target.result);
+      r.onerror = () => reject(new Error("Failed to read file"));
+      r.readAsDataURL(file);
+    });
+  }
+}
+
+// Returns {food, cal, protein, carbs, fats}. Throws if the photo can't be read.
+async function analyzeMealPhoto(dataUrl, fileType) {
+  const base64 = dataUrl.split(",")[1];
+  const mediaType = dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : (fileType || "image/jpeg");
+  const body = { model:"claude-sonnet-4-6", max_tokens:300, messages:[{ role:"user", content:[
+    { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
+    { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
+  ]}]};
+  const res = await anthropicFetch(body);
+  if (!res.ok) throw new Error("API error");
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "API error");
+  const text = (data.content && data.content[0] && data.content[0].text) || "";
+  if (!text) throw new Error("Empty response");
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
+// ── Dashboard quick capture ─────────────────────────────────────────────────────
+// Neal: "connect calorie intake directly to the Macro AI camera ... add it to whichever
+// meal you want ... and keep it moving. Just a shortcut."
+// So it deliberately does NOT navigate to Nutrition — you shoot the plate, pick the
+// meal, and you're back on the dashboard. `openRef` is handed the trigger so the tile's
+// own tap opens the camera: the file input must be clicked inside the user's gesture,
+// or iOS silently refuses to open it.
+function QuickMacro({ openRef, onLog }) {
+  const fileRef = useRef();
   const [imgSrc, setImgSrc] = useState(null);
-  const [scanning, setScanning] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const fileRef = useRef();
+  const [saved, setSaved] = useState(null);
 
-  const reset = () => { setImgSrc(null); setScanning(false); setResult(null); setError(null); };
+  useEffect(() => { if (openRef) openRef.current = () => fileRef.current?.click(); }, [openRef]);
 
-  const analyze = async (file) => {
-    // Compress the multi-MB camera photo to a ~1024px JPEG BEFORE it touches React
-    // state, the DOM, or the upload. A raw iOS photo is 3–16 MB of base64; decoding +
-    // rendering that synchronously is what made the camera and Use/Retake lag ~8s.
-    let dataUrl;
-    try { dataUrl = await compressImage(file, 1024, 0.7); }
-    catch {
-      dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.readAsDataURL(file);
-      });
-    }
-    setImgSrc(dataUrl);
-    setScanning(true); setError(null); setResult(null);
-    try {
-      const base64 = dataUrl.split(",")[1];
-      const mediaType = dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : (file.type || "image/jpeg");
-      const body = {
-        model: "claude-sonnet-4-6",
-        max_tokens: 300,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: "Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
-          ]
-        }]
-      };
-      const res = await anthropicFetch(body);
-      if (!res.ok) { const errText = await res.text(); throw new Error("API " + res.status + ": " + errText.slice(0,100)); }
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message || "API error");
-      const text = (data.content && data.content[0] && data.content[0].text) || "";
-      if (!text) throw new Error("Empty response");
-      const clean = text.replace(/```json|```/g, "").trim();
-      let parsed;
-      try { parsed = JSON.parse(clean); } catch(pe) { throw new Error("Parse error: " + clean.slice(0,80)); }
-      setResult(parsed);
-      setScanning(false);
-    } catch(e) {
-      setError(e.message || "Unknown error"); setScanning(false);
-    }
+  const close = () => { setImgSrc(null); setBusy(false); setResult(null); setError(null); };
+
+  const handleFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const dataUrl = await mealPhotoDataUrl(file);
+    setImgSrc(dataUrl); setBusy(true); setResult(null); setError(null);
+    try { setResult(await analyzeMealPhoto(dataUrl, file.type)); }
+    catch { setError("Could not read that photo — try again."); }
+    setBusy(false);
   };
 
-  const handleFile = (e) => { if(e.target.files[0]) analyze(e.target.files[0]); fileRef.current.value = ""; };
+  const fileTo = (slot) => {
+    onLog(slot.id, result);
+    close();
+    setSaved(slot.label);
+    setTimeout(() => setSaved((s) => (s === slot.label ? null : s)), 2600);
+  };
 
   return (
     <>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={handleFile} />
-      <button onClick={()=>fileRef.current.click()}
-        style={{ flex:1, width:"100%", background:"rgba(61,142,255,0.15)", color:"#3d8eff", border:"2px solid #3d8eff", borderRadius:20, padding:"8px 12px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>
-        Macro AI
-      </button>
 
-      {/* Full-screen overlay */}
+      {saved && (
+        <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:320, background:"#1a1a26", border:"1px solid #3ddc84", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+          <span style={{ fontSize:18, color:"#3ddc84" }}>&#10003;</span>
+          <span style={{ color:"#3ddc84", fontSize:14, fontWeight:700 }}>Added to {saved}</span>
+        </div>
+      )}
+
       {imgSrc && (
         <div style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
-          {/* X button */}
-          <button onClick={reset} style={{ position:"absolute", top:16, right:16, zIndex:310, background:"rgba(0,0,0,0.6)", border:"1px solid #444", borderRadius:"50%", width:36, height:36, color:"#fff", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+          <button onClick={close} style={{ position:"absolute", top:"calc(env(safe-area-inset-top) + 14px)", right:16, zIndex:310, background:"rgba(0,0,0,0.6)", border:"1px solid #444", borderRadius:"50%", width:36, height:36, color:"#fff", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>&#10005;</button>
 
-          {/* Image */}
           <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
             <img src={imgSrc} alt="meal" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
 
-            {/* Scanning overlay */}
-            {scanning && (
+            {busy && (
               <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14 }}>
                 <div style={{ width:48, height:48, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
                 <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:2 }}>Analyzing Meal...</div>
-                <div style={{ color:"#c8c8e0", fontSize:13 }}>Estimating calories &amp; macros</div>
               </div>
             )}
 
-            {/* Results overlay */}
-            {result && !scanning && (
-              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.92)", padding:"16px 20px" }}>
+            {result && !busy && (
+              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.94)", padding:"16px 20px calc(env(safe-area-inset-bottom) + 16px)" }}>
                 <div style={{ color:"#f0f0f8", fontWeight:700, fontSize:15, marginBottom:10 }}>{result.food}</div>
                 <div style={{ display:"flex", gap:0, marginBottom:14 }}>
                   {[["cal",result.cal,"#e8ff00"],["P",result.protein+"g","#3d8eff"],["C",result.carbs+"g","#9b5de5"],["F",result.fats+"g","#3ddc84"]].map(([k,v,col])=>(
@@ -8021,17 +8028,20 @@ function MacroAI({ slotLabel, onResult }) {
                     </div>
                   ))}
                 </div>
-                <div style={{ color:"#9898b8", fontSize:11, textAlign:"center", marginBottom:12 }}>AI estimate — tap Edit to adjust</div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={()=>fileRef.current.click()} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
-                  <button onClick={()=>{ onResult({...result, _openEdit:true}); reset(); }} style={{ flex:1, background:"transparent", border:"2px solid #e8ff00", borderRadius:20, color:"#e8ff00", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Edit</button>
-                  <button onClick={()=>{ onResult(result); reset(); }} style={{ flex:1, background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Log It</button>
+                <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, textAlign:"center", marginBottom:8 }}>ADD TO WHICH MEAL?</div>
+                <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+                  {FOOD_SLOTS.map((s) => (
+                    <button key={s.id} onClick={()=>fileTo(s)}
+                      style={{ flex:1, minWidth:0, background:"rgba(61,220,132,0.14)", border:"1px solid #3ddc84", borderRadius:16, color:"#3ddc84", padding:"11px 2px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12.5, lineHeight:1.15 }}>
+                      {s.label}
+                    </button>
+                  ))}
                 </div>
+                <button onClick={()=>fileRef.current.click()} style={{ width:"100%", background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
               </div>
             )}
 
-            {/* Error overlay */}
-            {error && !scanning && (
+            {error && !busy && (
               <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:20 }}>
                 <div style={{ color:"#ff7070", fontSize:14, textAlign:"center" }}>{error}</div>
                 <button onClick={()=>fileRef.current.click()} style={{ background:"#3d8eff", border:"none", borderRadius:20, color:"#fff", padding:"10px 24px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Try Again</button>
@@ -8285,25 +8295,11 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
   const removeLocal = (i) => setLocalItems(prev => prev.filter((_,idx)=>idx!==i).length ? prev.filter((_,idx)=>idx!==i) : []);
 
   const handlePhoto = async (file) => {
-    // Compress to ~1024px JPEG first (raw iOS photos are multi-MB and freeze the UI).
-    let dataUrl;
-    try { dataUrl = await compressImage(file, 1024, 0.7); }
-    catch { dataUrl = await new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=e=>resolve(e.target.result); r.onerror=()=>reject(); r.readAsDataURL(file); }); }
+    const dataUrl = await mealPhotoDataUrl(file);
     setImgSrc(dataUrl); setScanning(true); setScanResult(null); setScanError(null);
-    try {
-      const base64=dataUrl.split(",")[1]; const mediaType=dataUrl.startsWith("data:image/jpeg")?"image/jpeg":(file.type||"image/jpeg");
-      const body={ model:"claude-sonnet-4-6", max_tokens:300, messages:[{ role:"user", content:[
-        { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
-        { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
-      ]}]};
-      const res = await anthropicFetch(body);
-      if(!res.ok) throw new Error("API error");
-      const data=await res.json();
-      const text=(data.content&&data.content[0]&&data.content[0].text)||"";
-      const clean=text.replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(clean);
-      setScanResult(parsed); setScanning(false);
-    } catch(e) { setScanError("Could not analyze — try again."); setScanning(false); }
+    try { setScanResult(await analyzeMealPhoto(dataUrl, file.type)); }
+    catch { setScanError("Could not analyze — try again."); }
+    setScanning(false);
   };
 
   // Where does the photo go? A meal photo isn't tied to the card you happened to open —
@@ -12699,6 +12695,31 @@ export default function BodyMorph() {
     const delta = parseInt(n); // keep 0 and negatives; only default to +1 when truly absent/NaN
     return { ...base, cups: Math.max(0, base.cups + (Number.isNaN(delta) ? 1 : delta)) };
   });
+  // Dashboard camera shortcut: file an analysed meal photo into today's log. Appends
+  // (rather than replacing the slot, as the voice path does) because you can photograph
+  // two things for the same meal, and the second shouldn't erase the first.
+  const logFoodQuick = (slotId, item) => {
+    if (!item) return;
+    const todayStr = ymdLocal();
+    const s = FOOD_SLOT_IDS.includes(slotId) ? slotId : "snacks";
+    const entry = {
+      food: item.food || "Logged item",
+      cal: String(Math.round(item.cal || 0)), protein: String(Math.round(item.protein || 0)),
+      carbs: String(Math.round(item.carbs || 0)), fats: String(Math.round(item.fats || 0)),
+      logged: true,
+    };
+    setFoodLog(prev => {
+      const updated = { ...(prev || {}) };
+      const day = { ...(updated[todayStr] || {}) };
+      const raw = day[s];
+      const list = Array.isArray(raw) ? [...raw] : (raw ? [raw] : []);
+      list.push(entry);
+      day[s] = list;
+      updated[todayStr] = day;
+      return updated;
+    });
+  };
+
   // Voice companion: log a food item the client reports eating.
   const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
     const todayStr = ymdLocal();
@@ -13210,7 +13231,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} onQuickLog={logFoodQuick} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}
