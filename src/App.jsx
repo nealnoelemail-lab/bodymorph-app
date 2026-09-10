@@ -3954,16 +3954,25 @@ function Home({ burnedToday, burnState, burnFlash, onCloseBurnFlash, onConnectHe
             Neal's eyes are already on the tile he just tapped, not the status bar. */}
         <div style={{ display:"flex", justifyContent:"center", marginTop:9, position:"relative" }}>
           {burnFlash && (
-            <div onClick={onCloseBurnFlash}
-                 style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)", width:196, height:196, boxSizing:"border-box", padding:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:"1px solid #ff9d5c", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, zIndex:4, cursor:"pointer", animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
-              <span style={{ fontSize:26, lineHeight:1 }}>&#128293;</span>
-              <span style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0" }}>BURNED TODAY</span>
-              <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:38, lineHeight:1, color:"#ff9d5c" }}>{burnFlash.total}</span>
-              {/* One per line — a single "X active + Y resting" row runs to the circle's
-                  edge at four digits and reads cramped. */}
-              {(burnFlash.split || []).map((s) => (
-                <span key={s} style={{ color:"#9898b8", fontSize:12.5, lineHeight:1.3 }}>{s}</span>
-              ))}
+            // TWO elements on purpose. Centering lives on the OUTER wrapper (inset:0 +
+            // flex), never on transform: the fadeIn keyframes animate `transform`, which
+            // overrides an inline translateX(-50%) for the length of the animation — the
+            // circle drew half a width to the right, then snapped to centre when the
+            // animation ended. The INNER circle owns the animation and nothing else.
+            <div onClick={() => onCloseBurnFlash(burnFlash)}
+                 style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", zIndex:4, cursor:"pointer" }}>
+              <div style={{ width:196, height:196, boxSizing:"border-box", padding:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:"1px solid #ff9d5c", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+                <span style={{ fontSize:26, lineHeight:1 }}>&#128293;</span>
+                <span style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0" }}>{burnFlash.title || "BURNED TODAY"}</span>
+                {burnFlash.total && (
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:38, lineHeight:1, color:"#ff9d5c" }}>{burnFlash.total}</span>
+                )}
+                {/* One per line — a single "X active + Y resting" row runs to the circle's
+                    edge at four digits and reads cramped. */}
+                {(burnFlash.lines || []).map((s) => (
+                  <span key={s} style={{ color:"#9898b8", fontSize:12.5, lineHeight:1.3, maxWidth:164, textAlign:"center" }}>{s}</span>
+                ))}
+              </div>
             </div>
           )}
           <button onClick={onVoiceCoach} className={"silver-edge " + (voiceActive ? "vc-on" : "vc-idle")} style={{ width:196, height:196, borderRadius:"50%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.07)", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, overflow:"hidden", padding:"10px", position:"relative", zIndex:2 }}>
@@ -12052,7 +12061,13 @@ export default function BodyMorph() {
     setBurnFlash(payload);
     burnFlashTimer.current = setTimeout(() => setBurnFlash(null), 5000);
   };
-  const closeBurnFlash = () => { clearTimeout(burnFlashTimer.current); setBurnFlash(null); };
+  // Tapping the flash dismisses it — and when the flash IS the "turn it on in Health"
+  // message, the tap is also the shortcut there, since that's the only real fix.
+  const closeBurnFlash = (flash) => {
+    clearTimeout(burnFlashTimer.current);
+    setBurnFlash(null);
+    if (flash?.health) window.open("x-apple-health://", "_system");
+  };
   const [mealPlan, setMealPlan] = useState(null); // last AI-generated meal plan
   const [supplements, setSupplements] = useState([]);
   const [peptides, setPeptides] = useState([]);
@@ -12461,11 +12476,14 @@ export default function BodyMorph() {
   // been answered the only real fix is the Health app itself — say so, and open it.
   const connectHealth = useCallback(async () => {
     if (!IS_NATIVE) {
-      setToast({ kind:"info", emoji:"⌚️", title:"APPLE HEALTH", body:"Open BodyMorph on your iPhone to connect Apple Health." });
-      setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 6000);
+      showBurnFlash({ title:"IPHONE ONLY", lines:["Apple Health lives", "on your iPhone"] });
       return;
     }
-    setToast({ kind:"info", emoji:"⌚️", title:"APPLE HEALTH", body:"Checking…" });
+    // NO "checking..." indicator. The read is a background process and Neal's rule is
+    // that background work stays invisible — the only thing worth putting on screen is
+    // the RESULT. (It also used to hang around forever: moving the result to the Voice
+    // Coach flash dropped the line that cleared it.) setToast(null) clears any stale one.
+    setToast(null);
     const e = await todayEnergyBurned();
     if (e?.ok) {
       setBurnedToday(e);
@@ -12477,24 +12495,22 @@ export default function BodyMorph() {
       const parts = [];
       if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
       if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
-      showBurnFlash({ total: e.total.toLocaleString(), split: parts.length ? parts : ["from Apple Health"] });
+      showBurnFlash({ total: e.total.toLocaleString(), lines: parts.length ? parts : ["from Apple Health"] });
       return;
     }
     setBurnState(e?.reason || "error");            // leave the reason on the tile too
-    const BODY = {
-      unavailable: "Apple Health isn't available on this device.",
-      timeout:     "Apple Health didn't answer. Give it a second and tap again.",
-      noaccess:    "No energy data came back. Tap here to open Health, then Sharing › Apps › BodyMorph and switch ON Active Energy and Resting Energy.",
-      unsupported: "Apple Health only works in the iPhone app.",
-      notlinked:   "The Health connection didn't load at startup. Swipe BodyMorph closed and reopen it.",
+    // Failures land in the SAME place as the number. One tap, one place to look —
+    // a result at the top of the screen and a result over the circle, depending on
+    // whether it worked, is two things to learn instead of one. Kept short: this has
+    // to read inside a 196px circle.
+    const FAIL = {
+      unavailable: { title:"NO APPLE HEALTH", lines:["not available", "on this device"] },
+      timeout:     { title:"NO ANSWER",       lines:["Health didn't reply", "tap to retry"] },
+      noaccess:    { title:"SWITCH IT ON",    lines:["Health › Sharing › Apps", "› BodyMorph", "tap to open Health"], health:true },
+      unsupported: { title:"IPHONE ONLY",     lines:["open the iPhone app"] },
+      notlinked:   { title:"NOT LINKED",      lines:["close BodyMorph fully", "and reopen it"] },
     };
-    setToast({
-      kind: "info", emoji: "⌚️", title: "CALORIES BURNED",
-      body: BODY[e?.reason] || `Apple Health error: ${e?.detail || "unknown"}`,
-      // Only offer the Health shortcut where it's actually the fix.
-      health: e?.reason === "noaccess",
-    });
-    setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 12000);
+    showBurnFlash(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] });
   }, [syncAppleHealth]);
 
   useEffect(() => {
