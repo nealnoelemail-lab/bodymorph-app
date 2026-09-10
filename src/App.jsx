@@ -3727,11 +3727,21 @@ const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
 //
 // Counts ONLY items marked `logged` (an item added but not confirmed eaten is a plan,
 // not a meal). Old single-object slot data is auto-wrapped so nothing is lost.
+// The four meal slots, defined ONCE. Order matters — it's the order they're logged,
+// listed and totalled in. Components used to each carry their own copy of this list.
+const FOOD_SLOTS = [
+  { id:"breakfast", label:"Breakfast", emoji:"☕️" },
+  { id:"lunch",     label:"Lunch",     emoji:"🥙" },
+  { id:"dinner",    label:"Dinner",    emoji:"🍽️" },
+  { id:"snacks",    label:"Snacks",    emoji:"🍪" },
+];
+const FOOD_SLOT_IDS = FOOD_SLOTS.map((s) => s.id);
+
 function dayNutrition(foodLog, dateKey) {
   const day = (foodLog && foodLog[dateKey]) || {};
   let cal = 0, protein = 0, carbs = 0, fats = 0;
   const bySlot = {};
-  ["breakfast", "lunch", "dinner", "snacks"].forEach((slot) => {
+  FOOD_SLOT_IDS.forEach((slot) => {
     const raw = day[slot];
     if (!raw) return;
     const items = Array.isArray(raw) ? raw : [raw];
@@ -7785,12 +7795,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
     return ymdLocal(t);
   })();
 
-  const MEAL_SLOTS = [
-    { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
-    { id:"lunch",     label:"Lunch",     emoji:"\uD83E\uDD59" },
-    { id:"dinner",    label:"Dinner",    emoji:"\uD83C\uDF7D\uFE0F" },
-    { id:"snacks",    label:"Snacks",    emoji:"\uD83C\uDF6A" },
-  ];
+  const MEAL_SLOTS = FOOD_SLOTS;   // one shared definition — see FOOD_SLOTS
   const dayFoodLog = (foodLog && foodLog[dateKey]) || {};
 
   // Is the selected day a training day? Find its schedule entry.
@@ -8244,8 +8249,9 @@ function productLabel(p) {
   return name.toLowerCase().includes(brand.toLowerCase()) ? name : `${brand} ${name}`;
 }
 
-function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
+function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlot }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
+  const [sentTo, setSentTo] = useState(null);   // "Lunch" right after a photo was filed there
   const fileRef = useRef();
   const [scanning, setScanning] = useState(false);
   const [imgSrc, setImgSrc] = useState(null);
@@ -8300,8 +8306,23 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
     } catch(e) { setScanError("Could not analyze — try again."); setScanning(false); }
   };
 
-  const confirmScan = () => {
-    if (scanResult) { setLocalItems(prev=>[...prev, {...scanResult, logged:false}]); }
+  // Where does the photo go? A meal photo isn't tied to the card you happened to open —
+  // you shoot dinner from whatever screen you're on. So the analysed result asks which
+  // meal it belongs to instead of assuming the slot the logger was opened for.
+  //   • Chosen slot IS the open one -> append to the working list, same as before, so
+  //     you can keep adding and hit "Add to <meal>" once.
+  //   • Any other slot -> written straight into that meal and logged, without closing
+  //     this one or disturbing items already staged here.
+  const confirmScan = (destId, destLabel) => {
+    if (scanResult) {
+      if (!destId || destId === slotId) {
+        setLocalItems(prev => [...prev, { ...scanResult, logged:false }]);
+      } else {
+        onAddToSlot(destId, scanResult);
+        setSentTo(destLabel);
+        setTimeout(() => setSentTo(s => (s === destLabel ? null : s)), 2600);
+      }
+    }
     setImgSrc(null); setScanResult(null); setScanError(null);
   };
 
@@ -8758,6 +8779,16 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
           </div>
         )}
 
+        {/* Confirmation that a photo went somewhere ELSE. Without it the photo just
+            vanishes from a screen that shows no sign of it — filed correctly, but
+            indistinguishable from lost. */}
+        {sentTo && (
+          <div style={{ background:"rgba(61,220,132,0.12)", border:"1px solid #3ddc84", borderRadius:12, padding:"11px 14px", marginBottom:14, display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ fontSize:18 }}>&#10003;</span>
+            <span style={{ color:"#3ddc84", fontSize:14, fontWeight:700 }}>Added to {sentTo}</span>
+          </div>
+        )}
+
         {/* Photo scan overlay within page */}
         {imgSrc && (
           <div style={{ borderRadius:14, overflow:"hidden", background:"#000", marginBottom:16, position:"relative" }}>
@@ -8779,10 +8810,21 @@ function FoodLogger({ slotLabel, items, onSave, onClose, sug }) {
                     </div>
                   ))}
                 </div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button onClick={()=>{ setImgSrc(null); setScanResult(null); fileRef.current.click(); }} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
-                  <button onClick={confirmScan} style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Add to {slotLabel}</button>
+                {/* FOUR destinations, not just the card you opened. The one you came in
+                    from is filled so the common case is still a single obvious tap. */}
+                <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, textAlign:"center", marginBottom:7 }}>ADD TO WHICH MEAL?</div>
+                <div style={{ display:"flex", gap:5, marginBottom:8 }}>
+                  {FOOD_SLOTS.map((s) => {
+                    const here = s.id === slotId;
+                    return (
+                      <button key={s.id} onClick={()=>confirmScan(s.id, s.label)}
+                        style={{ flex:1, minWidth:0, background: here ? "#3ddc84" : "rgba(61,220,132,0.12)", border:"1px solid #3ddc84", borderRadius:14, color: here ? "#000" : "#3ddc84", padding:"9px 2px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12, lineHeight:1.15 }}>
+                        {s.label}
+                      </button>
+                    );
+                  })}
                 </div>
+                <button onClick={()=>{ setImgSrc(null); setScanResult(null); fileRef.current.click(); }} style={{ width:"100%", background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
               </div>
             )}
             {scanError && !scanning && (
@@ -8957,12 +8999,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   };
   const [swapping, setSwapping] = useState(null); // "mealIdx-itemIdx" being swapped
 
-  const MEAL_SLOTS = [
-    { id:"breakfast", label:"Breakfast", emoji:"\u2615\uFE0F" },
-    { id:"lunch",     label:"Lunch",     emoji:"\uD83E\uDD59" },
-    { id:"dinner",    label:"Dinner",    emoji:"\uD83C\uDF7D\uFE0F" },
-    { id:"snacks",    label:"Snacks",    emoji:"\uD83C\uDF6A" },
-  ];
+  const MEAL_SLOTS = FOOD_SLOTS;   // one shared definition — see FOOD_SLOTS
 
   const dateKey = (() => {
     const d = new Date(); const diff = sel - d.getDay();
@@ -9180,6 +9217,20 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   })();
   const calOver = totalCal > calGoal;
 
+  // File one item into a meal WITHOUT closing whatever the user has open. Used when a
+  // Macro AI photo is sent to a meal other than the one being edited, so staged items
+  // in the open slot survive. Appends and logs it, since choosing the meal IS the
+  // confirmation — there's no second screen to press "add" on.
+  const addToSlotDirect = (slotId, item) => {
+    const updated = { ...(foodLog||{}) };
+    const day = updated[dateKey] || {};
+    const raw = day[slotId];
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    const next = [...list, { ...item, logged:true }].filter(x => x && (x.food || x.cal));
+    updated[dateKey] = { ...day, [slotId]: next };
+    onSaveFoodLog(updated);
+  };
+
   const saveFoodLogger = (slotId, newItems) => {
     const updated = { ...(foodLog||{}) };
     updated[dateKey] = { ...(updated[dateKey]||{}), [slotId]: newItems.map(x=>({...x,logged:true})) };
@@ -9278,10 +9329,12 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       <style>{GLOBAL_CSS}</style><WatermarkPlain />
       {foodLogger && (
         <FoodLogger
+          slotId={foodLogger.slotId}
           slotLabel={foodLogger.slotLabel}
           items={slotList(foodLogger.slotId)}
           sug={foodLogger.sug}
           onSave={(newItems)=>saveFoodLogger(foodLogger.slotId, newItems)}
+          onAddToSlot={addToSlotDirect}
           onClose={()=>setFoodLogger(null)}
         />
       )}
