@@ -12402,13 +12402,48 @@ export default function BodyMorph() {
       if (daily) setWatchDaily(daily);
       // Today's TOTAL burn (active + resting) for the hero grid. null = unavailable
       // or permission denied -> the tile shows a dash rather than a fake number.
-      setBurnedToday(await todayEnergyBurned());
+      const energy = await todayEnergyBurned();
+      setBurnedToday(energy?.ok ? energy : null);
       if (insights && userRef.current?.id) {
         setWatchInsights(insights);
         pushHealthSummary(userRef.current.id, insights, daily);
       }
     } catch { /* silent — reports simply omit watch data */ }
   }, []);
+  // Tapping the empty CALORIES BURNED tile. The background sync fails silently by
+  // design (reports just omit watch data), but a tap is a deliberate user action —
+  // it must always produce a visible answer, even when that answer is "Health said no."
+  // Apple only ever shows the permission sheet ONCE per data type, so when it's already
+  // been answered the only real fix is the Health app itself — say so, and open it.
+  const connectHealth = useCallback(async () => {
+    if (!IS_NATIVE) {
+      setToast({ kind:"info", emoji:"⌚️", title:"APPLE HEALTH", body:"Open BodyMorph on your iPhone to connect Apple Health." });
+      setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 6000);
+      return;
+    }
+    setToast({ kind:"info", emoji:"⌚️", title:"APPLE HEALTH", body:"Checking…" });
+    const e = await todayEnergyBurned();
+    if (e?.ok) {                                   // got it — show the number, drop the toast
+      setBurnedToday(e);
+      setToast(null);
+      syncAppleHealth();
+      return;
+    }
+    const BODY = {
+      unavailable: "Apple Health isn't available on this device.",
+      timeout:     "Apple Health didn't answer. Give it a second and tap again.",
+      noaccess:    "No energy data came back. Tap here to open Health, then Sharing › Apps › BodyMorph and switch ON Active Energy and Resting Energy.",
+      unsupported: "Apple Health only works in the iPhone app.",
+    };
+    setToast({
+      kind: "info", emoji: "⌚️", title: "CALORIES BURNED",
+      body: BODY[e?.reason] || `Apple Health error: ${e?.detail || "unknown"}`,
+      // Only offer the Health shortcut where it's actually the fix.
+      health: e?.reason === "noaccess",
+    });
+    setTimeout(() => setToast(t => (t && t.kind === "info") ? null : t), 12000);
+  }, [syncAppleHealth]);
+
   useEffect(() => {
     if (!loaded || !IS_NATIVE) return;
     syncAppleHealth();
@@ -12795,6 +12830,21 @@ export default function BodyMorph() {
   // Medal toast (rendered above everything)
   const Toast = () => {
     if (!toast) return null;
+    // Plain status toast (Apple Health connect results). Tappable when there's an
+    // action behind it — otherwise it's just text and shouldn't pretend to be a button.
+    if (toast.kind === "info") {
+      const go = () => { setToast(null); if (toast.health) window.open("x-apple-health://", "_system"); };
+      return (
+        <div onClick={toast.health ? go : () => setToast(null)}
+             style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease", cursor:"pointer", maxWidth:"90%", textAlign:"left" }}>
+          <span style={{ fontSize:26 }}>{toast.emoji}</span>
+          <div>
+            <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1 }}>{toast.title}</div>
+            <div style={{ fontSize:13, color:"#c8c8e0", lineHeight:1.35 }}>{toast.body}</div>
+          </div>
+        </div>
+      );
+    }
     if (toast.kind === "msg") return (
       <button onClick={()=>{ setToast(null); if (myCoach) setPhase("chat"); }} style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease", cursor:"pointer", maxWidth:"90%", textAlign:"left" }}>
         <span style={{ fontSize:26 }}>💬</span>
@@ -12970,7 +13020,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} onConnectHealth={syncAppleHealth} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} onConnectHealth={connectHealth} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
         onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
         onEditDays={()=>setPhase("editdays")}

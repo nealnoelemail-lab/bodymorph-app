@@ -103,17 +103,30 @@ export async function syncHealth() {
 // Apple's Move ring is active-only, which looks broken next to food intake; the number
 // people mean by "burned today" is the sum. Returns null when Health is unavailable or
 // the read wasn't authorized — callers must show a dash, never a fabricated 0.
+// Returns { ok:true, total, active, resting } or { ok:false, reason } — never throws.
+// It reports a REASON rather than a bare null because the hero tile is tappable: when
+// the number can't be had, the app has to tell the user which of the several very
+// different causes it hit, instead of leaving a dash and a dead-feeling tap.
 export async function todayEnergyBurned() {
-  if (!IS_NATIVE || !IS_IOS) return null;
+  if (!IS_NATIVE || !IS_IOS) return { ok: false, reason: "unsupported" };
   try {
-    if (!(await HealthKit.isAvailable())?.available) return null;
+    if (!(await HealthKit.isAvailable())?.available) return { ok: false, reason: "unavailable" };
     await HealthKit.requestAuthorization();
-    const r = await HealthKit.getTodayEnergy();
-    if (!r || r.totalKcal == null || r.totalKcal < 0) return null;   // -1 = no data/denied
+    // TIMEOUT: a HealthKit query whose completion handler never fires would leave this
+    // promise pending forever — the tile would sit on a dash with no error to show.
+    const r = await withTimeout(HealthKit.getTodayEnergy(), 8000);
+    if (r === TIMED_OUT) return { ok: false, reason: "timeout" };
+    if (!r || r.totalKcal == null || r.totalKcal < 0) return { ok: false, reason: "noaccess" }; // -1 = no samples or not permitted
     return {
+      ok: true,
       total: Math.max(0, parseInt(r.totalKcal) || 0),
       active: r.activeKcal >= 0 ? Math.max(0, parseInt(r.activeKcal) || 0) : null,
       resting: r.restingKcal >= 0 ? Math.max(0, parseInt(r.restingKcal) || 0) : null,
     };
-  } catch { return null; }
+  } catch (e) { return { ok: false, reason: "error", detail: e?.message || String(e) }; }
+}
+
+const TIMED_OUT = Symbol("timeout");
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((res) => setTimeout(() => res(TIMED_OUT), ms))]);
 }

@@ -913,11 +913,16 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func requestAuthorization(_ call: CAPPluginCall) {
         guard HKHealthStore.isHealthDataAvailable() else { call.resolve(["granted": false]); return }
-        store.requestAuthorization(toShare: nil, read: readTypes()) { ok, err in
-            // Apple deliberately never tells us WHICH read types the user allowed (privacy).
-            // `ok` just means the sheet completed without error — we treat that as "proceed
-            // and try to read"; a denied type simply returns zero samples.
-            call.resolve(["granted": ok, "error": err?.localizedDescription ?? ""])
+        // MAIN THREAD: Capacitor dispatches plugin calls on a background queue, and this
+        // call presents a system sheet. Off-main it can complete without ever showing UI —
+        // which looks exactly like "I tapped it and nothing happened."
+        DispatchQueue.main.async {
+            self.store.requestAuthorization(toShare: nil, read: self.readTypes()) { ok, err in
+                // Apple deliberately never tells us WHICH read types the user allowed (privacy).
+                // `ok` just means the sheet completed without error — we treat that as "proceed
+                // and try to read"; a denied type simply returns zero samples.
+                call.resolve(["granted": ok, "error": err?.localizedDescription ?? ""])
+            }
         }
     }
 
