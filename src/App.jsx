@@ -3895,7 +3895,7 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
   };
 
   // The camera shortcut behind the CALORIES INTAKE tile. The ref is filled in by
-  // QuickMacro; calling it inside the tile's onClick keeps the file-input click inside
+  // MealPhotoFlow; calling it inside the tile's onClick keeps the file-input click inside
   // the user's gesture, which iOS requires before it will open the camera.
   const quickMacroRef = useRef(null);
   const onQuickMacro = () => quickMacroRef.current && quickMacroRef.current();
@@ -3904,7 +3904,7 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
-      <QuickMacro openRef={quickMacroRef} onLog={onQuickLog} />
+      <MealPhotoFlow openRef={quickMacroRef} onLog={onQuickLog} />
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
@@ -7978,13 +7978,32 @@ async function mealPhotoDataUrl(file) {
   }
 }
 
-// Returns {food, cal, protein, carbs, fats}. Throws if the photo can't be read.
+const MEAL_PHOTO_PROMPT = `Identify EVERY distinct food on this plate as a SEPARATE item. Do not merge them into one dish.
+
+For each item give:
+- "food": the specific food, 1-4 words ("grilled chicken breast", "white rice", "steamed broccoli")
+- "portion": the amount in a HOUSEHOLD measure a person can picture — "1 cup", "4 oz", "2 slices", "1 medium". Never grams here.
+- "grams": your estimate of that portion's weight in grams, as a number
+- "confidence": "high", "medium" or "low" — how sure you are of the IDENTIFICATION. Use "low" freely; foods that look alike (mushrooms vs meat, rice vs couscous, sauces) should be "low" or "medium".
+- "cal", "protein", "carbs", "fats": numbers for that item's portion
+
+Use the plate rim, cutlery or hands as a size reference for portions.
+
+Reply ONLY with JSON, no markdown, no commentary:
+{"items":[{"food":"...","portion":"...","grams":000,"confidence":"high","cal":000,"protein":00,"carbs":00,"fats":00}]}`;
+
+const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
+
+// Returns an ARRAY of items: [{food, portion, grams, confidence, cal, protein, carbs, fats}].
+// Itemised on purpose — a single lumped result means one misidentified food makes the
+// whole photo unusable, which is exactly the complaint this replaces. Throws if the
+// photo can't be read.
 async function analyzeMealPhoto(dataUrl, fileType) {
   const base64 = dataUrl.split(",")[1];
   const mediaType = dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : (fileType || "image/jpeg");
-  const body = { model:"claude-sonnet-4-6", max_tokens:300, messages:[{ role:"user", content:[
+  const body = { model:"claude-sonnet-4-6", max_tokens:900, messages:[{ role:"user", content:[
     { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
-    { type:"text", text:"Analyze this meal photo and estimate the nutritional content. Reply ONLY with a JSON object (no markdown, no explanation) in this exact format: {food: meal name, cal: 000, protein: 00, carbs: 00, fats: 00}. Use those exact key names. Estimate for a typical single serving shown in the image." }
+    { type:"text", text: MEAL_PHOTO_PROMPT }
   ]}]};
   const res = await anthropicFetch(body);
   if (!res.ok) throw new Error("API error");
@@ -7992,7 +8011,293 @@ async function analyzeMealPhoto(dataUrl, fileType) {
   if (data.error) throw new Error(data.error.message || "API error");
   const text = (data.content && data.content[0] && data.content[0].text) || "";
   if (!text) throw new Error("Empty response");
-  return JSON.parse(text.replace(/```json|```/g, "").trim());
+  const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+  // Tolerate a single object as well as {items:[...]} — the model occasionally answers
+  // with one food when the plate holds one food, and that shouldn't read as a failure.
+  const raw = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : [parsed]);
+  const items = raw.filter((it) => it && (it.food || it.cal != null)).map(normalizePhotoItem);
+  if (!items.length) throw new Error("Nothing recognised");
+  return items;
+}
+
+const toNum = (v, d = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+
+function normalizePhotoItem(it) {
+  const conf = String(it.confidence || "").toLowerCase();
+  return {
+    food: String(it.food || "Item").trim(),
+    portion: String(it.portion || "").trim(),
+    grams: Math.max(0, Math.round(toNum(it.grams))) || null,
+    confidence: CONFIDENCE_RANK[conf] !== undefined ? conf : "medium",
+    cal: Math.round(toNum(it.cal)),
+    protein: Math.round(toNum(it.protein) * 10) / 10,
+    carbs: Math.round(toNum(it.carbs) * 10) / 10,
+    fats: Math.round(toNum(it.fats) * 10) / 10,
+  };
+}
+
+// Totals are always DERIVED from the rows, never stored. That's what makes deleting a
+// misidentified food correct by construction: the total can't disagree with the list.
+function mealTotals(items) {
+  return (items || []).reduce((t, it) => ({
+    cal: t.cal + toNum(it.cal), protein: t.protein + toNum(it.protein),
+    carbs: t.carbs + toNum(it.carbs), fats: t.fats + toNum(it.fats),
+  }), { cal:0, protein:0, carbs:0, fats:0 });
+}
+
+// ── Keeping the SIZE when the identity changes ──────────────────────────────────
+// Neal's case: it called the steak "mushrooms". Correcting the name must NOT keep the
+// gram weight, because that weight was derived from the wrong food.
+//
+// What survives a re-identification is how much SPACE the food took up. So:
+//   • a MASS portion ("4 oz", "150 g") transfers as-is — 4 oz is 4 oz whatever it is.
+//   • a VOLUME or COUNT portion ("1 cup", "2 slices") keeps the UNIT and the QUANTITY,
+//     and the grams get re-derived from the corrected food's own measures. A cup of
+//     mushrooms and a cup of steak weigh very different amounts, and that's the point.
+const MASS_UNITS = /\b(g|gram|grams|oz|ounce|ounces|lb|lbs|pound|pounds|kg)\b/i;
+
+function parsePortion(portion) {
+  const s = String(portion || "").trim();
+  if (!s) return null;
+  const m = s.match(/^\s*([\d.\/]+)?\s*(.*)$/);
+  let qty = 1;
+  if (m && m[1]) {
+    if (m[1].includes("/")) { const [a, b] = m[1].split("/").map(Number); qty = b ? a / b : 1; }
+    else qty = toNum(m[1], 1);
+  }
+  const unit = (m && m[2] ? m[2] : s).trim();
+  return { qty: qty > 0 ? qty : 1, unit, isMass: MASS_UNITS.test(unit) };
+}
+
+// Pick the USDA measure that best preserves the photo's portion, and the quantity to
+// go with it. Returns {index, qty}.
+function measureForPortion(measures, portion, grams) {
+  const list = measures || [];
+  const p = parsePortion(portion);
+  if (p && !p.isMass) {
+    // Match on the unit word: "1 cup" -> a measure whose label mentions cup.
+    const word = (p.unit.match(/[a-z]+/i) || [""])[0].toLowerCase().replace(/s$/, "");
+    if (word) {
+      const i = list.findIndex((mm) => new RegExp(`\\b${word}s?\\b`, "i").test(mm.label || ""));
+      if (i >= 0) return { index: i, qty: p.qty };
+    }
+  }
+  // Mass portion, or no matching unit: fall back to the gram estimate, which for a mass
+  // portion is exactly right and otherwise is at least the correct order of magnitude.
+  if (grams > 0) {
+    const gi = list.findIndex((mm) => (mm.label || "").includes("100 g"));
+    if (gi >= 0) return { index: gi, qty: Math.round((grams / 100) * 10) / 10 || 1 };
+  }
+  return { index: 0, qty: p ? p.qty : 1 };
+}
+
+// A photo/review item -> the shape the food log stores. Keeps the portion in the name
+// so the log reads "White rice (1 cup)" rather than a bare food with an invisible size.
+function foodLogEntry(it) {
+  const name = it.portion ? `${it.food} (${it.portion})` : (it.food || "Logged item");
+  return {
+    food: name,
+    cal: String(Math.round(toNum(it.cal))),
+    protein: String(Math.round(toNum(it.protein))),
+    carbs: String(Math.round(toNum(it.carbs))),
+    fats: String(Math.round(toNum(it.fats))),
+    logged: true,
+  };
+}
+
+// ── The plate, itemised ─────────────────────────────────────────────────────────
+// One row per food, each removable and fixable on its own, with the total derived from
+// whatever rows survive. This is the whole point of the change: a photo that gets three
+// of four foods right used to be unusable.
+function MealPhotoReview({ items, onChange, onFix }) {
+  const t = mealTotals(items);
+  const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:8 }}>
+        <span style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0" }}>ON THE PLATE</span>
+        <span style={{ color:"#9898b8", fontSize:11.5 }}>{items.length} item{items.length===1?"":"s"}</span>
+      </div>
+
+      {items.map((it, i) => {
+        const unsure = it.confidence === "low" || it.confidence === "medium";
+        return (
+          <div key={i} style={{ background:"#12121c", border:`1px solid ${it.confidence==="low" ? "#ff9d5c" : "#1e1e2e"}`, borderRadius:12, padding:"10px 12px", marginBottom:7 }}>
+            <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color:"#f0f0f8", fontSize:14, fontWeight:600, lineHeight:1.25 }}>{it.food}</div>
+                <div style={{ color:"#9898b8", fontSize:12, marginTop:2 }}>
+                  {it.portion || `${it.grams || 0} g`}{it.portion && it.grams ? ` · ${it.grams} g` : ""} · {Math.round(toNum(it.cal))} cal
+                </div>
+              </div>
+              <button onClick={()=>onFix(i)} style={{ background:"transparent", border:"1px solid #3d8eff", borderRadius:14, color:"#3d8eff", padding:"5px 11px", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans'", fontWeight:700, flexShrink:0 }}>Fix</button>
+              <button onClick={()=>remove(i)} aria-label={`Remove ${it.food}`} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:14, color:"#9898b8", padding:"5px 10px", cursor:"pointer", fontSize:12, flexShrink:0 }}>&#10005;</button>
+            </div>
+            {/* Flagging only the doubtful rows is the difference between checking one
+                item and auditing the whole plate. The model knows when it's guessing. */}
+            {unsure && (
+              <div style={{ color: it.confidence==="low" ? "#ff9d5c" : "#9898b8", fontSize:11.5, marginTop:6 }}>
+                {it.confidence === "low" ? "Not sure about this one — tap Fix if it's wrong" : "Fairly sure"}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {!items.length && (
+        <div style={{ color:"#9898b8", fontSize:13, padding:"12px 2px" }}>Nothing left — retake the photo, or close.</div>
+      )}
+
+      {items.length > 0 && (
+        <div style={{ display:"flex", gap:0, background:"#12121c", borderRadius:12, padding:"11px 0", marginTop:10 }}>
+          {[["cal",Math.round(t.cal),"#e8ff00"],["P",Math.round(t.protein)+"g","#3d8eff"],["C",Math.round(t.carbs)+"g","#9b5de5"],["F",Math.round(t.fats)+"g","#3ddc84"]].map(([k,v,col])=>(
+            <div key={k} style={{ flex:1, textAlign:"center" }}>
+              <div style={{ color:col, fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:19 }}>{v}</div>
+              <div style={{ color:"#9898b8", fontSize:11 }}>{k}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Say the accuracy out loud. Portion size from a flat photo is a guess even when
+          the food is identified perfectly; presenting it as exact would be a lie. */}
+      <div style={{ color:"#7a7a95", fontSize:11, textAlign:"center", marginTop:8, lineHeight:1.4 }}>
+        Estimated from a photo — usually within 20&ndash;30%. Fix or remove anything that looks wrong.
+      </div>
+    </div>
+  );
+}
+
+// ── Fixing one misidentified item ───────────────────────────────────────────────
+// Opens on the item the photo got wrong, pre-typed with its name so you can correct it,
+// and re-prices it against USDA data rather than asking the AI to guess again. USDA is
+// free, gives real per-100g numbers, and ships household measures — so this is both
+// cheaper and more accurate than a second vision call.
+function FoodFixSheet({ item, onCancel, onDone }) {
+  const [query, setQuery] = useState(item.food || "");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [picked, setPicked] = useState(null);
+  const [mIdx, setMIdx] = useState(0);
+  const [qty, setQty] = useState("1");
+  const timer = useRef(null);
+  const inputRef = useRef(null);
+
+  const run = async (q) => {
+    if (!q || q.trim().length < 2) { setResults([]); return; }
+    setLoading(true); setError(null);
+    try { setResults(await searchUSDA(q.trim())); }
+    catch (e) { setError(e.message === "rate_limit" ? "Food database is busy — try again in a moment." : "Search failed."); }
+    setLoading(false);
+  };
+  // Search the item's own name immediately: most of the time the fix is a small
+  // correction ("mushroom" -> "steak"), so having results already up saves a step.
+  useEffect(() => { run(item.food || ""); /* eslint-disable-next-line */ }, []);
+
+  const onQuery = (v) => {
+    setQuery(v); setPicked(null);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => run(v), 450);
+  };
+
+  const pick = (f) => {
+    // THE IMPORTANT BIT: carry the photo's portion across to the corrected food.
+    const { index, qty: q } = measureForPortion(f.measures, item.portion, item.grams);
+    setPicked(f); setMIdx(index); setQty(String(q));
+  };
+
+  const measure = picked ? (picked.measures[mIdx] || picked.measures[0]) : null;
+  const grams = measure ? measure.grams * (toNum(qty, 1) || 1) : 0;
+  const macros = picked ? {
+    cal:     Math.round(picked.cal * grams / 100),
+    protein: Math.round(picked.protein * grams / 100 * 10) / 10,
+    carbs:   Math.round(picked.carbs * grams / 100 * 10) / 10,
+    fats:    Math.round(picked.fats * grams / 100 * 10) / 10,
+  } : null;
+
+  const done = () => {
+    const q = toNum(qty, 1) || 1;
+    // "0.6 × 100 g" is a fraction of a unit nobody thinks in. When the fallback gram
+    // measure is what's selected, just say the grams.
+    const generic = /^100 g$/.test(measure.label);
+    onDone({
+      food: picked.description,
+      portion: generic ? `${Math.round(grams)} g` : (q === 1 ? measure.label : `${q} × ${measure.label}`),
+      grams: Math.round(grams),
+      confidence: "high",          // a person chose it — no longer a guess
+      ...macros,
+    });
+  };
+
+  const chip = (on) => ({ background:on?"#e8ff00":"transparent", border:on?"none":"1px solid #2a2a3d", borderRadius:20, color:on?"#000":"#c8c8e0", padding:"6px 12px", cursor:"pointer", fontSize:12, fontFamily:"'DM Sans'", fontWeight:on?700:400, whiteSpace:"nowrap" });
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:420, background:"#0a0a0f", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto", paddingTop:"calc(env(safe-area-inset-top) + 8px)", paddingBottom:"env(safe-area-inset-bottom)", boxSizing:"border-box" }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px", borderBottom:"1px solid #1a1a26" }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>WHAT IS IT?</div>
+        <button onClick={onCancel} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 12px", cursor:"pointer", fontSize:14 }}>Cancel</button>
+      </div>
+
+      <div style={{ padding:"14px 18px 8px" }}>
+        {item.portion && (
+          <div style={{ color:"#9898b8", fontSize:12.5, marginBottom:10, lineHeight:1.4 }}>
+            Keeping the photo's portion — <span style={{ color:"#e8ff00" }}>{item.portion}</span>. The weight is recalculated for whatever you pick.
+          </div>
+        )}
+        <input ref={inputRef} value={query} onChange={(e)=>onQuery(e.target.value)} placeholder="Search a food…"
+               style={{ width:"100%", boxSizing:"border-box", background:"#12121c", border:"1px solid #2a2a3d", borderRadius:12, color:"#f0f0f8", padding:"13px 14px", fontSize:16, outline:"none", fontFamily:"'DM Sans'" }} />
+      </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"0 18px 18px" }}>
+        {loading && <div style={{ color:"#9898b8", fontSize:13, padding:"10px 2px" }}>Searching…</div>}
+        {error && <div style={{ color:"#ff7070", fontSize:13, padding:"10px 2px" }}>{error}</div>}
+
+        {!picked && results.map((f) => (
+          <button key={f.fdcId} onClick={()=>pick(f)} style={{ display:"block", width:"100%", textAlign:"left", background:"#12121c", border:"1px solid #1e1e2e", borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer", color:"#f0f0f8" }}>
+            <div style={{ fontSize:14, fontWeight:600, lineHeight:1.3 }}>{f.description}</div>
+            <div style={{ color:"#9898b8", fontSize:12, marginTop:3 }}>{f.brandOwner ? f.brandOwner + " · " : ""}{f.cal} cal / 100g</div>
+          </button>
+        ))}
+
+        {picked && (
+          <div>
+            <div style={{ color:"#f0f0f8", fontSize:15, fontWeight:700, marginBottom:10, lineHeight:1.3 }}>{picked.description}</div>
+            <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, marginBottom:6 }}>HOW MUCH?</div>
+            <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:8, marginBottom:10 }}>
+              {picked.measures.map((mm, i) => (
+                <button key={i} onClick={()=>setMIdx(i)} style={chip(mIdx===i)}>{mm.label}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+              <span style={{ color:"#9898b8", fontSize:13 }}>Quantity</span>
+              <input value={qty} onChange={(e)=>setQty(e.target.value.replace(/[^\d.]/g,""))} inputMode="decimal"
+                     style={{ width:72, background:"#12121c", border:"1px solid #2a2a3d", borderRadius:10, color:"#f0f0f8", padding:"9px 10px", fontSize:16, textAlign:"center", outline:"none", fontFamily:"'Oswald',sans-serif", fontWeight:700 }} />
+              <span style={{ color:"#9898b8", fontSize:13 }}>&asymp; {Math.round(grams)} g</span>
+            </div>
+            <div style={{ display:"flex", gap:0, marginBottom:16, background:"#12121c", borderRadius:12, padding:"12px 0" }}>
+              {[["cal",macros.cal,"#e8ff00"],["P",macros.protein+"g","#3d8eff"],["C",macros.carbs+"g","#9b5de5"],["F",macros.fats+"g","#3ddc84"]].map(([k,v,col])=>(
+                <div key={k} style={{ flex:1, textAlign:"center" }}>
+                  <div style={{ color:col, fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:19 }}>{v}</div>
+                  <div style={{ color:"#9898b8", fontSize:11 }}>{k}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setPicked(null)} style={{ flex:1, background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"11px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Back</button>
+              <button onClick={done} style={{ flex:2, background:"#3ddc84", border:"none", borderRadius:20, color:"#000", padding:"11px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Use this</button>
+            </div>
+          </div>
+        )}
+
+        {!picked && !loading && !results.length && !error && (
+          <div style={{ color:"#9898b8", fontSize:13, padding:"10px 2px" }}>Type what it actually is.</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Dashboard quick capture ─────────────────────────────────────────────────────
@@ -8002,31 +8307,33 @@ async function analyzeMealPhoto(dataUrl, fileType) {
 // meal, and you're back on the dashboard. `openRef` is handed the trigger so the tile's
 // own tap opens the camera: the file input must be clicked inside the user's gesture,
 // or iOS silently refuses to open it.
-function QuickMacro({ openRef, onLog }) {
+function MealPhotoFlow({ openRef, onLog, homeSlotId }) {
   const fileRef = useRef();
   const [imgSrc, setImgSrc] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
+  const [items, setItems] = useState(null);      // null = no result yet; [] = all removed
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(null);
+  const [fixing, setFixing] = useState(null);    // index of the row being corrected
 
   useEffect(() => { if (openRef) openRef.current = () => fileRef.current?.click(); }, [openRef]);
 
-  const close = () => { setImgSrc(null); setBusy(false); setResult(null); setError(null); };
+  const close = () => { setImgSrc(null); setBusy(false); setItems(null); setError(null); setFixing(null); };
 
   const handleFile = async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (!file) return;
     const dataUrl = await mealPhotoDataUrl(file);
-    setImgSrc(dataUrl); setBusy(true); setResult(null); setError(null);
-    try { setResult(await analyzeMealPhoto(dataUrl, file.type)); }
+    setImgSrc(dataUrl); setBusy(true); setItems(null); setError(null);
+    try { setItems(await analyzeMealPhoto(dataUrl, file.type)); }
     catch { setError("Could not read that photo — try again."); }
     setBusy(false);
   };
 
   const fileTo = (slot) => {
-    onLog(slot.id, result);
+    if (!items || !items.length) return;
+    onLog(slot.id, items);
     close();
     setSaved(slot.label);
     setTimeout(() => setSaved((s) => (s === slot.label ? null : s)), 2600);
@@ -8037,57 +8344,68 @@ function QuickMacro({ openRef, onLog }) {
       <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={handleFile} />
 
       {saved && (
-        <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:320, background:"#1a1a26", border:"1px solid #3ddc84", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+        <div style={{ position:"fixed", top:"calc(env(safe-area-inset-top) + 14px)", left:"50%", transform:"translateX(-50%)", zIndex:430, background:"#1a1a26", border:"1px solid #3ddc84", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
           <span style={{ fontSize:18, color:"#3ddc84" }}>&#10003;</span>
           <span style={{ color:"#3ddc84", fontSize:14, fontWeight:700 }}>Added to {saved}</span>
         </div>
       )}
 
+      {fixing != null && items && items[fixing] && (
+        <FoodFixSheet
+          item={items[fixing]}
+          onCancel={()=>setFixing(null)}
+          onDone={(fixed)=>{ setItems(prev => prev.map((it,i)=> i===fixing ? fixed : it)); setFixing(null); }}
+        />
+      )}
+
       {imgSrc && (
-        <div style={{ position:"fixed", inset:0, zIndex:300, background:"#000", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
-          <button onClick={close} style={{ position:"absolute", top:"calc(env(safe-area-inset-top) + 14px)", right:16, zIndex:310, background:"rgba(0,0,0,0.6)", border:"1px solid #444", borderRadius:"50%", width:36, height:36, color:"#fff", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>&#10005;</button>
+        <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto", paddingTop:"calc(env(safe-area-inset-top) + 8px)", paddingBottom:"env(safe-area-inset-bottom)", boxSizing:"border-box" }}>
+          <style>{GLOBAL_CSS}</style>
 
-          <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
-            <img src={imgSrc} alt="meal" style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 18px 8px" }}>
+            <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>MACRO AI</div>
+            <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:"50%", width:34, height:34, color:"#c8c8e0", fontSize:16, cursor:"pointer" }}>&#10005;</button>
+          </div>
 
+          {/* The photo stays visible while you review, so you can look between the plate
+              and the list to decide what the AI got wrong. */}
+          <div style={{ position:"relative", flexShrink:0, padding:"0 18px" }}>
+            <img src={imgSrc} alt="meal" style={{ width:"100%", maxHeight:190, objectFit:"contain", borderRadius:12, display:"block", background:"#000" }} />
             {busy && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14 }}>
-                <div style={{ width:48, height:48, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
-                <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:2 }}>Analyzing Meal...</div>
+              <div style={{ position:"absolute", inset:"0 18px", background:"rgba(0,0,0,0.6)", borderRadius:12, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12 }}>
+                <div style={{ width:42, height:42, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
+                <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:19, letterSpacing:2 }}>Reading the plate...</div>
               </div>
             )}
+          </div>
 
-            {result && !busy && (
-              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.94)", padding:"16px 20px calc(env(safe-area-inset-bottom) + 16px)" }}>
-                <div style={{ color:"#f0f0f8", fontWeight:700, fontSize:15, marginBottom:10 }}>{result.food}</div>
-                <div style={{ display:"flex", gap:0, marginBottom:14 }}>
-                  {[["cal",result.cal,"#e8ff00"],["P",result.protein+"g","#3d8eff"],["C",result.carbs+"g","#9b5de5"],["F",result.fats+"g","#3ddc84"]].map(([k,v,col])=>(
-                    <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
-                      <div style={{ color:col, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:20 }}>{v}</div>
-                      <div style={{ color:"#9898b8", fontSize:11 }}>{k}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, textAlign:"center", marginBottom:8 }}>ADD TO WHICH MEAL?</div>
-                <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-                  {FOOD_SLOTS.map((s) => (
-                    <button key={s.id} onClick={()=>fileTo(s)}
-                      style={{ flex:1, minWidth:0, background:"rgba(61,220,132,0.14)", border:"1px solid #3ddc84", borderRadius:16, color:"#3ddc84", padding:"11px 2px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12.5, lineHeight:1.15 }}>
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={()=>fileRef.current.click()} style={{ width:"100%", background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
-              </div>
-            )}
-
+          <div style={{ flex:1, overflowY:"auto", padding:"14px 18px 6px" }}>
+            {items && <MealPhotoReview items={items} onChange={setItems} onFix={(i)=>setFixing(i)} />}
             {error && !busy && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:20 }}>
-                <div style={{ color:"#ff7070", fontSize:14, textAlign:"center" }}>{error}</div>
+              <div style={{ textAlign:"center", padding:"24px 0" }}>
+                <div style={{ color:"#ff7070", fontSize:14, marginBottom:14 }}>{error}</div>
                 <button onClick={()=>fileRef.current.click()} style={{ background:"#3d8eff", border:"none", borderRadius:20, color:"#fff", padding:"10px 24px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14 }}>Try Again</button>
               </div>
             )}
           </div>
+
+          {items && items.length > 0 && (
+            <div style={{ padding:"8px 18px 14px", borderTop:"1px solid #1a1a26", background:"#0a0a0f" }}>
+              <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, textAlign:"center", marginBottom:8 }}>ADD TO WHICH MEAL?</div>
+              <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                {FOOD_SLOTS.map((s) => {
+                  const here = s.id === homeSlotId;
+                  return (
+                    <button key={s.id} onClick={()=>fileTo(s)}
+                      style={{ flex:1, minWidth:0, background: here ? "#3ddc84" : "rgba(61,220,132,0.14)", border:"1px solid #3ddc84", borderRadius:16, color: here ? "#000" : "#3ddc84", padding:"11px 2px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12.5, lineHeight:1.15 }}>
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={()=>fileRef.current.click()} style={{ width:"100%", background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"10px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -8302,11 +8620,9 @@ function productLabel(p) {
 function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlot }) {
   const [localItems, setLocalItems] = useState(items && items.length && items.some(x=>x.food||x.cal) ? items : []);
   const [sentTo, setSentTo] = useState(null);   // "Lunch" right after a photo was filed there
-  const fileRef = useRef();
-  const [scanning, setScanning] = useState(false);
-  const [imgSrc, setImgSrc] = useState(null);
-  const [scanResult, setScanResult] = useState(null);
-  const [scanError, setScanError] = useState(null);
+  // The photo pipeline is the SAME component the dashboard shortcut uses — camera,
+  // itemised review, per-item fix, meal picker. One implementation, two entry points.
+  const photoRef = useRef(null);
 
   // USDA search states
   const [searchActive, setSearchActive] = useState(false);
@@ -8334,32 +8650,24 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
   };
   const removeLocal = (i) => setLocalItems(prev => prev.filter((_,idx)=>idx!==i).length ? prev.filter((_,idx)=>idx!==i) : []);
 
-  const handlePhoto = async (file) => {
-    const dataUrl = await mealPhotoDataUrl(file);
-    setImgSrc(dataUrl); setScanning(true); setScanResult(null); setScanError(null);
-    try { setScanResult(await analyzeMealPhoto(dataUrl, file.type)); }
-    catch { setScanError("Could not analyze — try again."); }
-    setScanning(false);
-  };
-
   // Where does the photo go? A meal photo isn't tied to the card you happened to open —
-  // you shoot dinner from whatever screen you're on. So the analysed result asks which
-  // meal it belongs to instead of assuming the slot the logger was opened for.
-  //   • Chosen slot IS the open one -> append to the working list, same as before, so
-  //     you can keep adding and hit "Add to <meal>" once.
+  // you shoot dinner from whatever screen you're on. So the review asks which meal it
+  // belongs to instead of assuming the slot the logger was opened for.
+  //   • Chosen slot IS the open one -> append to the working list, so you can keep
+  //     adding and hit "Add to <meal>" once.
   //   • Any other slot -> written straight into that meal and logged, without closing
   //     this one or disturbing items already staged here.
-  const confirmScan = (destId, destLabel) => {
-    if (scanResult) {
-      if (!destId || destId === slotId) {
-        setLocalItems(prev => [...prev, { ...scanResult, logged:false }]);
-      } else {
-        onAddToSlot(destId, scanResult);
-        setSentTo(destLabel);
-        setTimeout(() => setSentTo(s => (s === destLabel ? null : s)), 2600);
-      }
+  const photoLogged = (destId, photoItems) => {
+    const list = (photoItems || []).filter(Boolean);
+    if (!list.length) return;
+    if (destId === slotId) {
+      setLocalItems(prev => [...prev, ...list.map(it => ({ ...foodLogEntry(it), logged:false }))]);
+    } else {
+      onAddToSlot(destId, list);
+      const label = (FOOD_SLOTS.find(f => f.id === destId) || {}).label || "that meal";
+      setSentTo(label);
+      setTimeout(() => setSentTo(s2 => (s2 === label ? null : s2)), 2600);
     }
-    setImgSrc(null); setScanResult(null); setScanError(null);
   };
 
   const done = () => { onSave(localItems.filter(x=>x.food||x.cal)); };
@@ -8505,7 +8813,7 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
             cards (so results aren't pushed off-screen) with much larger type.
             They collapse while a flow is running, so the scan result / search lands at
             the TOP of the screen instead of buried under three big buttons. */}
-        {!(bcBusy || bcError || bcResult || bcManual || searchActive || imgSrc) && (() => {
+        {!(bcBusy || bcError || bcResult || bcManual || searchActive) && (() => {
           const card = (accent, active) => ({
             background: active ? `rgba(${accent.rgb},0.18)` : `rgba(${accent.rgb},0.09)`,
             border: `1px solid rgba(${accent.rgb},0.5)`,
@@ -8531,7 +8839,7 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
           const sub  = { display:"block", fontSize:16, fontWeight:400, color:"#9898b8", marginTop:2 };
           return (
             <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
-              <button onClick={()=>fileRef.current.click()} style={card(BLUE, !!imgSrc)}>
+              <button onClick={()=>photoRef.current && photoRef.current()} style={card(BLUE, false)}>
                 <span style={icon}>📷</span>
                 <span style={{ flex:1, minWidth:0 }}>
                   <span style={name}>Macro AI</span>
@@ -8707,10 +9015,10 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
           </div>
         )}
         <input ref={barcodeRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handleBarcodePhoto(e.target.files[0]); barcodeRef.current.value=""; } }} />
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(e.target.files[0]){ handlePhoto(e.target.files[0]); fileRef.current.value=""; } }} />
+        <MealPhotoFlow openRef={photoRef} onLog={photoLogged} homeSlotId={slotId} />
 
         {/* USDA Search panel */}
-        {searchActive && !imgSrc && (
+        {searchActive && (
           <div style={{ marginBottom:16 }}>
             {/* Header: title + a way OUT (the keyboard covers everything otherwise) */}
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:10 }}>
@@ -8825,53 +9133,6 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
           </div>
         )}
 
-        {/* Photo scan overlay within page */}
-        {imgSrc && (
-          <div style={{ borderRadius:14, overflow:"hidden", background:"#000", marginBottom:16, position:"relative" }}>
-            <img src={imgSrc} alt="meal" style={{ width:"100%", maxHeight:260, objectFit:"contain", display:"block" }} />
-            {scanning && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10 }}>
-                <div style={{ width:40, height:40, border:"3px solid #2a2a3d", borderTop:"3px solid #3d8eff", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
-                <div style={{ color:"#3d8eff", fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2 }}>Analyzing…</div>
-              </div>
-            )}
-            {scanResult && !scanning && (
-              <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(10,10,20,0.92)", padding:"12px 14px" }}>
-                <div style={{ color:"#f0f0f8", fontWeight:700, fontSize:14, marginBottom:8 }}>{scanResult.food}</div>
-                <div style={{ display:"flex", gap:0, marginBottom:10 }}>
-                  {[["cal",scanResult.cal,"#e8ff00"],["P",scanResult.protein+"g","#3d8eff"],["C",scanResult.carbs+"g","#9b5de5"],["F",scanResult.fats+"g","#3ddc84"]].map(([k,v,col])=>(
-                    <div key={k} style={{ flex:1, textAlign:"center", borderRight:"1px solid #2a2a3d" }}>
-                      <div style={{ color:col, fontFamily:"'Oswald'", fontWeight:700, fontSize:18 }}>{v}</div>
-                      <div style={{ color:"#9898b8", fontSize:10 }}>{k}</div>
-                    </div>
-                  ))}
-                </div>
-                {/* FOUR destinations, not just the card you opened. The one you came in
-                    from is filled so the common case is still a single obvious tap. */}
-                <div style={{ color:"#9898b8", fontSize:11, letterSpacing:1, textAlign:"center", marginBottom:7 }}>ADD TO WHICH MEAL?</div>
-                <div style={{ display:"flex", gap:5, marginBottom:8 }}>
-                  {FOOD_SLOTS.map((s) => {
-                    const here = s.id === slotId;
-                    return (
-                      <button key={s.id} onClick={()=>confirmScan(s.id, s.label)}
-                        style={{ flex:1, minWidth:0, background: here ? "#3ddc84" : "rgba(61,220,132,0.12)", border:"1px solid #3ddc84", borderRadius:14, color: here ? "#000" : "#3ddc84", padding:"9px 2px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:12, lineHeight:1.15 }}>
-                        {s.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button onClick={()=>{ setImgSrc(null); setScanResult(null); fileRef.current.click(); }} style={{ width:"100%", background:"transparent", border:"2px solid #444", borderRadius:20, color:"#c8c8e0", padding:"8px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700, fontSize:13 }}>Retake</button>
-              </div>
-            )}
-            {scanError && !scanning && (
-              <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, padding:16 }}>
-                <div style={{ color:"#ff7070", fontSize:13, textAlign:"center" }}>{scanError}</div>
-                <button onClick={()=>fileRef.current.click()} style={{ background:"#3d8eff", border:"none", borderRadius:20, color:"#fff", padding:"8px 20px", cursor:"pointer", fontFamily:"'DM Sans'", fontWeight:700 }}>Try Again</button>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Current items */}
         {localItems.length > 0 && (
           <div>
@@ -8884,7 +9145,7 @@ function FoodLogger({ slotId, slotLabel, items, onSave, onClose, sug, onAddToSlo
           </div>
         )}
 
-        {!imgSrc && !searchActive && localItems.length === 0 && sug && (
+        {!searchActive && localItems.length === 0 && sug && (
           <div style={{ background:"#1a1a26", borderRadius:12, padding:"12px 14px", marginTop:8 }}>
             <div style={{ color:"#9898b8", fontSize:11, fontWeight:600, letterSpacing:1, marginBottom:6 }}>TODAY'S SUGGESTION</div>
             <div style={{ color:"#c8c8e0", fontSize:13 }}>{sug.food}</div>
@@ -9257,12 +9518,15 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   // Macro AI photo is sent to a meal other than the one being edited, so staged items
   // in the open slot survive. Appends and logs it, since choosing the meal IS the
   // confirmation — there's no second screen to press "add" on.
-  const addToSlotDirect = (slotId, item) => {
+  const addToSlotDirect = (slotId, newItems) => {
+    const incoming = (Array.isArray(newItems) ? newItems : [newItems]).filter(Boolean);
+    if (!incoming.length) return;
     const updated = { ...(foodLog||{}) };
     const day = updated[dateKey] || {};
     const raw = day[slotId];
     const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-    const next = [...list, { ...item, logged:true }].filter(x => x && (x.food || x.cal));
+    // One row per food, so a plate arrives as its own line items.
+    const next = [...list, ...incoming.map(foodLogEntry)].filter(x => x && (x.food || x.cal));
     updated[dateKey] = { ...day, [slotId]: next };
     onSaveFoodLog(updated);
   };
@@ -12738,23 +13002,21 @@ export default function BodyMorph() {
   // Dashboard camera shortcut: file an analysed meal photo into today's log. Appends
   // (rather than replacing the slot, as the voice path does) because you can photograph
   // two things for the same meal, and the second shouldn't erase the first.
-  const logFoodQuick = (slotId, item) => {
-    if (!item) return;
+  const logFoodQuick = (slotId, newItems) => {
+    const incoming = (Array.isArray(newItems) ? newItems : [newItems]).filter(Boolean);
+    if (!incoming.length) return;
     const todayStr = ymdLocal();
     const s = FOOD_SLOT_IDS.includes(slotId) ? slotId : "snacks";
-    const entry = {
-      food: item.food || "Logged item",
-      cal: String(Math.round(item.cal || 0)), protein: String(Math.round(item.protein || 0)),
-      carbs: String(Math.round(item.carbs || 0)), fats: String(Math.round(item.fats || 0)),
-      logged: true,
-    };
+    // Each food lands as its OWN row, not one merged line: that's what lets the client
+    // (and the coach reading the log) see "chicken, rice, broccoli" rather than "lunch",
+    // and it's what makes a single wrong item removable later.
+    const entries = incoming.map(foodLogEntry);
     setFoodLog(prev => {
       const updated = { ...(prev || {}) };
       const day = { ...(updated[todayStr] || {}) };
       const raw = day[s];
       const list = Array.isArray(raw) ? [...raw] : (raw ? [raw] : []);
-      list.push(entry);
-      day[s] = list;
+      day[s] = [...list, ...entries];
       updated[todayStr] = day;
       return updated;
     });
