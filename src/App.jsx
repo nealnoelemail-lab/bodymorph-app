@@ -8447,6 +8447,53 @@ async function lookupFoodMacros(name) {
 }
 
 // One food line: name + macro inputs, with debounced auto-fill of blank macro fields.
+// ── USDA descriptions -> something a person would say ───────────────────────────
+// USDA writes inverted, comma-stacked database entries: "Rice, white, glutinous,
+// unenriched, cooked". Accurate, but it reads like a lab report in a food log, which
+// is jarring next to the AI's own "grilled chicken breast".
+//
+// Deliberately conservative: drop catalogue noise, keep at most a couple of
+// descriptors, and never reorder words in a way that could invent a different food.
+// "Rice, white, cooked" is a win; turning it into something wrong is not.
+const USDA_NOISE = /^(nfs|ns as to \w+|unenriched|enriched|unprepared|commercially prepared|prepared|all types?|grade [a-z]+|upc:.*|includes? .*|without .*|with salt|salt added|no salt added|regular|type not specified|variety not specified|composite of .*|broilers? or fryers?|meat only|meat and skin|skin only|separable lean only|separable lean and fat|all grades?|light and dark meat|home prepared|restaurant|fast ?food|fresh|flesh|dry heat|moist heat|mature seeds?)$/i;
+const USDA_STATE = /^(raw|cooked|boiled|roasted|baked|grilled|fried|steamed|broiled|braised|stewed)$/i;
+// Cuts read naturally AFTER the food ("chicken breast"), unlike adjectives.
+const USDA_CUT = /^(breast|thigh|wing|drumstick|leg|loin|sirloin|ribeye|rib eye|tenderloin|fillet|filet|chops?|shoulder|flank|brisket|rump)$/i;
+
+function prettyFoodName(desc) {
+  let s = String(desc || "").trim();
+  if (!s) return "Food";
+  // Branded rows arrive SHOUTING; title-case them and stop there.
+  if (s === s.toUpperCase() && /[A-Z]{3}/.test(s)) {
+    s = s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    return s.length > 42 ? s.slice(0, 41).trimEnd() + "…" : s;
+  }
+  const parts = s.split(",").map((x) => x.trim()).filter(Boolean);
+  const head = parts[0];
+  const headStem = head.toLowerCase().replace(/e?s$/, "");
+  const rest = parts.slice(1).filter((x) => x && !USDA_NOISE.test(x));
+
+  // "Eggs, Grade A, Large, egg white" — the descriptor already names the food.
+  const selfNaming = headStem.length > 2
+    ? rest.find((x) => new RegExp(`\\b${headStem}s?\\b`, "i").test(x))
+    : null;
+  if (selfNaming) return cap(selfNaming);
+
+  const state = rest.find((x) => USDA_STATE.test(x));
+  const others = rest.filter((x) => !USDA_STATE.test(x));
+  // Most specific cut wins: "Pork, loin, tenderloin" is a tenderloin, and naming both
+  // gives "Pork loin, tenderloin".
+  const cut = others.filter((x) => USDA_CUT.test(x)).sort((a, b) => b.length - a.length)[0];
+  const adjectives = others.filter((x) => !USDA_CUT.test(x)).slice(0, 1);
+
+  let name = cut ? `${head} ${cut}` : head;
+  if (adjectives.length) name += `, ${adjectives.join(", ")}`;
+  // "raw" is the default state of a food and adds nothing; "cooked" changes the macros.
+  if (state && !/^raw$/i.test(state)) name += `, ${state}`;
+  return cap(name);
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 async function searchUSDA(query) {
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation,SR%20Legacy,Branded`;
   const res = await fetch(url);
@@ -8455,7 +8502,9 @@ async function searchUSDA(query) {
   const data = await res.json();
   return (data.foods || []).map(f => ({
     fdcId: f.fdcId,
-    description: f.description,
+    // Cleaned at the source, so every screen that shows a USDA food — the search list,
+    // the photo's Fix sheet, and the name written into the log — reads the same way.
+    description: prettyFoodName(f.description),
     brandOwner: f.brandOwner || null,
     cal:     Math.round(f.foodNutrients.find(n=>n.nutrientId===1008)?.value || 0),
     protein: Math.round((f.foodNutrients.find(n=>n.nutrientId===1003)?.value || 0) * 10) / 10,
