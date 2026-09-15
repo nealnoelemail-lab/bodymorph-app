@@ -12020,9 +12020,8 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
     setSummary({ summary: payload, generated_at: new Date().toISOString() });
     saveClientSummary(coachId, clientId, payload);   // cache (best-effort)
   };
-  const Back = () => (
-    <button onClick={onBack} style={{ background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
-  );
+  // Same chevron as the client app, in the dashboard's own muted colour.
+  const Back = () => <BackBtn onClick={onBack} color={C.muted} />;
   const wrap = (children) => (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style><WatermarkPlain />
