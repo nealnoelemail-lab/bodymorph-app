@@ -3070,7 +3070,7 @@ function ChangeProgram({ profile, onSave, onBack }) {
       {showHFTInfo && <HFTInfo onClose={()=>setShowHFTInfo(false)} />}
       {showGLBInfo && <GLBInfo onClose={()=>setShowGLBInfo(false)} />}
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>CHANGE PROGRAM</div>
       </div>
 
@@ -3126,7 +3126,7 @@ function EditDays({ profile, onSave, onBack }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>EDIT TRAINING DAYS</div>
       </div>
 
@@ -3167,7 +3167,7 @@ function EditTime({ profile, onSave, onBack }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>EDIT SESSION TIME</div>
       </div>
 
@@ -3214,7 +3214,7 @@ function TrainingWeek({ profile, program, cardioPlan, stretchPlan, stepEntries, 
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 5% 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>TRAINING WEEK</div>
       </div>
 
@@ -3320,7 +3320,7 @@ function ProgramSummary({ profile, program, mealPlan, dietPref, onReset, onBack,
 
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 0 12px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:18 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} size={28} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:29, letterSpacing:1 }}>MY PROGRAM</div>
         <button onClick={onReset} style={{ background:"rgba(255,61,61,0.12)", border:"1px solid rgba(255,61,61,0.4)", borderRadius:8, color:"#ff7070", padding:"7px 12px", cursor:"pointer", fontSize:17, fontFamily:"'DM Sans'", fontWeight:600 }}>RESET</button>
       </div>
@@ -3606,7 +3606,7 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>SETTINGS</div>
       </div>
       <div style={{ padding:"12px 20px 0", display:"flex", flexDirection:"column", gap:10, maxWidth:420, margin:"0 auto" }}>
@@ -3708,6 +3708,17 @@ function Settings({ profile, onBack, onResetProfile, coachVoice, onSetVoice, use
 // The ONE in-app message icon — a chat SQUARE with three dots + tail. Used at every
 // "messages" entry point (client home, client menu, coach top bar, client cards) so
 // the icon language is identical everywhere.
+// Back — an arrow, not the word. `size` tracks the title it sits beside so the two read
+// as one unit; a fixed-size control looks stranded next to a bigger or smaller heading.
+const BackBtn = ({ onClick, size = 22, color = "#c8c8e0" }) => (
+  <button onClick={onClick} aria-label="Back" type="button"
+    style={{ background:"transparent", border:"none", padding:0, marginRight:4, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", width:Math.round(size*1.25), height:Math.round(size*1.25), flexShrink:0 }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display:"block" }}>
+      <path d="M15 18L9 12l6-6" />
+    </svg>
+  </button>
+);
+
 const MsgIcon = ({ size = 24, color = "#e8ff00" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display:"block", flexShrink:0 }}>
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -4139,7 +4150,7 @@ function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStr
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 0 12px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1 }}>MENU</div>
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -5420,7 +5431,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
         <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+          <BackBtn onClick={onBack} />
           <Logo small />
         </div>
 
@@ -5827,7 +5838,7 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>PROGRESS REPORT</div>
       </div>
 
@@ -6506,7 +6517,7 @@ function CardioPlanner({ plan, onSave, onBack }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>CARDIO</div>
       </div>
 
@@ -6965,7 +6976,7 @@ function RoutineEditor({ routineId, routines, onSaveRoutines, gender, videoOverr
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <BackBtn onClick={onClose} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{routineLabel.toUpperCase()}</div>
       </div>
       <div style={{ padding:"8px 20px 0" }}>
@@ -7136,7 +7147,7 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>STRETCH</div>
       </div>
 
@@ -7249,7 +7260,7 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
         <style>{GLOBAL_CSS}</style>
         <WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+          <BackBtn onClick={onBack} />
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>STRETCH</div>
         </div>
 
@@ -7288,7 +7299,7 @@ function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={()=>setPick(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <BackBtn onClick={()=>setPick(null)} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{label.toUpperCase()} STRETCH</div>
       </div>
 
@@ -7702,7 +7713,7 @@ function Regimen({ kind, catalog, caution, entries, onSave, onBack }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{title}</div>
       </div>
 
@@ -7776,7 +7787,7 @@ function RegimenConfig({ item, kind, caution, existing, onConfirm, onCancel }) {
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onCancel} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+        <BackBtn onClick={onCancel} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{item.name}</div>
       </div>
 
@@ -7888,7 +7899,7 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>TO DO DAILY</div>
       </div>
 
@@ -9551,7 +9562,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
         <style>{GLOBAL_CSS}</style><WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <button onClick={()=>setDiet(null)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+          <BackBtn onClick={()=>setDiet(null)} />
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{diet.emoji} {diet.label.toUpperCase()}</div>
         </div>
         <div style={{ padding:"12px 20px 0" }}>
@@ -9587,7 +9598,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:60, position:"relative" }}>
         <style>{GLOBAL_CSS}</style><WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <button onClick={()=>setSetupOpen(false)} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Back</button>
+          <BackBtn onClick={()=>setSetupOpen(false)} />
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>MEAL PLAN SETUP</div>
         </div>
         <div style={{ padding:"6px 20px 0", maxWidth:480, margin:"0 auto" }}>
@@ -9639,7 +9650,7 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
         />
       )}
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <button onClick={onBack} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"7px 12px", cursor:"pointer", fontSize:14 }}>&#8249; Home</button>
+        <BackBtn onClick={onBack} />
         <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>NUTRITION</div>
       </div>
 
@@ -13164,6 +13175,30 @@ export default function BodyMorph() {
   const goMyTraining = useCallback(() => {
     setPhase(profile && Object.keys(profile).length ? "home" : "wizard");
   }, [profile]);
+  // ── One screen back, not all the way home ───────────────────────────────────
+  // Neal: "I'm in nutrition and I want to go back to the main menu, I don't want to go
+  // all the way to the home page." Every sub-screen used to hard-code a jump to home,
+  // so Menu → Nutrition → back dumped you on the dashboard and you had to re-open the
+  // menu to pick the next thing.
+  //
+  // A stack, not a hard-coded parent: Nutrition can be reached from the menu OR the
+  // dashboard, and "back" has to mean whichever one you actually came from.
+  const navStack = useRef([]);
+  const phaseRef = useRef(phase);
+  useEffect(() => {
+    phaseRef.current = phase;
+    // Home is the root of the app — landing there is the end of any trail.
+    if (phase === "home") navStack.current = [];
+  }, [phase]);
+  const navTo = useCallback((next) => {
+    if (phaseRef.current !== next) {
+      navStack.current.push(phaseRef.current);
+      if (navStack.current.length > 20) navStack.current.shift();   // don't grow forever
+    }
+    setPhase(next);
+  }, []);
+  const navBack = useCallback(() => setPhase(navStack.current.pop() || "home"), []);
+
   const backToDashboard = useCallback(() => setPhase("dashboard"), []);
 
   const saveTrainingDays = async (days) => {
@@ -13359,7 +13394,7 @@ export default function BodyMorph() {
       );
     }
     if (toast.kind === "msg") return (
-      <button onClick={()=>{ setToast(null); if (myCoach) setPhase("chat"); }} style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease", cursor:"pointer", maxWidth:"90%", textAlign:"left" }}>
+      <button onClick={()=>{ setToast(null); if (myCoach) navTo("chat"); }} style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:200, background:"#1a1a26", border:"1px solid #e8ff00", borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 30px rgba(0,0,0,0.6)", animation:"fadeIn 0.3s ease", cursor:"pointer", maxWidth:"90%", textAlign:"left" }}>
         <span style={{ fontSize:26 }}>💬</span>
         <div>
           <div style={{ color:"#e8ff00", fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1 }}>{toast.title}</div>
@@ -13534,30 +13569,30 @@ export default function BodyMorph() {
   if (phase === "home") return (
     <><Toast />
       <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} onQuickLog={logFoodQuick} profile={profile} program={program} rewards={rewards}
-        onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }}
-        onProgress={()=>setPhase("progress")} onNutrition={()=>setPhase("nutrition")} onStretch={()=>setPhase("stretch")} onCardio={()=>setPhase("cardio")}
-        onEditDays={()=>setPhase("editdays")}
-        onEditTime={()=>setPhase("edittime")}
-        onTrainingWeek={()=>setPhase("trainingweek")}
-        onSupplements={()=>setPhase("supplements")}
-        onPeptides={()=>setPhase("peptides")}
-        onCalendar={()=>setPhase("calendar")}
-        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} sleepEntries={sleepEntries} onSaveSleep={setSleepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>setPhase("programsummary")} onSettings={()=>setPhase("settings")}
+        onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); navTo("session"); }}
+        onProgress={()=>navTo("progress")} onNutrition={()=>navTo("nutrition")} onStretch={()=>navTo("stretch")} onCardio={()=>navTo("cardio")}
+        onEditDays={()=>navTo("editdays")}
+        onEditTime={()=>navTo("edittime")}
+        onTrainingWeek={()=>navTo("trainingweek")}
+        onSupplements={()=>navTo("supplements")}
+        onPeptides={()=>navTo("peptides")}
+        onCalendar={()=>navTo("calendar")}
+        onReset={resetProfile} stepEntries={stepEntries} onSaveSteps={setStepEntries} sleepEntries={sleepEntries} onSaveSleep={setSleepEntries} foodLog={foodLog} dietPref={dietPref} onProgramSummary={()=>navTo("programsummary")} onSettings={()=>navTo("settings")}
         hydration={hydration} onSetCups={setHydrationCups}
         voiceActive={homeVoice} voiceState={voiceState}
-        onMenu={()=>setPhase("menu")} brand={coachBrand} unreadMsgs={unreadMsgs} onMessages={myCoach ? ()=>setPhase("chat") : null}
+        onMenu={()=>navTo("menu")} brand={coachBrand} unreadMsgs={unreadMsgs} onMessages={myCoach ? ()=>navTo("chat") : null}
         onVoiceCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
 
-  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={()=>setPhase("home")} onCalendar={()=>setPhase("calendar")} onTrainingWeek={()=>setPhase("trainingweek")} onCardio={()=>setPhase("cardio")} onStretch={()=>setPhase("stretch")} onNutrition={()=>setPhase("nutrition")} onSupplements={()=>setPhase("supplements")} onPeptides={()=>setPhase("peptides")} onProgress={()=>setPhase("progress")} onProgramSummary={()=>setPhase("programsummary")} onMessages={myCoach ? ()=>setPhase("chat") : null} unreadMsgs={unreadMsgs} /></>);
+  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={navBack} onCalendar={()=>navTo("calendar")} onTrainingWeek={()=>navTo("trainingweek")} onCardio={()=>navTo("cardio")} onStretch={()=>navTo("stretch")} onNutrition={()=>navTo("nutrition")} onSupplements={()=>navTo("supplements")} onPeptides={()=>navTo("peptides")} onProgress={()=>navTo("progress")} onProgramSummary={()=>navTo("programsummary")} onMessages={myCoach ? ()=>navTo("chat") : null} unreadMsgs={unreadMsgs} /></>);
   if (phase === "chat") return (
     <><Toast />
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
         <style>{GLOBAL_CSS}</style><WatermarkPlain />
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, padding:"16px 0 12px" }}>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1 }}>{(coachBrand?.brand_name || "YOUR COACH").toUpperCase()}</div>
-          <button onClick={()=>setPhase("home")} aria-label="Close messages" style={{ background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>&#10005;</button>
+          <button onClick={navBack} aria-label="Close messages" style={{ background:"transparent", border:"none", color:"#8a8aa4", fontSize:32, lineHeight:1, cursor:"pointer", padding:4, fontFamily:"'DM Sans'" }}>&#10005;</button>
         </div>
         <div style={{ background:"#12121a", border:"1px solid #2a2a3d", borderRadius:12, padding:"14px 14px" }}>
           <ChatThread coachId={myCoach} clientId={user?.id} meRole="client" maxHeight={Math.max(260, (typeof window !== "undefined" ? window.innerHeight : 700) - 260)} />
@@ -13567,32 +13602,32 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); setPhase("session"); }} onEditDays={()=>setPhase("editdays")} onEditTime={()=>setPhase("edittime")} onChangeProgram={()=>setPhase("changeprogram")} onBack={()=>setPhase("home")} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
+  if (phase === "trainingweek") return (<><Toast /><TrainingWeek profile={profile} program={program} cardioPlan={cardioPlan} stretchPlan={stretchPlan} stepEntries={stepEntries} onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); navTo("session"); }} onEditDays={()=>navTo("editdays")} onEditTime={()=>navTo("edittime")} onChangeProgram={()=>navTo("changeprogram")} onBack={navBack} aiGenerating={aiGenerating} onRegenerateAI={regenerateAIProgram} /></>);
 
-  if (phase === "editdays") return (<><Toast /><EditDays profile={profile} onSave={saveTrainingDays} onBack={()=>setPhase("home")} /></>);
-  if (phase === "edittime") return (<><Toast /><EditTime profile={profile} onSave={saveSessionTime} onBack={()=>setPhase("home")} /></>);
-  if (phase === "changeprogram") return (<><Toast /><ChangeProgram profile={profile} onSave={saveProgramFocus} onBack={()=>setPhase("trainingweek")} /></>);
+  if (phase === "editdays") return (<><Toast /><EditDays profile={profile} onSave={saveTrainingDays} onBack={navBack} /></>);
+  if (phase === "edittime") return (<><Toast /><EditTime profile={profile} onSave={saveSessionTime} onBack={navBack} /></>);
+  if (phase === "changeprogram") return (<><Toast /><ChangeProgram profile={profile} onSave={saveProgramFocus} onBack={navBack} /></>);
 
   if (phase === "session") return (
     <><Toast />
       <Session profile={profile} day={(program.weeklySchedule||[])[dayIdx]||{}} logs={logs}
         cardioPlan={cardioPlan} stretchPlan={stretchPlan} stretchRoutines={stretchRoutines}
         onLogExercise={logExercise} onCompleteWorkout={completeWorkout} onSaveExtras={addCardioSessionFromDay}
-        onBack={()=>setPhase("home")} videoOverrides={videoOverrides} onSaveVideo={saveVideo}
+        onBack={navBack} videoOverrides={videoOverrides} onSaveVideo={saveVideo}
         liveSets={liveSets}
         coachOn={homeVoice} onToggleCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
 
-  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={()=>setPhase("home")} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
-  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={()=>setPhase("home")} onEditPlan={()=>setPhase("fatloss")} /></>);
-  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={()=>setPhase("home")} userId={user?.id} watch={watchInsights} watchDaily={watchDaily} /></>);
-  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={()=>setPhase("home")} /></>);
-  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={()=>setPhase("home")} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
-  if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={()=>setPhase("home")} /></>);
-  if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={()=>setPhase("home")} /></>);
-  if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={()=>setPhase("home")} /></>);
-  if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={()=>setPhase("home")} checked={todoChecked} onToggle={toggleTodo} /></>);
+  if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={navBack} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
+  if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={navBack} onEditPlan={()=>navTo("fatloss")} /></>);
+  if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={navBack} userId={user?.id} watch={watchInsights} watchDaily={watchDaily} /></>);
+  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={navBack} /></>);
+  if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={navBack} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
+  if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={navBack} /></>);
+  if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={navBack} /></>);
+  if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={navBack} /></>);
+  if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={navBack} checked={todoChecked} onToggle={toggleTodo} /></>);
 
   return <div style={S.center}><style>{GLOBAL_CSS}</style><WatermarkPlain /><Logo /></div>;
   })();
