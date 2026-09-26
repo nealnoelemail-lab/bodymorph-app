@@ -30,7 +30,7 @@ export const REALTIME_TOOLS = [
         cal: { type: "number" }, protein: { type: "number" },
         carbs: { type: "number" }, fats: { type: "number" },
       },
-      required: ["slot", "name", "cal"],
+      required: ["slot", "name", "cal", "protein", "carbs", "fats"],
     },
   },
   {
@@ -139,7 +139,18 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
         format: { type: "audio/pcm", rate: 24000 },
         // Let OpenAI decide when a turn ends — it hears the audio, so its own
         // endpointing beats the energy-threshold gate the old pipeline needs.
-        turn_detection: { type: "semantic_vad" },
+        // server_vad, NOT semantic_vad. Semantic detection is eager — it fires on
+        // anything that sounds like a finished thought, including the coach's own
+        // voice bleeding into the mic and whatever the transcriber invents from
+        // silence ("Thank you.", "God bless." are Whisper's classic hallucinations
+        // on a quiet track, and each one cost a phantom turn). Energy-gated
+        // detection with an explicit threshold doesn't bite on near-silence.
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.6,             // above room noise and residual echo
+          prefix_padding_ms: 300,
+          silence_duration_ms: 700,   // let a person pause mid-sentence without being cut off
+        },
         transcription: { model: "whisper-1" },
       },
       output: { format: { type: "audio/pcm", rate: 24000 }, voice: openaiVoice(voice) },
@@ -167,8 +178,8 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
     try { await RealtimeVoice.sendToolResult({ callId: e.callId, output: JSON.stringify({ ok: true, detail: result }) }); }
     catch { /* socket already closed */ }
   }));
-  listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => onEvent && onEvent({ type: "coach", text: e.text })));
-  listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => onEvent && onEvent({ type: "user", text: e.text })));
+  listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => { rtLog(`coach: ${e.text}`); onEvent && onEvent({ type: "coach", text: e.text }); }));
+  listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => { rtLog(`you: ${e.text}`); onEvent && onEvent({ type: "user", text: e.text }); }));
   listeners.push(RealtimeVoice.addListener("rtUserSpeaking", () => onEvent && onEvent({ type: "listening" })));
   listeners.push(RealtimeVoice.addListener("rtTurnDone", () => onEvent && onEvent({ type: "idle" })));
   listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));

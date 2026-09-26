@@ -904,6 +904,19 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private var capturing = false
     private var micFormat: AVAudioFormat?
 
+    // ── Mic gate while the coach is talking ────────────────────────────────────
+    // Apple's echo cancellation needs a moment to converge, and until it does the
+    // coach's own voice reaches the mic. The server hears it, counts it as the user
+    // taking a turn, and the coach interrupts itself — which is the "jerky startup".
+    // So we simply stop SENDING while audio is playing, plus a short tail for the
+    // speaker to finish and the room to settle.
+    // Trade-off, deliberately taken: no barge-in. Talking over the coach won't stop
+    // it. Set GATE_MIC_WHILE_SPEAKING = false to get interruption back at the cost of
+    // the self-triggering above.
+    private let GATE_MIC_WHILE_SPEAKING = true
+    private let micGateTailMs: Double = 400
+    private var lastAudioOutAt: CFAbsoluteTime = 0
+
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
 
     // MARK: - Lifecycle
@@ -1028,7 +1041,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // so the coach stops mid-sentence like a person would, instead of finishing
         // its turn into a conversation that has already moved on.
         case "input_audio_buffer.speech_started":
-            flushPlayback()
+            if !GATE_MIC_WHILE_SPEAKING { flushPlayback() }
             notifyListeners("rtUserSpeaking", data: [:])
 
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
@@ -1068,6 +1081,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func playPCM16(base64: String) {
         guard let raw = Data(base64Encoded: base64), !raw.isEmpty, let fmt = playFormat else { return }
+        lastAudioOutAt = CFAbsoluteTimeGetCurrent()   // the coach is talking right now
         let frames = raw.count / 2
         guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames)) else { return }
         buf.frameLength = AVAudioFrameCount(frames)
@@ -1139,6 +1153,8 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func sendMic(_ buffer: AVAudioPCMBuffer) {
         guard running, let converter = converter else { return }
+        if GATE_MIC_WHILE_SPEAKING,
+           (CFAbsoluteTimeGetCurrent() - lastAudioOutAt) * 1000 < micGateTailMs { return }
         let ratio = outFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
         guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
