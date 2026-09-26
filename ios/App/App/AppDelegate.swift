@@ -21,6 +21,7 @@ enum LocalPlugins {
         guard !registered, let bridge = bridge else { return }
         bridge.registerPluginInstance(VoiceCapturePlugin())
         bridge.registerPluginInstance(HealthKitPlugin())
+        bridge.registerPluginInstance(RealtimeVoicePlugin())
         registered = true
     }
 }

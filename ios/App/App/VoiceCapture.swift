@@ -865,6 +865,274 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// OpenAI Realtime — SPEECH-TO-SPEECH coach (experimental, behind VOICE_PROVIDER)
+//
+// The existing coach is three hops: native mic → Grok STT → Claude → Grok TTS. This
+// is one hop: the model hears the audio and answers in audio. Parked alongside the
+// old stack, not replacing it — VITE_VOICE_PROVIDER picks which one runs.
+//
+// It lives in native code for the same reason streaming TTS does: the WebView can't
+// set the Authorization header this socket needs, and on a real device the WebView
+// mic is dead. So Swift owns the socket AND both directions of audio; JS only sends
+// the session config and receives events (transcripts, tool calls, state).
+//
+// Audio contract with OpenAI: 24 kHz mono PCM16, base64, both ways.
+// ══════════════════════════════════════════════════════════════════════════════
+@objc(RealtimeVoicePlugin)
+public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "RealtimeVoicePlugin"
+    public let jsName = "RealtimeVoice"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "sendToolResult", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "isRunning", returnType: CAPPluginReturnPromise),
+    ]
+
+    private var ws: URLSessionWebSocketTask?
+    private var urlSession: URLSession?
+    private var running = false
+
+    // Playback: one engine, one player node, 24 kHz float32 (what AVAudioEngine wants).
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private var playFormat: AVAudioFormat?
+    private var engineReady = false
+
+    // Capture: a tap on the input node, converted to 24 kHz PCM16 for the socket.
+    private var converter: AVAudioConverter?
+    private var capturing = false
+    private var micFormat: AVAudioFormat?
+
+    private let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
+
+    // MARK: - Lifecycle
+
+    @objc func isRunning(_ call: CAPPluginCall) { call.resolve(["running": running]) }
+
+    @objc func start(_ call: CAPPluginCall) {
+        let token = call.getString("token") ?? ""
+        let model = call.getString("model") ?? "gpt-realtime"
+        let sessionJSON = call.getString("session") ?? "{}"
+        guard !token.isEmpty else { call.reject("no token"); return }
+
+        stopInternal()
+
+        guard var comps = URLComponents(string: "wss://api.openai.com/v1/realtime") else { call.reject("bad url"); return }
+        comps.queryItems = [URLQueryItem(name: "model", value: model)]
+        guard let url = comps.url else { call.reject("bad url"); return }
+
+        var req = URLRequest(url: url)
+        // The ephemeral secret minted by /api/openai-token. The real key never ships.
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+
+        let s = URLSession(configuration: .default)
+        urlSession = s
+        let task = s.webSocketTask(with: req)
+        ws = task
+        running = true
+        task.resume()
+
+        // Session config (persona + tools) comes straight from JS so the coach is
+        // defined in one place, not duplicated in Swift.
+        sendRaw("{\"type\":\"session.update\",\"session\":\(sessionJSON)}")
+        receiveLoop()
+        startAudio()
+        notifyListeners("rtOpen", data: [:])
+        call.resolve(["ok": true])
+    }
+
+    @objc func stop(_ call: CAPPluginCall) {
+        stopInternal()
+        call.resolve()
+    }
+
+    private func stopInternal() {
+        running = false
+        stopCapture()
+        stopPlayback()
+        ws?.cancel(with: .goingAway, reason: nil)
+        ws = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+    }
+
+    // MARK: - Socket
+
+    private func sendRaw(_ json: String) {
+        guard let ws = ws else { return }
+        ws.send(.string(json)) { err in
+            if let err = err { print("[Realtime] send error: \(err.localizedDescription)") }
+        }
+    }
+
+    // JS answers a tool call: forward the result and ask for the spoken reply.
+    @objc func sendToolResult(_ call: CAPPluginCall) {
+        let callId = call.getString("callId") ?? ""
+        let output = call.getString("output") ?? "{}"
+        guard !callId.isEmpty else { call.resolve(); return }
+        let escaped = output.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        sendRaw("{\"type\":\"conversation.item.create\",\"item\":{\"type\":\"function_call_output\",\"call_id\":\"\(callId)\",\"output\":\"\(escaped)\"}}")
+        sendRaw("{\"type\":\"response.create\"}")
+        call.resolve()
+    }
+
+    private func receiveLoop() {
+        guard let ws = ws else { return }
+        ws.receive { [weak self] result in
+            guard let self = self, self.running else { return }
+            switch result {
+            case .failure(let err):
+                self.notifyListeners("rtError", data: ["error": err.localizedDescription])
+                self.stopInternal()
+            case .success(let msg):
+                if case .string(let text) = msg { self.handleEvent(text) }
+                if case .data(let d) = msg, let text = String(data: d, encoding: .utf8) { self.handleEvent(text) }
+                self.receiveLoop()
+            }
+        }
+    }
+
+    private func handleEvent(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+
+        switch type {
+        case "response.output_audio.delta", "response.audio.delta":
+            if let b64 = obj["delta"] as? String { playPCM16(base64: b64) }
+
+        // BARGE-IN: the user started talking over the coach. Drop whatever is queued
+        // so the coach stops mid-sentence like a person would, instead of finishing
+        // its turn into a conversation that has already moved on.
+        case "input_audio_buffer.speech_started":
+            flushPlayback()
+            notifyListeners("rtUserSpeaking", data: [:])
+
+        case "response.output_audio_transcript.done", "response.audio_transcript.done":
+            notifyListeners("rtCoachSaid", data: ["text": obj["transcript"] as? String ?? ""])
+
+        case "conversation.item.input_audio_transcription.completed":
+            notifyListeners("rtUserSaid", data: ["text": obj["transcript"] as? String ?? ""])
+
+        case "response.function_call_arguments.done":
+            notifyListeners("rtToolCall", data: [
+                "callId": obj["call_id"] as? String ?? "",
+                "name": obj["name"] as? String ?? "",
+                "arguments": obj["arguments"] as? String ?? "{}",
+            ])
+
+        case "response.done":
+            notifyListeners("rtTurnDone", data: [:])
+
+        case "error":
+            let e = (obj["error"] as? [String: Any])?["message"] as? String ?? "unknown"
+            notifyListeners("rtError", data: ["error": e])
+
+        default: break
+        }
+    }
+
+    // MARK: - Playback (model voice out)
+
+    private func setupEngine() {
+        if engineReady { return }
+        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)
+        playFormat = fmt
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: fmt)
+        engineReady = true
+    }
+
+    private func playPCM16(base64: String) {
+        guard let raw = Data(base64Encoded: base64), !raw.isEmpty, let fmt = playFormat else { return }
+        let frames = raw.count / 2
+        guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames)) else { return }
+        buf.frameLength = AVAudioFrameCount(frames)
+        raw.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
+            let src = ptr.bindMemory(to: Int16.self)
+            let dst = buf.floatChannelData![0]
+            for i in 0..<frames { dst[i] = max(-1.0, min(1.0, Float(src[i]) / 32768.0)) }
+        }
+        if !player.isPlaying { player.play() }
+        player.scheduleBuffer(buf, completionHandler: nil)
+    }
+
+    private func flushPlayback() {
+        player.stop()
+        player.reset()
+        if engine.isRunning { player.play() }
+    }
+
+    private func stopPlayback() {
+        player.stop()
+        if engine.isRunning { engine.stop() }
+    }
+
+    // MARK: - Capture (user voice in)
+
+    private func startAudio() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // .voiceChat gives Apple's echo cancellation, which a speech-to-speech coach
+            // NEEDS: the mic is open while the coach talks, so without it the model hears
+            // itself and answers its own sentences. The old stack deliberately avoids
+            // .voiceChat (it routes to the quieter call-volume curve) — but that stack is
+            // half-duplex and never listens while speaking, so it doesn't need AEC.
+            try session.setCategory(.playAndRecord, mode: .voiceChat,
+                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true)
+        } catch { print("[Realtime] audio session: \(error)") }
+
+        setupEngine()
+        let input = engine.inputNode
+        // Hardware/OS echo cancellation + noise suppression on the input.
+        if #available(iOS 13.0, *) { try? input.setVoiceProcessingEnabled(true) }
+
+        let inFmt = input.outputFormat(forBus: 0)
+        micFormat = inFmt
+        converter = AVAudioConverter(from: inFmt, to: outFormat)
+
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 2048, format: inFmt) { [weak self] buffer, _ in
+            self?.sendMic(buffer)
+        }
+
+        engine.prepare()
+        do { try engine.start(); capturing = true }
+        catch { notifyListeners("rtError", data: ["error": "mic start: \(error.localizedDescription)"]) }
+    }
+
+    private func stopCapture() {
+        if capturing { engine.inputNode.removeTap(onBus: 0); capturing = false }
+        converter = nil
+    }
+
+    private func sendMic(_ buffer: AVAudioPCMBuffer) {
+        guard running, let converter = converter else { return }
+        let ratio = outFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        if error != nil || out.frameLength == 0 { return }
+
+        let bytes = Int(out.frameLength) * 2
+        guard let ch = out.int16ChannelData else { return }
+        let data = Data(bytes: ch[0], count: bytes)
+        sendRaw("{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(data.base64EncodedString())\"}")
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // HealthKit plugin — reads STEPS + SLEEP from Apple Health (which aggregates the
 // iPhone's motion chip, Apple Watch, and any app that writes to Health). Read-only.
 // Lives in this file so it's already in the app target's Compile Sources (no separate

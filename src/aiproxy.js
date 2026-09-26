@@ -115,6 +115,24 @@ export async function lookupBarcode(barcode, opts = {}) {
   return res.json();
 }
 
+// A short-lived OpenAI Realtime client secret for the speech-to-speech coach. The
+// persona and tools are sent up here so the session is stamped with them at creation;
+// the real OPENAI_KEY stays on the server. Returns { value, expires_at, session }.
+export async function openaiRealtimeToken({ instructions, tools, voice, model } = {}) {
+  if (!USE_PROXY) throw new Error(NO_PROXY);
+  const res = await fetch(`${API_BASE}/api/openai-token`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ instructions, tools, voice, model }),
+  });
+  if (!res.ok) {
+    let msg = `Realtime token failed (${res.status})`;
+    try { const j = await res.json(); if (j?.error) msg = typeof j.error === "string" ? j.error : (j.error.message || msg); } catch { /* keep default */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export const PROXY_BASE = API_BASE;
 
 // Keep the proxy's serverless functions warm during a voice session so a turn never

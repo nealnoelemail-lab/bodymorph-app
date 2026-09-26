@@ -3,6 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth, startPhoneVerify, confirmPhoneVerify, sendPhoneCode, verifyPhoneCode, updatePassword, normalizePhone } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
+import { startRealtimeCoach, stopRealtimeCoach } from "./realtime";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode, startAuthKeepAlive } from "./aiproxy";
 import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
@@ -160,6 +161,10 @@ const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
 const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
 const USE_CARTESIA = false;   // retired: Cartesia ran on a bundled key; proxy-only now
 const USE_GROK = VOICE_PROVIDER === "grok" && USE_PROXY; // Grok runs entirely through the proxy
+// "openai" → OpenAI Realtime speech-to-speech (EXPERIMENTAL). One model hears and
+// answers in audio, replacing STT + brain + TTS at once. Selecting it PARKS the Grok
+// stack rather than removing it — set VITE_VOICE_PROVIDER back to "grok" to return.
+const USE_OPENAI_RT = VOICE_PROVIDER === "openai" && USE_PROXY;
 const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
 const CARTESIA_STT_MODEL = "ink-whisper";
@@ -5265,6 +5270,35 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     });
   }, [day, videoOverrides, coachCues]);
 
+  // ── OpenAI Realtime engine (experimental) ───────────────────────────────────
+  // Uses buildSysPrompt() — the SAME persona the Grok coach runs on — so the only
+  // thing that differs between the two engines is the engine. The action handlers
+  // below are the identical props the legacy coach drives through its ||| tags, so
+  // logging food or water changes the app the same way whichever engine is speaking.
+  const startRT = useCallback(async () => {
+    try {
+      setState("thinking");
+      await startRealtimeCoach({
+        instructions: buildSysPrompt(),
+        voice: voiceId || undefined,
+        handlers: { onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo },
+        onEvent: (e) => {
+          if (closedRef.current) return;
+          if (e.type === "open")      { log("realtime: connected"); setState("listening"); }
+          if (e.type === "listening") setState("listening");
+          if (e.type === "idle")      setState("listening");
+          if (e.type === "user")      log(`you: ${e.text}`);
+          if (e.type === "coach")     { log(`coach: ${e.text}`); setState("listening"); }
+          if (e.type === "action")    { setLogConfirm(`\u2713 ${e.result}`); setTimeout(() => setLogConfirm(null), 2200); }
+          if (e.type === "error")     { log(`realtime error: ${e.error}`); setState("idle"); }
+        },
+      });
+    } catch (err) {
+      log(`realtime failed: ${err.message}`);
+      setState("idle");
+    }
+  }, [buildSysPrompt, voiceId, onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, log]);
+
   // ── Mount/unmount: auto-start coaching, tear down on close ──────────────────
   // The parent already called primeTTS() inside the tap, so we can arm immediately
   // — no second "Start Coaching" screen needed.
@@ -5299,7 +5333,9 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     // Wake lock auto-releases when the page is hidden — re-acquire when it returns.
     const onVis = () => { if (document.visibilityState === "visible") { requestWakeLock(); try { audioCtxRef.current?.resume?.(); } catch {} } };
     document.addEventListener("visibilitychange", onVis);
-    arm();
+    // ONE switch decides which engine runs. The legacy loop's timers (watchdog, idle
+    // standby) all gate on `armed`, which stays false here, so they simply never fire.
+    if (USE_OPENAI_RT) startRT(); else arm();
     return () => {
       closedRef.current = true;
       clearTimeout(restNudgeRef.current);   // no "rest's up" barge-in after the coach is closed
@@ -5314,6 +5350,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
       try { audioCtxRef.current?.close(); } catch {}
       if (IS_NATIVE) { try { VoiceCapture.stop(); } catch {} }
+      if (USE_OPENAI_RT) { stopRealtimeCoach().catch(() => {}); }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

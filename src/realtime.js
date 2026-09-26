@@ -1,0 +1,167 @@
+// ── OpenAI Realtime coach (speech-to-speech) ────────────────────────────────────
+// EXPERIMENTAL, parked behind VITE_VOICE_PROVIDER=openai. The shipped coach is
+// native mic → Grok STT → Claude → Grok TTS; this is one model that hears audio and
+// answers in audio. Nothing here touches the old path — flip the env var back and
+// the Grok stack returns untouched.
+//
+// Swift owns the socket and both directions of audio (see RealtimeVoicePlugin): the
+// WebView can't set the auth header this socket needs, and on a real device the
+// WebView mic is dead. This module owns the SESSION — persona, tools, and turning
+// the model's tool calls into the app's existing actions.
+import { registerPlugin, Capacitor } from "@capacitor/core";
+import { openaiRealtimeToken } from "./aiproxy";
+
+const RealtimeVoice = registerPlugin("RealtimeVoice");
+const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
+
+// The shipped coach performs actions by emitting |||FOOD:{…}||| tags inside its reply,
+// which a regex pulls out before the text is spoken. That can't work here: this model
+// generates AUDIO directly, so a tag in its answer gets READ ALOUD. Same actions,
+// expressed as real function calls instead.
+export const REALTIME_TOOLS = [
+  {
+    type: "function", name: "log_food",
+    description: "Log a food the client says they ate. Use their own words for the name.",
+    parameters: {
+      type: "object",
+      properties: {
+        slot: { type: "string", enum: ["breakfast", "lunch", "dinner", "snacks"] },
+        name: { type: "string" },
+        cal: { type: "number" }, protein: { type: "number" },
+        carbs: { type: "number" }, fats: { type: "number" },
+      },
+      required: ["slot", "name", "cal"],
+    },
+  },
+  {
+    type: "function", name: "remove_food",
+    description: "Undo the last food logged for a meal when the client says they misspoke.",
+    parameters: { type: "object", properties: { slot: { type: "string", enum: ["breakfast","lunch","dinner","snacks"] } }, required: ["slot"] },
+  },
+  {
+    type: "function", name: "add_water",
+    description: "Add cups of water. Negative to correct an over-count.",
+    parameters: { type: "object", properties: { cups: { type: "number" } }, required: ["cups"] },
+  },
+  {
+    type: "function", name: "set_water",
+    description: "Set today's total cups of water to an exact number.",
+    parameters: { type: "object", properties: { cups: { type: "number" } }, required: ["cups"] },
+  },
+  {
+    type: "function", name: "log_steps",
+    description: "Set today's step count to an exact number.",
+    parameters: { type: "object", properties: { steps: { type: "number" } }, required: ["steps"] },
+  },
+  {
+    type: "function", name: "log_sleep",
+    description: "Log hours slept last night.",
+    parameters: { type: "object", properties: { hours: { type: "number" } }, required: ["hours"] },
+  },
+  {
+    type: "function", name: "log_set",
+    description: "Log a completed weight-training set during a workout.",
+    parameters: {
+      type: "object",
+      properties: { ex: { type: "number", description: "0-based exercise index" }, weight: { type: "number" }, reps: { type: "number" } },
+      required: ["ex", "weight", "reps"],
+    },
+  },
+  {
+    type: "function", name: "remove_set",
+    description: "Remove the last logged set for an exercise when the client says it was wrong.",
+    parameters: { type: "object", properties: { ex: { type: "number" } }, required: ["ex"] },
+  },
+  {
+    type: "function", name: "check_todo",
+    description: "Tick an item off today's checklist.",
+    parameters: { type: "object", properties: { key: { type: "string" } }, required: ["key"] },
+  },
+];
+
+// The shipped prompt teaches the ||| tag format. Override that here rather than
+// maintaining a second persona — the whole point of the trial is that only the ENGINE
+// differs, so the coach has to be the same coach.
+const TOOL_OVERRIDE = `
+
+IMPORTANT — HOW YOU TAKE ACTIONS IN THIS MODE:
+Ignore every instruction above about ||| tags. You are speaking out loud, so a tag would be heard by the client. Instead, call the matching function: log_food, remove_food, add_water, set_water, log_steps, log_sleep, log_set, remove_set, check_todo. Never say the words "function", "tool" or "log tag" out loud — just do it and confirm naturally in your own voice, the way you always would.`;
+
+export const realtimeSupported = () => IS_NATIVE;
+
+let listeners = [];
+const clearListeners = async () => {
+  for (const l of listeners) { try { (await l).remove(); } catch { /* already gone */ } }
+  listeners = [];
+};
+
+// Map a tool call onto the app's existing action handlers — the SAME ones the Grok
+// coach drives through its text tags, so both engines change the app identically.
+function runTool(name, args, h) {
+  switch (name) {
+    case "log_food":    h.onLogFood && h.onLogFood(args); return `Logged ${args.name || "food"}`;
+    case "remove_food": h.onRemoveFood && h.onRemoveFood(args); return "Removed";
+    case "add_water":   h.onAddWater && h.onAddWater(args.cups); return "Water logged";
+    case "set_water":   h.onSetWater && h.onSetWater(args.cups); return "Water set";
+    case "log_steps":   h.onLogSteps && h.onLogSteps({ set: args.steps }); return "Steps updated";
+    case "log_sleep":   h.onLogSleep && h.onLogSleep(args.hours); return "Sleep logged";
+    case "log_set":     h.onLogSet && h.onLogSet(args); return `Logged ${args.weight}x${args.reps}`;
+    case "remove_set":  h.onRemoveSet && h.onRemoveSet({ ...args, remove: true }); return "Set removed";
+    case "check_todo":  h.onCheckTodo && h.onCheckTodo(args.key); return "Checked off";
+    default: return "Unknown action";
+  }
+}
+
+// Open a speech-to-speech session. `instructions` is the app's own system prompt so
+// the persona is identical to the shipped coach. Returns {ok} or throws.
+export async function startRealtimeCoach({ instructions, voice, model, handlers = {}, onEvent } = {}) {
+  if (!IS_NATIVE) throw new Error("The speech-to-speech coach runs on the phone app only.");
+
+  const session = {
+    instructions: (instructions || "") + TOOL_OVERRIDE,
+    tools: REALTIME_TOOLS,
+    tool_choice: "auto",
+    audio: {
+      input: {
+        format: { type: "audio/pcm", rate: 24000 },
+        // Let OpenAI decide when a turn ends — it hears the audio, so its own
+        // endpointing beats the energy-threshold gate the old pipeline needs.
+        turn_detection: { type: "semantic_vad" },
+        transcription: { model: "whisper-1" },
+      },
+      output: { format: { type: "audio/pcm", rate: 24000 }, voice: voice || "verse" },
+    },
+  };
+
+  const minted = await openaiRealtimeToken({ instructions: session.instructions, tools: REALTIME_TOOLS, voice, model });
+  const token = minted?.value;
+  if (!token) throw new Error("No realtime token returned.");
+
+  await clearListeners();
+  listeners.push(RealtimeVoice.addListener("rtToolCall", async (e) => {
+    let args = {};
+    try { args = JSON.parse(e.arguments || "{}"); } catch { /* malformed — run with nothing */ }
+    const result = runTool(e.name, args, handlers);
+    onEvent && onEvent({ type: "action", name: e.name, args, result });
+    try { await RealtimeVoice.sendToolResult({ callId: e.callId, output: JSON.stringify({ ok: true, detail: result }) }); }
+    catch { /* socket already closed */ }
+  }));
+  listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => onEvent && onEvent({ type: "coach", text: e.text })));
+  listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => onEvent && onEvent({ type: "user", text: e.text })));
+  listeners.push(RealtimeVoice.addListener("rtUserSpeaking", () => onEvent && onEvent({ type: "listening" })));
+  listeners.push(RealtimeVoice.addListener("rtTurnDone", () => onEvent && onEvent({ type: "idle" })));
+  listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));
+  listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
+
+  await RealtimeVoice.start({
+    token,
+    model: model || minted?.session?.model || "gpt-realtime",
+    session: JSON.stringify(session),
+  });
+  return { ok: true };
+}
+
+export async function stopRealtimeCoach() {
+  await clearListeners();
+  try { await RealtimeVoice.stop(); } catch { /* not running */ }
+}
