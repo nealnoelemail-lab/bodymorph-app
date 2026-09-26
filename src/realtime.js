@@ -87,6 +87,15 @@ const TOOL_OVERRIDE = `
 IMPORTANT — HOW YOU TAKE ACTIONS IN THIS MODE:
 Ignore every instruction above about ||| tags. You are speaking out loud, so a tag would be heard by the client. Instead, call the matching function: log_food, remove_food, add_water, set_water, log_steps, log_sleep, log_set, remove_set, check_todo. Never say the words "function", "tool" or "log tag" out loud — just do it and confirm naturally in your own voice, the way you always would.`;
 
+// OpenAI ships a fixed set of voices and does NOT clone. The app stores the coach's
+// voice as a GROK voice id ("hvff5tluuao4" = Neal's cloned "Coach Neal"), and passing
+// that through is a 400 that kills the whole session before it starts — which is
+// precisely how this first presented: connect, silence, nothing in the log.
+// So: only ever send a voice OpenAI actually has.
+const OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"];
+const DEFAULT_VOICE = "cedar";   // the closest natural male coach voice OpenAI offers
+export const openaiVoice = (v) => (OPENAI_VOICES.includes(String(v || "").toLowerCase()) ? String(v).toLowerCase() : DEFAULT_VOICE);
+
 export const realtimeSupported = () => IS_NATIVE;
 
 let listeners = [];
@@ -114,7 +123,10 @@ function runTool(name, args, h) {
 
 // Open a speech-to-speech session. `instructions` is the app's own system prompt so
 // the persona is identical to the shipped coach. Returns {ok} or throws.
+const rtLog = (m) => { try { console.log(`[RT] ${m}`); } catch { /* no console */ } };
+
 export async function startRealtimeCoach({ instructions, voice, model, handlers = {}, onEvent } = {}) {
+  rtLog(`start: native=${IS_NATIVE} promptChars=${(instructions || "").length} voice=${openaiVoice(voice)} (asked for ${voice || "none"})`);
   if (!IS_NATIVE) throw new Error("The speech-to-speech coach runs on the phone app only.");
 
   const session = {
@@ -130,12 +142,20 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
         turn_detection: { type: "semantic_vad" },
         transcription: { model: "whisper-1" },
       },
-      output: { format: { type: "audio/pcm", rate: 24000 }, voice: voice || "verse" },
+      output: { format: { type: "audio/pcm", rate: 24000 }, voice: openaiVoice(voice) },
     },
   };
 
-  const minted = await openaiRealtimeToken({ instructions: session.instructions, tools: REALTIME_TOOLS, voice, model });
+  let minted;
+  try {
+    rtLog("requesting token...");
+    minted = await openaiRealtimeToken({ instructions: session.instructions, tools: REALTIME_TOOLS, voice: openaiVoice(voice), model });
+  } catch (e) {
+    rtLog(`TOKEN FAILED: ${e.message}`);
+    throw e;
+  }
   const token = minted?.value;
+  rtLog(`token ${token ? "ok" : "MISSING"} model=${minted?.session?.model || "?"}`);
   if (!token) throw new Error("No realtime token returned.");
 
   await clearListeners();
@@ -155,11 +175,13 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
 
+  rtLog("opening socket...");
   await RealtimeVoice.start({
     token,
     model: model || minted?.session?.model || "gpt-realtime",
     session: JSON.stringify(session),
   });
+  rtLog("socket open");
   return { ok: true };
 }
 

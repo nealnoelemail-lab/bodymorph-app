@@ -5291,10 +5291,13 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           if (e.type === "user")      log(`you: ${e.text}`);
           if (e.type === "coach")     { log(`coach: ${e.text}`); setState("listening"); }
           if (e.type === "action")    { setLogConfirm(`\u2713 ${e.result}`); setTimeout(() => setLogConfirm(null), 2200); }
-          if (e.type === "error")     { log(`realtime error: ${e.error}`); setState("idle"); }
+          if (e.type === "error")     { try { console.log(`[RT] ERROR: ${e.error}`); } catch {} log(`realtime error: ${e.error}`); setState("idle"); }
         },
       });
     } catch (err) {
+      // Both channels on purpose: the strip for a glance, the native console because
+      // that's the log that actually gets copied when something goes wrong.
+      try { console.log(`[RT] START FAILED: ${err?.message || err}`); } catch { /* no console */ }
       log(`realtime failed: ${err.message}`);
       setState("idle");
     }
