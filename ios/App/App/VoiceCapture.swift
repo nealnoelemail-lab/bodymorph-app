@@ -925,7 +925,9 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         var req = URLRequest(url: url)
         // The ephemeral secret minted by /api/openai-token. The real key never ships.
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+        // NO "OpenAI-Beta: realtime=v1" header. That was the pre-GA handshake, and
+        // sending it now gets the socket closed immediately with "The Realtime Beta API
+        // is no longer supported." The GA endpoint wants the bearer token and nothing else.
 
         let s = URLSession(configuration: .default)
         urlSession = s
@@ -1149,9 +1151,10 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             status.pointee = .haveData
             return buffer
         }
-        if error != nil || out.frameLength == 0 { return }
+        if error != nil || out.frameLength == 0 { return }   // converter priming — nothing to send yet
 
         let bytes = Int(out.frameLength) * 2
+        guard bytes > 0 else { return }
         guard let ch = out.int16ChannelData else { return }
         let data = Data(bytes: ch[0], count: bytes)
         sendRaw("{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(data.base64EncodedString())\"}")
