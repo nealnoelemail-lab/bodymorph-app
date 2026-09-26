@@ -13,25 +13,64 @@ export const USE_PROXY = !!API_BASE;
 
 const NO_PROXY = "AI proxy not configured (VITE_API_BASE unset). Refusing to call the vendor directly — set the proxy URL.";
 
-// The user's Supabase access token — the proxy's auth gate.
-async function authHeader() {
+// ── The proxy's auth gate: a LIVE Supabase access token ─────────────────────────
+// Access tokens last about an hour. Supabase refreshes them on a background timer,
+// but iOS suspends timers while an app is backgrounded — so an app left open
+// overnight wakes up holding a dead token, the proxy answers 401, and the feature
+// looks broken until you force-quit (which mints a fresh one on launch). That's the
+// "I had to close the app and reopen it" report.
+//
+// So: refresh BEFORE the call if the token is expired or nearly so, rather than
+// trusting a timer that may not have fired.
+const REFRESH_MARGIN_S = 120;   // treat "expires in under 2 min" as already expired
+
+async function freshToken(force = false) {
   try {
     const { data } = await supabase.auth.getSession();
-    const t = data?.session?.access_token;
-    return t ? { authorization: `Bearer ${t}` } : {};
-  } catch { return {}; }
+    const session = data?.session;
+    if (!session) return null;
+    const expiresAt = session.expires_at || 0;          // seconds since epoch
+    const stale = force || !expiresAt || expiresAt - Date.now() / 1000 < REFRESH_MARGIN_S;
+    if (!stale) return session.access_token;
+    const { data: refreshed, error } = await supabase.auth.refreshSession();
+    if (error) return session.access_token;             // offline: try the old one anyway
+    return refreshed?.session?.access_token || session.access_token;
+  } catch { return null; }
+}
+
+async function authHeader(force = false) {
+  const t = await freshToken(force);
+  return t ? { authorization: `Bearer ${t}` } : {};
+}
+
+// Re-arm Supabase's own refresh timer when the app comes back to the foreground.
+// Without this the timer stays stopped after a long background and every token the
+// app holds drifts out of date. Native/Capacitor only concern, harmless on web.
+export function startAuthKeepAlive() {
+  if (!supabase?.auth?.startAutoRefresh) return;
+  const sync = () => {
+    if (document.visibilityState === "visible") supabase.auth.startAutoRefresh();
+    else supabase.auth.stopAutoRefresh();
+  };
+  document.addEventListener("visibilitychange", sync);
+  sync();
 }
 
 // Anthropic Messages. Pass the request body object (not stringified). Returns the raw
 // fetch Response so callers can `.json()` it OR stream it (body.getReader()) unchanged.
 export async function anthropicFetch(body, opts = {}) {
   if (!USE_PROXY) throw new Error(NO_PROXY);
-  return fetch(`${API_BASE}/api/anthropic`, {
+  const send = async (force) => fetch(`${API_BASE}/api/anthropic`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(await authHeader()) },
+    headers: { "content-type": "application/json", ...(await authHeader(force)) },
     body: JSON.stringify(body),
     signal: opts.signal,
   });
+  const res = await send(false);
+  // A 401 means the token we just sent was dead anyway. Force a new one and try once
+  // more, so a stale session costs a second rather than a failed photo.
+  if (res.status === 401) return send(true);
+  return res;
 }
 
 // Grok speech-to-text. Pass a FormData (the audio clip). Returns the Response.

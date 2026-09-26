@@ -3,7 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUser, onAuth, startPhoneVerify, confirmPhoneVerify, sendPhoneCode, verifyPhoneCode, updatePassword, normalizePhone } from "./supabase";
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
-import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode } from "./aiproxy";
+import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode, startAuthKeepAlive } from "./aiproxy";
 import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
   listProspects, upsertProspect, deleteProspect, setProspectStage, PROSPECT_STAGES,
@@ -7977,8 +7977,12 @@ function DailyCalendar({ program, supplements, peptides, meals, cardioPlan, food
 // Compress the multi-MB camera photo to a ~1024px JPEG BEFORE it touches React state,
 // the DOM, or the upload. A raw iOS photo is 3-16 MB of base64; decoding and rendering
 // that synchronously is what made the camera lag for seconds.
+// 1568px is what Claude's vision downscales to anyway, and 0.85 keeps the texture that
+// actually decides a hard call. The old 1024 @ 0.7 was chosen to stop multi-MB photos
+// freezing the UI, but it threw away exactly the detail that separates beef from pork:
+// the grain, the colour depth, the char. Cheap fidelity to buy back.
 async function mealPhotoDataUrl(file) {
-  try { return await compressImage(file, 1024, 0.7); }
+  try { return await compressImage(file, 1568, 0.85); }
   catch {
     return await new Promise((resolve, reject) => {
       const r = new FileReader();
@@ -7991,17 +7995,25 @@ async function mealPhotoDataUrl(file) {
 
 const MEAL_PHOTO_PROMPT = `Identify EVERY distinct food on this plate as a SEPARATE item. Do not merge them into one dish.
 
+Look carefully before you answer. Many foods have lookalikes, and getting the wrong one wrong costs the user their whole day's numbers:
+- beef vs pork vs lamb — judge by colour depth, grain direction, fat marbling, char
+- chicken vs turkey vs pork loin — judge by fibre texture and colour
+- rice vs couscous vs quinoa vs orzo — judge by grain shape and size
+- mushroom vs meat, sweet potato vs squash, beans vs lentils
+If the deciding cue isn't actually visible in the photo, say so with a low confidence rather than picking the more common food.
+
 For each item give:
 - "food": the specific food, 1-4 words ("grilled chicken breast", "white rice", "steamed broccoli")
+- "why": the visual cue that decided it, under 8 words ("dark red grain, seared crust")
 - "portion": the amount in a HOUSEHOLD measure a person can picture — "1 cup", "4 oz", "2 slices", "1 medium". Never grams here.
 - "grams": your estimate of that portion's weight in grams, as a number
-- "confidence": "high", "medium" or "low" — how sure you are of the IDENTIFICATION. Use "low" freely; foods that look alike (mushrooms vs meat, rice vs couscous, sauces) should be "low" or "medium".
+- "confidence": "high", "medium" or "low" — how sure you are of the IDENTIFICATION, not the portion. Use "low" freely.
 - "cal", "protein", "carbs", "fats": numbers for that item's portion
 
 Use the plate rim, cutlery or hands as a size reference for portions.
 
 Reply ONLY with JSON, no markdown, no commentary:
-{"items":[{"food":"...","portion":"...","grams":000,"confidence":"high","cal":000,"protein":00,"carbs":00,"fats":00}]}`;
+{"items":[{"food":"...","why":"...","portion":"...","grams":000,"confidence":"high","cal":000,"protein":00,"carbs":00,"fats":00}]}`;
 
 const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
 
@@ -8012,12 +8024,20 @@ const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 };
 async function analyzeMealPhoto(dataUrl, fileType) {
   const base64 = dataUrl.split(",")[1];
   const mediaType = dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : (fileType || "image/jpeg");
-  const body = { model:"claude-sonnet-4-6", max_tokens:900, messages:[{ role:"user", content:[
+  const body = { model:"claude-opus-4-8", max_tokens:1400, messages:[{ role:"user", content:[
     { type:"image", source:{ type:"base64", media_type:mediaType, data:base64 } },
     { type:"text", text: MEAL_PHOTO_PROMPT }
   ]}]};
   const res = await anthropicFetch(body);
-  if (!res.ok) throw new Error("API error");
+  // Name the failure. One catch-all "couldn't read that photo" hid an expired login
+  // behind the same words as a bad photo, so nobody — including me — could tell a
+  // signed-out session from a genuine miss.
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Your session expired. Close BodyMorph fully, reopen it, and try again.");
+    if (res.status === 429) throw new Error("Too many requests right now — give it a few seconds.");
+    if (res.status >= 500) throw new Error("The food service is having a moment. Try again.");
+    throw new Error(`Photo service error (${res.status}).`);
+  }
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || "API error");
   const text = (data.content && data.content[0] && data.content[0].text) || "";
@@ -8037,6 +8057,7 @@ function normalizePhotoItem(it) {
   const conf = String(it.confidence || "").toLowerCase();
   return {
     food: String(it.food || "Item").trim(),
+    why: String(it.why || "").trim(),
     portion: String(it.portion || "").trim(),
     grams: Math.max(0, Math.round(toNum(it.grams))) || null,
     confidence: CONFIDENCE_RANK[conf] !== undefined ? conf : "medium",
@@ -8147,9 +8168,13 @@ function MealPhotoReview({ items, onChange, onFix }) {
             </div>
             {/* Flagging only the doubtful rows is the difference between checking one
                 item and auditing the whole plate. The model knows when it's guessing. */}
+            {/* The cue it judged by. Seeing "pale fibre, no sear" under something you
+                know was steak tells you instantly that it misread the photo, rather
+                than leaving you guessing whether the lens was dirty. */}
             {unsure && (
-              <div style={{ color: it.confidence==="low" ? "#ff9d5c" : "#9898b8", fontSize:11.5, marginTop:6 }}>
-                {it.confidence === "low" ? "Not sure about this one — tap Fix if it's wrong" : "Fairly sure"}
+              <div style={{ color: it.confidence==="low" ? "#ff9d5c" : "#9898b8", fontSize:11.5, marginTop:6, lineHeight:1.35 }}>
+                {it.confidence === "low" ? "Not sure — tap Fix if it's wrong" : "Fairly sure"}
+                {it.why ? ` · ${it.why}` : ""}
               </div>
             )}
           </div>
@@ -8337,8 +8362,10 @@ function MealPhotoFlow({ openRef, onLog, homeSlotId }) {
     if (!file) return;
     const dataUrl = await mealPhotoDataUrl(file);
     setImgSrc(dataUrl); setBusy(true); setItems(null); setError(null);
+    // Show what actually went wrong. "Try again" is useless advice when the real
+    // problem is an expired session or a service outage.
     try { setItems(await analyzeMealPhoto(dataUrl, file.type)); }
-    catch { setError("Could not read that photo — try again."); }
+    catch (err) { setError(err?.message || "Could not read that photo — try again."); }
     setBusy(false);
   };
 
@@ -12992,6 +13019,9 @@ export default function BodyMorph() {
     };
     showFlash(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] });
   }, [syncAppleHealth]);
+
+  // Keep the login token alive across backgrounding (see startAuthKeepAlive).
+  useEffect(() => { startAuthKeepAlive(); }, []);
 
   useEffect(() => {
     if (!loaded || !IS_NATIVE) return;
