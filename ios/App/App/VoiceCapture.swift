@@ -938,7 +938,26 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // defined in one place, not duplicated in Swift.
         sendRaw("{\"type\":\"session.update\",\"session\":\(sessionJSON)}")
         receiveLoop()
-        startAudio()
+
+        // Audio MUST be set up on the main thread: Capacitor dispatches plugin calls on
+        // a background queue, and configuring AVAudioSession / starting AVAudioEngine
+        // off-main fails quietly — which looks exactly like "the mic never turned on".
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                DispatchQueue.main.async {
+                    guard granted else {
+                        self.notifyListeners("rtError", data: ["error": "microphone permission denied"])
+                        return
+                    }
+                    self.startAudio()
+                    // Speak FIRST, before anyone says anything. It matches how the shipped
+                    // coach opens, and it proves the audio path works even if the mic
+                    // doesn't — silence then tells us which half is broken.
+                    self.sendRaw("{\"type\":\"response.create\"}")
+                }
+            }
+        }
         notifyListeners("rtOpen", data: [:])
         call.resolve(["ok": true])
     }
@@ -1100,8 +1119,15 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         engine.prepare()
-        do { try engine.start(); capturing = true }
-        catch { notifyListeners("rtError", data: ["error": "mic start: \(error.localizedDescription)"]) }
+        do {
+            try engine.start()
+            capturing = true
+            // Report the real rates: a mismatch here is the usual cause of "it hears
+            // nothing" or "it sounds like chipmunks".
+            notifyListeners("rtAudio", data: ["micHz": Int(inFmt.sampleRate), "outHz": 24000])
+        } catch {
+            notifyListeners("rtError", data: ["error": "mic start: \(error.localizedDescription)"])
+        }
     }
 
     private func stopCapture() {

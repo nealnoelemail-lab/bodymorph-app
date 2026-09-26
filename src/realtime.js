@@ -118,6 +118,7 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
   if (!IS_NATIVE) throw new Error("The speech-to-speech coach runs on the phone app only.");
 
   const session = {
+    type: "realtime",
     instructions: (instructions || "") + TOOL_OVERRIDE,
     tools: REALTIME_TOOLS,
     tool_choice: "auto",
@@ -152,6 +153,7 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
   listeners.push(RealtimeVoice.addListener("rtTurnDone", () => onEvent && onEvent({ type: "idle" })));
   listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
+  listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
 
   await RealtimeVoice.start({
     token,
