@@ -4566,7 +4566,9 @@ function GymSetup({ userId, programExercises, onBack, say }) {
       <div style={{ color:"#9898b8", fontSize:13, lineHeight:1.6, marginBottom:14 }}>
         Machines take two shots — front, then side. The side view is what tells a seated row from a
         chest-supported row. Small kit takes one: bands, kettlebells, medicine balls, ropes, and the
-        bars and handles that clip onto a cable. Anything you skip gets swapped for something you have.
+        bars and handles that clip onto a cable. Get close enough to fill the frame — on a bar or a
+        ball, that's what makes the size or grip readable. Anything you skip gets swapped for
+        something you have.
       </div>
 
       {/* Neal wants the sweep wider than the program: "as much of the equipment they can take
@@ -4654,6 +4656,95 @@ function EquipThumb({ path, size = 46 }) {
            : <span style={{ fontSize:17, opacity:0.45 }}>🏋️</span>}
     </div>
   );
+}
+
+// ── WHICH MACHINE DO I WALK UP TO ─────────────────────────────────────────────
+// The point of the whole gym-orientation feature. "Pec deck" means nothing to someone
+// who has never been shown one, so every exercise row carries the answer.
+//
+// It degrades in three steps, and the order matters because almost nobody has
+// photographed their gym yet:
+//
+//   1. Their own photo of their own machine — the best answer, once setup is done.
+//   2. No photo yet: name the machine and the handle anyway. This is still genuinely
+//      useful ("leg press, wide-grip bar") and it's what everyone sees today, so it
+//      must never read as an error or nag them about setup. A client mid-workout is
+//      not going to stop and photograph the gym.
+//   3. Nothing needed at all: say so. Push-ups are push-ups.
+function EquipmentTile({ exercise, gym, accent, compact }) {
+  const [big, setBig] = useState(false);
+  const t = tileFor(exercise, gym || { items: [] });
+
+  // Nothing to walk up to. Quiet, one line, no photo frame implying a missing image.
+  if (t.none) return (
+    <div style={{ marginTop:compact ? 3 : 7, color:"#7a7a95", fontSize:12.5, fontFamily:"'Oswald', sans-serif" }}>
+      No equipment needed
+    </div>
+  );
+  if (t.unknown) return null;                     // untagged exercise — say nothing
+
+  const photo = t.item && (t.item.photo_front || t.item.photo_side);
+  const shown = (t.item && t.item.label) || t.label;
+
+  // On the day's preview list this has to stay scannable — eight boxed tiles turn a
+  // glanceable list into a wall. One line, no frame.
+  if (compact) return (
+    <div style={{ marginTop:4, display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
+      {photo && <EquipThumb path={t.item.photo_front || t.item.photo_side} size={22} />}
+      <div style={{ color:"#9898b8", fontSize:12.5, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+        {shown}{t.attachmentLabel ? ` · ${t.attachmentLabel.toLowerCase()}` : ""}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div onClick={photo ? ()=>setBig(true) : undefined}
+        style={{ marginTop:8, display:"flex", alignItems:"center", gap:10, background:"#12121a",
+                 border:"1px solid #232334", borderRadius:10, padding:"7px 10px",
+                 cursor: photo ? "pointer" : "default" }}>
+        {/* Always frame it, photo or not. A bare bordered box of text reads as a form
+            field; the frame makes it read as equipment, and quietly shows where their
+            own photo will sit once they've walked the gym. */}
+        <EquipThumb path={photo || null} size={38} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ color:"#dcdcf0", fontSize:13.5, fontWeight:600, lineHeight:1.3,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{shown}</div>
+          {/* The handle is advisory — it can never gate the exercise, only sharpen it. */}
+          {t.attachmentLabel && (
+            <div style={{ color:"#9898b8", fontSize:11.5, marginTop:1.5 }}>Use the {t.attachmentLabel.toLowerCase()}</div>
+          )}
+        </div>
+        {photo && <span style={{ color:accent || "#9898b8", fontSize:11, letterSpacing:0.5, flexShrink:0 }}>VIEW</span>}
+      </div>
+
+      {big && photo && (
+        <div onClick={()=>setBig(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", zIndex:900, display:"flex",
+                   flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, padding:16 }}>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1, color:"#f0f0f8" }}>{shown}</div>
+          {/* Both angles, because the side view is often the one that makes it click. */}
+          <div style={{ display:"flex", gap:10, width:"100%", justifyContent:"center", flexWrap:"wrap" }}>
+            {[t.item.photo_front, t.item.photo_side].filter(Boolean).map(p => (
+              <EquipBig key={p} path={p} />
+            ))}
+          </div>
+          {t.attachmentLabel && (
+            <div style={{ color:"#c8c8e0", fontSize:13.5 }}>Use the {t.attachmentLabel.toLowerCase()}</div>
+          )}
+          <div style={{ color:"#7a7a95", fontSize:12, marginTop:4 }}>Tap anywhere to close</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// The enlarged view. Same signed-URL path as the thumbnail, sized to actually be read.
+function EquipBig({ path }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => { let on = true; gymPhotoUrl(path).then(u => { if (on) setSrc(u); }); return () => { on = false; }; }, [path]);
+  if (!src) return <div style={{ width:150, height:200, borderRadius:12, background:"#1e1e2e" }} />;
+  return <img src={src} alt="" style={{ maxWidth:"46%", maxHeight:"58vh", borderRadius:12, objectFit:"contain" }} />;
 }
 
 // ── MENU PAGE ─────────────────────────────────────────────────────────────────
@@ -6000,7 +6091,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
 // ── SESSION ───────────────────────────────────────────────────────────────────
 // Shows the day's exercise summary + a date picker + START button.
 // After START, reveals set-by-set logging for each exercise.
-function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo, coachOn, onToggleCoach, liveSets }) {
+function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines, onLogExercise, onCompleteWorkout, onSaveExtras, onBack, videoOverrides, onSaveVideo, coachOn, onToggleCoach, liveSets, gym }) {
   const sessionAccent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const [started, setStarted] = useState(false);
   const [dateStr, setDateStr] = useState(ymdLocal());
@@ -6062,9 +6153,10 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
         <div style={{ display:"flex", flexDirection:"column", gap:8, padding:"0 20px 16px" }}>
           {workout.map((ex,i) => (
             <div key={i} style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:10, padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ minWidth:0 }}>
+              <div style={{ minWidth:0, flex:1 }}>
                 <div style={{ fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:22, color:sessionAccent }}>{i+1}. {ex.exercise}</div>
                 <div style={{ color:"#d6d6ec", fontSize:14, marginTop:2, fontFamily:"'Oswald', sans-serif" }}>Target {ex.sets} sets &times; {ex.reps} reps</div>
+                <EquipmentTile exercise={ex.exercise} gym={gym} accent={sessionAccent} compact />
               </div>
             </div>
           ))}
@@ -6131,7 +6223,7 @@ function Session({ profile, day, logs, cardioPlan, stretchPlan, stretchRoutines,
 
       <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"14px" }}>
         {workout.map((ex,i) => (
-          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} voiceSets={(liveSets && liveSets[ex.exercise]) || null} />
+          <ExerciseLogger key={i} index={i} ex={ex} history={logs[ex.exercise] || []} dateStr={dateStr} onSave={onLogExercise} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} voiceSets={(liveSets && liveSets[ex.exercise]) || null} gym={gym} />
         ))}
 
         {/* Cardio for the day */}
@@ -6186,7 +6278,7 @@ function ExtraRow({ icon, iconColor, label, state, onDone, onMins }) {
 }
 
 // One exercise with N set rows. Auto-fills from last session; user adjusts.
-function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo, voiceSets }) {
+function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOverrides, onSaveVideo, voiceSets, gym }) {
   const loggerAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   const numSets = Math.max(1, parseInt(ex.sets) || 3);
   const last = history.length ? history[history.length-1] : null;
@@ -6342,6 +6434,7 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
         {pr > 0 && <div style={{ color:loggerAccent, fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:12.5, flexShrink:0 }}>PR {pr}</div>}
       </div>
 
+      <EquipmentTile exercise={ex.exercise} gym={gym} accent={loggerAccent} />
       {ex.coachCue && <CoachCue text={ex.coachCue} accent={loggerAccent} />}
       <VideoPanel exName={ex.exercise} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
 
@@ -13206,6 +13299,17 @@ export default function BodyMorph() {
   const clearStretchProgress = useCallback(() => { setStretchProgress(null); try { localStorage.removeItem("bodymorph_stretchprogress"); } catch {} }, []);
   const [todoChecked, setTodoChecked] = useState({}); // checked to-do items, keyed by date:section:id
   const [user, setUser] = useState(null);             // signed-in Supabase user (null = offline / not signed in)
+
+  // The client's photographed gym, loaded once. Every exercise row asks it which machine
+  // to walk up to. An empty profile is the normal state before setup, not an error — the
+  // tile falls back to naming the machine from the equipment map.
+  const [gym, setGym] = useState({ items: [] });
+  useEffect(() => {
+    if (!user?.id) { setGym({ items: [] }); return; }
+    let on = true;
+    loadGym(user.id).then(g => { if (on) setGym(g); }).catch(() => {});
+    return () => { on = false; };
+  }, [user?.id]);
   const [pendingPhone, setPendingPhone] = useState(""); // phone captured at signup, awaiting one-time verification
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
@@ -14306,7 +14410,7 @@ export default function BodyMorph() {
         cardioPlan={cardioPlan} stretchPlan={stretchPlan} stretchRoutines={stretchRoutines}
         onLogExercise={logExercise} onCompleteWorkout={completeWorkout} onSaveExtras={addCardioSessionFromDay}
         onBack={navBack} videoOverrides={videoOverrides} onSaveVideo={saveVideo}
-        liveSets={liveSets}
+        liveSets={liveSets} gym={gym}
         coachOn={homeVoice} onToggleCoach={()=>{ if (homeVoice) { setHomeVoice(false); setVoiceState(null); } else { primeTTS(); setHomeVoice(true); } }} />
     </>
   );
