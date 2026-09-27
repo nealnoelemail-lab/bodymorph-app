@@ -13,36 +13,42 @@
 // in this file knows or cares which voice engine is active.
 import { supabase } from "./supabase";
 import { anthropicFetch } from "./aiproxy";
-import { EQUIPMENT, baseId, classifyCapture, captureLine } from "./equipment";
+import { EQUIPMENT, baseId, classifyCapture, captureLine, isAccessory } from "./equipment";
 
 const BUCKET = "gym-equipment";
 
 const VOCAB = Object.keys(EQUIPMENT).join(", ");
 
-const IDENTIFY_PROMPT = `These are two photos of ONE piece of gym equipment — a front view and a side view.
+const prompt = (twoPhotos) => `${twoPhotos
+  ? "These are two photos of ONE piece of gym equipment — a front view and a side view."
+  : "This is one photo of a single piece of gym equipment. It may be a machine, or it may be loose kit — a kettlebell, a medicine ball, a band, a rope, or a bar or handle that clips onto a cable."}
 
 Identify it. Reply ONLY with JSON, no markdown:
-{"id":"...","label":"...","usedFor":"...","confidence":"high|medium|low","variant":false}
+{"id":"...","label":"...","detail":"","usedFor":"...","confidence":"high|medium|low","variant":false}
 
 - "id" MUST be one of exactly these: ${VOCAB}
   Use "other" if it is genuinely none of them (a machine the list doesn't cover, or not gym equipment at all).
 - "label": what a trainer would call it, 1-4 words.
+- "detail": for loose kit and cable attachments only, the size or grip printed or plainly visible — "10 lb", "25 kg", "wide grip", "heavy". Leave it "" if nothing is legible. Do NOT guess a weight from apparent size; an unlabelled ball is "".
 - "usedFor": the muscle or movement it trains, under 8 words ("chest flyes", "hamstring curls"). This gets read aloud to someone who may not know.
 - "confidence": how sure you are of the identification. Say "low" freely — a wrong guess here silently corrupts their whole program.
 - "variant": true ONLY if this is a genuinely different KIND of machine rather than a different brand or model — a curved sprint treadmill versus a motorised one, a 45-degree leg press versus a horizontal one. Different manufacturer, colour or age is NOT a variant.
 
-If the two photos show different machines, or either is too blurry or too far away to identify, set confidence "low" and say so in "label".`;
+If ${twoPhotos ? "the two photos show different machines, or either is" : "the photo is"} too blurry or too far away to identify, set confidence "low" and say so in "label".`;
 
-// Identify one machine from its two photos. Returns the parsed object, or throws.
+// Identify one piece of equipment. The side photo is OPTIONAL: a machine needs two
+// angles to tell a seated row from a chest-supported one, but a resistance band has no
+// meaningful side view, and asking for one is a pointless second photo.
 export async function identifyEquipment(frontDataUrl, sideDataUrl) {
   const img = (dataUrl) => ({
     type: "image",
     source: { type: "base64", media_type: "image/jpeg", data: dataUrl.split(",")[1] },
   });
+  const photos = sideDataUrl ? [img(frontDataUrl), img(sideDataUrl)] : [img(frontDataUrl)];
   const body = {
     model: "claude-opus-4-8",
     max_tokens: 400,
-    messages: [{ role: "user", content: [img(frontDataUrl), img(sideDataUrl), { type: "text", text: IDENTIFY_PROMPT }] }],
+    messages: [{ role: "user", content: [...photos, { type: "text", text: prompt(!!sideDataUrl) }] }],
   };
   const res = await anthropicFetch(body);
   if (!res.ok) {
@@ -56,6 +62,7 @@ export async function identifyEquipment(frontDataUrl, sideDataUrl) {
   return {
     id: String(parsed.id || "other"),
     label: String(parsed.label || "Unknown").trim(),
+    detail: String(parsed.detail || "").trim(),
     usedFor: String(parsed.usedFor || "").trim(),
     confidence: ["high", "medium", "low"].includes(parsed.confidence) ? parsed.confidence : "low",
     variant: parsed.variant === true,
@@ -114,7 +121,12 @@ export async function captureMachine({ userId, gym, frontDataUrl, sideDataUrl, g
   }
 
   const decision = classifyCapture(gym, ident);
-  const label = ident.label || (EQUIPMENT[baseId(ident.id)] || {}).label || ident.id;
+  // Loose kit carries its size or grip in the label, because that's the part that tells
+  // one from another on the shelf — "Medicine ball" alone doesn't help you pick.
+  const base = ident.label || (EQUIPMENT[baseId(ident.id)] || {}).label || ident.id;
+  const label = ident.detail && isAccessory(ident.id) && !base.toLowerCase().includes(ident.detail.toLowerCase())
+    ? `${base} ${ident.detail}`
+    : base;
 
   if (decision.action === "skip") {
     // No upload, no row, no cost. Just move them on.
@@ -126,7 +138,7 @@ export async function captureMachine({ userId, gym, frontDataUrl, sideDataUrl, g
   const equipId = decision.action === "variant" ? `${baseId(ident.id)}/${slug(label)}` : ident.id;
   const [front, side] = await Promise.all([
     upload(userId, equipId, "front", frontDataUrl),
-    upload(userId, equipId, "side", sideDataUrl),
+    sideDataUrl ? upload(userId, equipId, "side", sideDataUrl) : Promise.resolve(null),
   ]);
 
   const row = {

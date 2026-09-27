@@ -4,7 +4,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { startRealtimeCoach, stopRealtimeCoach } from "./realtime";
-import { EQUIPMENT, setupProgress, resolveExercise, tileEquipment } from "./equipment";
+import { EQUIPMENT, setupProgress, resolveExercise, tileEquipment, sweepSuggestions, tileFor, needsNoEquipment, attachmentFor } from "./equipment";
 import { loadGym, captureMachine, forgetMachine, gymPhotoUrl } from "./gymsetup";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode, startAuthKeepAlive } from "./aiproxy";
 import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
@@ -4481,6 +4481,7 @@ function GymSetup({ userId, programExercises, onBack, say }) {
   }, [userId]);
 
   const progress = setupProgress(gym, programExercises || []);
+  const sweep = sweepSuggestions(gym);
 
   const shoot = (which) => (which === "front" ? frontRef : sideRef).current?.click();
 
@@ -4489,18 +4490,17 @@ function GymSetup({ userId, programExercises, onBack, say }) {
     e.target.value = "";
     if (!f) return;
     setFront(await mealPhotoDataUrl(f));
-    setMsg({ kind: "step", text: "Now step to the side and take the second shot." });
-    try { say && say("Good. Now step to the side and take one more."); } catch {}
+    setMsg({ kind: "step", text: "Step to the side for the second shot — or save it now if it's small kit." });
+    try { say && say("Good. Step to the side for one more, or save it now if it's small."); } catch {}
   };
 
-  const onSide = async (e) => {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!f || !front) return;
-    const sideUrl = await mealPhotoDataUrl(f);
+  // One shared submit. A machine sends both angles; loose kit sends the front shot alone,
+  // because a resistance band has no side view worth taking.
+  const submit = async (sideUrl) => {
+    if (!front) return;
     setBusy(true); setMsg({ kind: "step", text: "Looking at it…" });
     try {
-      const r = await captureMachine({ userId, gym, frontDataUrl: front, sideDataUrl: sideUrl, say });
+      const r = await captureMachine({ userId, gym, frontDataUrl: front, sideDataUrl: sideUrl || null, say });
       if (r.item) setGym(g => ({ items: [...g.items, r.item] }));
       setMsg({ kind: r.action === "unclear" || r.action === "error" ? "warn" : "ok", text: r.line });
     } catch (err) {
@@ -4509,6 +4509,13 @@ function GymSetup({ userId, programExercises, onBack, say }) {
     }
     setFront(null);
     setBusy(false);
+  };
+
+  const onSide = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f || !front) return;
+    submit(await mealPhotoDataUrl(f));
   };
 
   const remove = async (item) => {
@@ -4557,10 +4564,27 @@ function GymSetup({ userId, programExercises, onBack, say }) {
       </div>
 
       <div style={{ color:"#9898b8", fontSize:13, lineHeight:1.6, marginBottom:14 }}>
-        Walk up to a machine and take two shots — one from the front, one from the side. The side view
-        is what tells a seated row from a chest-supported row. You don't need the whole gym: anything
-        missing gets swapped for something you do have.
+        Machines take two shots — front, then side. The side view is what tells a seated row from a
+        chest-supported row. Small kit takes one: bands, kettlebells, medicine balls, ropes, and the
+        bars and handles that clip onto a cable. Anything you skip gets swapped for something you have.
       </div>
+
+      {/* Neal wants the sweep wider than the program: "as much of the equipment they can take
+          pictures of." Readiness is still measured against their program — this is the nudge for
+          everything else worth having on file. */}
+      {!loading && sweep.length > 0 && (
+        <div style={{ marginBottom:14 }}>
+          <div style={{ color:"#7a7a95", fontSize:11.5, letterSpacing:0.6, marginBottom:6 }}>ALSO WORTH GRABBING</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {sweep.map(s => (
+              <span key={s.id} style={{ background:"#12121a", border:"1px solid #1e1e2e", borderRadius:99,
+                                        padding:"5px 11px", color:"#9898b8", fontSize:12 }}>
+                {s.label}{s.kind !== "machine" ? " · 1 photo" : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div style={{ background: msg.kind === "warn" ? "rgba(255,157,92,0.1)" : "rgba(61,220,132,0.1)",
@@ -4573,9 +4597,20 @@ function GymSetup({ userId, programExercises, onBack, say }) {
 
       <button onClick={()=>shoot(front ? "side" : "front")} disabled={busy}
         style={{ width:"100%", background: busy ? "#2a2a3d" : accent, border:"none", borderRadius:14, color: busy ? "#9898b8" : "#000",
-                 padding:"16px", cursor: busy ? "default" : "pointer", fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, marginBottom:18 }}>
-        {busy ? "WORKING…" : front ? "NOW THE SIDE VIEW" : "PHOTOGRAPH A MACHINE"}
+                 padding:"16px", cursor: busy ? "default" : "pointer", fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5,
+                 marginBottom: front && !busy ? 8 : 18 }}>
+        {busy ? "WORKING…" : front ? "NOW THE SIDE VIEW" : "PHOTOGRAPH EQUIPMENT"}
       </button>
+
+      {/* The escape hatch for loose kit. Without it, every band and medicine ball costs a
+          second photo of nothing. */}
+      {front && !busy && (
+        <button onClick={()=>submit(null)}
+          style={{ width:"100%", background:"transparent", border:"1px solid #2a2a3d", borderRadius:14, color:"#9898b8",
+                   padding:"13px", cursor:"pointer", fontSize:13.5, marginBottom:18 }}>
+          One shot is enough — it's small kit
+        </button>
+      )}
 
       {loading ? (
         <div style={{ color:"#9898b8", fontSize:13 }}>Loading your gym…</div>
@@ -4586,7 +4621,7 @@ function GymSetup({ userId, programExercises, onBack, say }) {
       ) : (
         <>
           <div style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0", marginBottom:8 }}>
-            YOUR GYM · {gym.items.length} {gym.items.length === 1 ? "MACHINE" : "MACHINES"}
+            YOUR GYM · {gym.items.length} {gym.items.length === 1 ? "ITEM" : "ITEMS"}
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
             {gym.items.map(item => (

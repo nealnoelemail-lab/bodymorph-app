@@ -55,19 +55,60 @@ export const EQUIPMENT = {
   "lateral-raise-machine":{ label: "Lateral raise machine", area: "upper body" },
   "smith-machine":       { label: "Smith machine",          area: "free weights" },
   "glute-ham-bench":     { label: "Glute-ham / Nordic bench", area: "lower body" },
-  "step-box":            { label: "Step or plyo box",       area: "free weights" },
-  "resistance-band":     { label: "Resistance band",        area: "bodyweight" },
-  "chair":               { label: "Chair",                  area: "bodyweight" },
+  "step-box":            { label: "Step or plyo box",       area: "accessories", kind: "accessory" },
+  "resistance-band":     { label: "Resistance band",        area: "accessories", kind: "accessory" },
+  "chair":               { label: "Chair or box",           area: "accessories", kind: "accessory" },
   "treadmill":           { label: "Treadmill",              area: "cardio" },
   "stationary-bike":     { label: "Stationary bike",        area: "cardio" },
   "elliptical":          { label: "Elliptical",             area: "cardio" },
   "rower":               { label: "Rowing machine",         area: "cardio" },
   "stair-climber":       { label: "Stair climber",          area: "cardio" },
 
+
+  // ── Loose kit ─────────────────────────────────────────────────────────────
+  // Sizes matter here in a way they don't for machines: a 10 lb medicine ball and a
+  // 25 lb one are different tools, so these dedupe by label, not by type.
+  "kettlebell":          { label: "Kettlebell",             area: "accessories", kind: "accessory" },
+  "medicine-ball":       { label: "Medicine ball",          area: "accessories", kind: "accessory" },
+  "slam-ball":           { label: "Slam ball",              area: "accessories", kind: "accessory" },
+  "stability-ball":      { label: "Stability ball",         area: "accessories", kind: "accessory" },
+  "loop-band":           { label: "Loop / mini band",       area: "accessories", kind: "accessory" },
+  "climbing-rope":       { label: "Climbing rope",          area: "accessories", kind: "accessory" },
+  "battle-rope":         { label: "Battle ropes",           area: "accessories", kind: "accessory" },
+  "suspension-trainer":  { label: "Suspension trainer",     area: "accessories", kind: "accessory" },
+  "ab-wheel":            { label: "Ab wheel",               area: "accessories", kind: "accessory" },
+  "foam-roller":         { label: "Foam roller",            area: "accessories", kind: "accessory" },
+  "jump-rope":           { label: "Jump rope",              area: "accessories", kind: "accessory" },
+  "weight-vest":         { label: "Weight vest",            area: "accessories", kind: "accessory" },
+  "dip-belt":            { label: "Dip / pull-up belt",     area: "accessories", kind: "accessory" },
+  "ankle-weights":       { label: "Ankle weights",          area: "accessories", kind: "accessory" },
+  "trap-bar":            { label: "Trap / hex bar",         area: "free weights", kind: "accessory" },
+  "landmine":            { label: "Landmine",               area: "free weights" },
+  "sled":                { label: "Push / pull sled",       area: "free weights" },
+  "dumbbell-rack":       { label: "Dumbbell rack",          area: "free weights" },
+
+  // ── Cardio ────────────────────────────────────────────────────────────────
+  "spin-bike":           { label: "Spin bike",              area: "cardio" },
+  "air-bike":            { label: "Air / fan bike",         area: "cardio" },
+  "ski-erg":             { label: "Ski erg",                area: "cardio" },
+
+  // ── Cable and pulldown attachments ────────────────────────────────────────
+  // These are ADVISORY, never required — see EXERCISE_ATTACHMENT below. They exist so
+  // the tile can say "use the wide bar", which is the difference between a client
+  // doing the prescribed exercise and doing something adjacent to it.
+  "wide-lat-bar":        { label: "Wide-grip lat bar",      area: "attachments", kind: "attachment" },
+  "narrow-lat-bar":      { label: "Narrow-grip bar",        area: "attachments", kind: "attachment" },
+  "v-handle":            { label: "V-handle / neutral grip", area: "attachments", kind: "attachment" },
+  "straight-cable-bar":  { label: "Straight cable bar",     area: "attachments", kind: "attachment" },
+  "ez-cable-bar":        { label: "EZ cable bar",           area: "attachments", kind: "attachment" },
+  "rope-attachment":     { label: "Rope attachment",        area: "attachments", kind: "attachment" },
+  "single-handle":       { label: "Single D-handle",        area: "attachments", kind: "attachment" },
+  "ankle-strap":         { label: "Ankle strap",            area: "attachments", kind: "attachment" },
+
   // Bodyweight
   "pull-up-bar":         { label: "Pull-up bar",           area: "bodyweight" },
   "dip-station":         { label: "Dip station",           area: "bodyweight" },
-  "bodyweight":          { label: "No equipment",          area: "bodyweight" },
+  "bodyweight":          { label: "No equipment needed",    area: "bodyweight", kind: "none" },
 };
 
 // What each exercise needs. The FIRST entry is the one whose photo gets shown on the
@@ -475,6 +516,19 @@ export function classifyCapture(profile, identified) {
 
   if (!existing.length) return { action: "add" };
 
+  // Loose kit dedupes by DESCRIPTION, not by type. One leg press is enough, but a 10 lb
+  // medicine ball and a 25 lb one are two different tools, and a wide lat bar is not a
+  // spare copy of the narrow one — so anything the vision pass describes differently
+  // earns its own entry. Matching still runs on the base id, so the extras can only ever
+  // add detail to a tile; they can never split the gym's capability.
+  if (isAccessory(base)) {
+    const seen = (it) => descKey(it.label);
+    const key = descKey(identified.detail ? `${identified.label} ${identified.detail}` : identified.label);
+    return existing.some((it) => seen(it) === key)
+      ? { action: "skip", have: existing[0] }
+      : { action: "variant", base };
+  }
+
   // The vision pass marks a machine as a distinct variant when it differs in kind
   // rather than in make — that's the only thing that earns a second entry.
   if (identified.variant) {
@@ -484,11 +538,14 @@ export function classifyCapture(profile, identified) {
   return { action: "skip", have: existing[0] };
 }
 
+// "10 lb Medicine Ball" and "medicine ball, 10lb" are the same thing photographed twice.
+const descKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 // What the coach says out loud. Short, because it's spoken mid-walk around a gym.
 export function captureLine(result, label) {
   if (result.action === "add")     return `${label} — got it.`;
-  if (result.action === "variant") return `Different kind of ${label.toLowerCase()} — worth having. Got it.`;
-  return `Already got a ${label.toLowerCase()}. Skip to the next one.`;
+  if (result.action === "variant") return `${label} — that's a different one. Got it.`;
+  return `Already got that one. Skip to the next.`;
 }
 
 // Which equipment the client's PROGRAM actually needs — so setup can be prioritised,
@@ -513,4 +570,120 @@ export function setupProgress(profile, exercises) {
   // exercises carry no equipment tags produces an empty need set, and "0 of 0 missing"
   // would announce the gym was fully covered before a single photo was taken.
   return { need: need.size, covered: covered.length, missing, ready: need.size > 0 && missing.length === 0, untagged: need.size === 0 };
+}
+
+// ── Which handle to clip on ─────────────────────────────────────────────────────
+// Neal: "you have a narrow grip pull down bar, wide grip pull down bar... so it becomes
+// pretty specific as to what you're doing with that particular exercise."
+//
+// ADVISORY ON PURPOSE. These are deliberately NOT part of EXERCISE_EQUIPMENT, because a
+// requirement is a gate: a client who photographed the pulldown tower but never thought
+// to photograph the bar hanging on it would get an UNAVAILABLE row for an exercise they
+// can plainly do. So an attachment shows on the tile and shapes the cue, and nothing
+// here can ever make an exercise disappear.
+//
+// The first entry is what we suggest; the rest are fine too, and matter for the client
+// who walks over and finds the wide bar already taken.
+export const EXERCISE_ATTACHMENT = {
+  "Lat Pulldown":                   ["wide-lat-bar", "narrow-lat-bar"],
+  "Wide-Grip Lat Pulldown":         ["wide-lat-bar"],
+  "Neutral-Grip Pulldown":          ["v-handle", "narrow-lat-bar"],
+  "Incline Bench Lat Pulldown":     ["wide-lat-bar"],
+  "Straight-Arm Pulldown":          ["straight-cable-bar", "rope-attachment"],
+  "Straight-Arm Cable Pullover":    ["straight-cable-bar", "rope-attachment"],
+  "Cable Pullover":                 ["rope-attachment", "straight-cable-bar"],
+  "Seated Cable Row":               ["v-handle", "straight-cable-bar"],
+  "Seated Wide-Grip Row":           ["wide-lat-bar", "straight-cable-bar"],
+  "Single-Arm Cable Row":           ["single-handle"],
+  "Cable Upright Row":              ["straight-cable-bar", "ez-cable-bar"],
+
+  "Cable Flyes":                    ["single-handle"],
+  "Cable Fly":                      ["single-handle"],
+  "Low-to-High Cable Fly":          ["single-handle"],
+  "Cable Crossover":                ["single-handle"],
+  "Cable Crossover (high)":         ["single-handle"],
+  "Cable Crossover (low)":          ["single-handle"],
+  "Rear-Delt Cable Fly":            ["single-handle"],
+  "Cable Lateral Raise":            ["single-handle"],
+  "Leaning Cable Lateral Raise":    ["single-handle"],
+  "Face Pull":                      ["rope-attachment"],
+
+  "Cable Curl":                     ["ez-cable-bar", "straight-cable-bar"],
+  "Cable Curl superset with Triceps Dips": ["ez-cable-bar"],
+  "Rope Triceps Pushdown":          ["rope-attachment"],
+  "Rope Pushdown":                  ["rope-attachment"],
+  "Cable Tricep Pushdown":          ["straight-cable-bar", "rope-attachment"],
+  "Overhead Cable Triceps Extension": ["rope-attachment"],
+  "Overhead Cable Extension":       ["rope-attachment"],
+  "Cable Overhead Extension":       ["rope-attachment"],
+  "Concentration Curl superset with Rope Pushdown": ["rope-attachment"],
+  "Spider Curl superset with Kickbacks": ["rope-attachment"],
+
+  "Cable Abduction":                ["ankle-strap"],
+  "Cable Hip Abduction":            ["ankle-strap"],
+  "Cable Glute Kickback":           ["ankle-strap"],
+  "Cable Kickback":                 ["ankle-strap"],
+
+  "Kneeling Rope Crunch":           ["rope-attachment"],
+  "Cable Crunches":                 ["rope-attachment"],
+  "Cable Woodchop":                 ["rope-attachment", "single-handle"],
+  "Cable Woodchopper":              ["rope-attachment", "single-handle"],
+};
+
+export const attachmentFor = (exercise) =>
+  EXERCISE_ATTACHMENT[exercise] || EXERCISE_ATTACHMENT[normalizeExercise(exercise)] || [];
+
+// What kind of thing an id is. Machines get the two-angle treatment; accessories are
+// one photo, because a resistance band has no meaningful side view.
+export const kindOf = (id) => (EQUIPMENT[baseId(id)] || {}).kind || "machine";
+export const isAccessory = (id) => kindOf(id) !== "machine";
+
+// Push-ups are push-ups. An exercise that needs nothing says so, rather than showing a
+// blank tile that reads as a missing photo.
+export const needsNoEquipment = (exercise) => {
+  const need = equipmentFor(exercise);
+  return need.length === 1 && need[0] === "bodyweight";
+};
+
+// What the tile shows for one exercise, against one gym.
+//   { none: true }                     — no equipment required, say so
+//   { equip, item, attachment, note }  — the thing to walk up to, their photo of it if
+//                                        they have one, and the handle to clip on
+export function tileFor(exercise, profile) {
+  if (needsNoEquipment(exercise)) return { none: true, label: "No equipment needed" };
+  const id = tileEquipment(exercise);
+  if (!id) return { none: false, unknown: true };
+  const items = (profile && profile.items) || [];
+  const item = items.find((it) => baseId(it.id) === id) || null;
+  const att = attachmentFor(exercise);
+  const attItem = att.length ? items.find((it) => att.includes(baseId(it.id))) || null : null;
+  return {
+    none: false,
+    equip: id,
+    label: (EQUIPMENT[id] || {}).label || id,
+    item,                                        // their own photo, if they took one
+    attachment: att[0] || null,
+    attachmentLabel: att.length ? (EQUIPMENT[att[0]] || {}).label || att[0] : null,
+    attachmentItem: attItem,
+  };
+}
+
+// ── What's still worth photographing ────────────────────────────────────────────
+// Readiness is measured against their program, but Neal wants the sweep wider than
+// that: "as much of the equipment they can take pictures of." This is the nudge list —
+// common gym kit they haven't captured yet, program or no program. Ordered so the
+// things that change a prescription come before the things that are merely nice.
+const SWEEP = [
+  "dumbbell-rack", "barbell", "adjustable-bench", "squat-rack", "cable-crossover",
+  "lat-pulldown", "leg-press", "smith-machine",
+  "wide-lat-bar", "narrow-lat-bar", "v-handle", "rope-attachment", "single-handle", "ankle-strap",
+  "kettlebell", "medicine-ball", "resistance-band", "loop-band", "step-box",
+  "suspension-trainer", "battle-rope", "climbing-rope", "ab-wheel", "trap-bar", "sled",
+  "treadmill", "spin-bike", "air-bike", "rower", "elliptical", "stair-climber", "ski-erg",
+];
+
+export function sweepSuggestions(profile, limit = 6) {
+  const have = ownedSet(profile);
+  return SWEEP.filter((id) => !have.has(id)).slice(0, limit)
+    .map((id) => ({ id, label: (EQUIPMENT[id] || {}).label || id, kind: kindOf(id) }));
 }
