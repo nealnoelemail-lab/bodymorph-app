@@ -10,6 +10,7 @@
 // the model's tool calls into the app's existing actions.
 import { registerPlugin, Capacitor } from "@capacitor/core";
 import { openaiRealtimeToken } from "./aiproxy";
+import { recordTurn, flush as flushCost } from "./voicecost";
 
 const RealtimeVoice = registerPlugin("RealtimeVoice");
 const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { return false; } })();
@@ -125,7 +126,8 @@ function runTool(name, args, h) {
 // the persona is identical to the shipped coach. Returns {ok} or throws.
 const rtLog = (m) => { try { console.log(`[RT] ${m}`); } catch { /* no console */ } };
 
-export async function startRealtimeCoach({ instructions, voice, model, handlers = {}, onEvent } = {}) {
+export async function startRealtimeCoach({ instructions, voice, model, userId, handlers = {}, onEvent } = {}) {
+  const sessionId = `rt_${Date.now().toString(36)}`;
   rtLog(`start: native=${IS_NATIVE} promptChars=${(instructions || "").length} voice=${openaiVoice(voice)} (asked for ${voice || "none"})`);
   if (!IS_NATIVE) throw new Error("The speech-to-speech coach runs on the phone app only.");
 
@@ -181,7 +183,17 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
   listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => { rtLog(`coach: ${e.text}`); onEvent && onEvent({ type: "coach", text: e.text }); }));
   listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => { rtLog(`you: ${e.text}`); onEvent && onEvent({ type: "user", text: e.text }); }));
   listeners.push(RealtimeVoice.addListener("rtUserSpeaking", () => onEvent && onEvent({ type: "listening" })));
-  listeners.push(RealtimeVoice.addListener("rtTurnDone", () => onEvent && onEvent({ type: "idle" })));
+  listeners.push(RealtimeVoice.addListener("rtTurnDone", async (e) => {
+    // Meter every turn from the API's own numbers.
+    try {
+      const usage = e.usage ? JSON.parse(e.usage) : null;
+      if (usage) {
+        const priced = await recordTurn({ usage, sessionId, userId });
+        if (priced) rtLog(`turn cost $${priced.cost.toFixed(4)} (audio out $${priced.breakdown.audioOut.toFixed(4)})`);
+      }
+    } catch (err) { rtLog(`cost meter: ${err.message}`); }
+    onEvent && onEvent({ type: "idle" });
+  }));
   listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
@@ -197,6 +209,7 @@ export async function startRealtimeCoach({ instructions, voice, model, handlers 
 }
 
 export async function stopRealtimeCoach() {
+  await flushCost();          // don't lose the last turns of a session
   await clearListeners();
   try { await RealtimeVoice.stop(); } catch { /* not running */ }
 }

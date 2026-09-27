@@ -4378,7 +4378,7 @@ function loadCoachSummaries() {
 }
 
 // ── VOICE AI COACH ────────────────────────────────────────────────────────────
-function VoiceCoach({ profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onStretchProgress, voiceId, stretchSession, coachCues }) {
+function VoiceCoach({ userId, profile, day, logs, onLogSet, onRemoveSet, onClose, videoOverrides, onState, companion, companionData, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onStretchProgress, voiceId, stretchSession, coachCues }) {
   const [vs, setVs]           = useState("idle");
   const [armed, setArmed]     = useState(false); // mic permission granted + session started
   const [lastUser, setLastUser] = useState("");
@@ -5281,6 +5281,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
       await startRealtimeCoach({
         instructions: buildSysPrompt(),
         voice: voiceId || undefined,
+        userId,
         handlers: { onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo },
         onEvent: (e) => {
           if (closedRef.current) return;
@@ -13671,6 +13672,7 @@ export default function BodyMorph() {
       onCheckTodo={checkTodo}
       onStretchProgress={stretchSession ? (i) => stretchProgressUpdate(stretchSession.name, i) : undefined}
       voiceId={coachVoice?.id}
+      userId={user?.id}
       videoOverrides={videoOverrides}
       onState={setVoiceState}
       onClose={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }}

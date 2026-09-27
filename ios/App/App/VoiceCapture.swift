@@ -1058,7 +1058,16 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             ])
 
         case "response.done":
-            notifyListeners("rtTurnDone", data: [:])
+            // Every turn reports exactly what it consumed. Forward it verbatim rather
+            // than estimating from wall-clock — this is the billing ground truth.
+            var usageJSON = ""
+            if let resp = obj["response"] as? [String: Any],
+               let usage = resp["usage"],
+               let d = try? JSONSerialization.data(withJSONObject: usage),
+               let str = String(data: d, encoding: .utf8) {
+                usageJSON = str
+            }
+            notifyListeners("rtTurnDone", data: ["usage": usageJSON])
 
         case "error":
             let e = (obj["error"] as? [String: Any])?["message"] as? String ?? "unknown"
