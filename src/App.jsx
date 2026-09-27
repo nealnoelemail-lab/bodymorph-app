@@ -1876,7 +1876,7 @@ function buildCalisthenicsProgram(profile) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── THE BLACK PANTHER — 90-DAY HIGH-VOLUME AESTHETIC PROGRAM ────────────────
+// ── BLACK PANTHER — 90-DAY HIGH-VOLUME AESTHETIC PROGRAM ────────────────
 // Neal's spec (artifact 552bbcac). Five-day body-part split, constant across all
 // three phases: Chest / Back / Legs / Shoulders / Arms. The SPLIT never changes —
 // progression comes from sets, reps, and a fresh exercise rotation each phase.
@@ -2502,7 +2502,7 @@ function BPInfo({ onClose }) {
     <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", overflowY:"auto", maxWidth:480, margin:"0 auto", paddingBottom:"calc(env(safe-area-inset-bottom) + 30px)" }}>
       <style>{GLOBAL_CSS}</style>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"calc(env(safe-area-inset-top) + 14px) 18px 12px", position:"sticky", top:0, background:"#0a0a0f", borderBottom:"1px solid #1a1a26" }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>THE BLACK PANTHER</div>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>BLACK PANTHER</div>
         <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:"50%", width:34, height:34, color:"#c8c8e0", fontSize:16, cursor:"pointer" }}>&#10005;</button>
       </div>
 
@@ -2838,7 +2838,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, 
     () => true,             // store + allergies optional
   ];
 
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","The Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = p.gender === "Female" ? femaleFocuses : maleFocuses;
 
@@ -3330,7 +3330,7 @@ function Loading({ name }) {
 // ── HOME ──────────────────────────────────────────────────────────────────────
 // Clean landing: greeting, program summary, then the Mon-Fri week to pick from.
 function ChangeProgram({ profile, onSave, onBack }) {
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","The Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = profile.gender === "Female" ? femaleFocuses : maleFocuses;
   const [focus, setFocus] = useState(profile.focus || "Full Body");
@@ -13680,7 +13680,7 @@ export default function BodyMorph() {
     if (focus.includes("HFT")) {
       updated.hftStartDate = ymdLocal();
     }
-    // Starting the Black Panther fresh resets its 90-day clock to today
+    // Starting Black Panther fresh resets its 90-day clock to today
     if (focus.includes("Black Panther")) {
       updated.bpStartDate = ymdLocal();
     }
