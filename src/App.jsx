@@ -1897,7 +1897,7 @@ function getBPPhase(bpStartDate) {
 
 function getBPPhaseInfo(phase) {
   return [
-    { num:1, name:"Re-entry",    weeks:"Weeks 1–4",   days:5, focus:"4 sets × 12–15. Wake everything up. Moderate load, continuous tension — let the joints catch up.", color:"#3d8eff" },
+    { num:1, name:"Re-entry",    weeks:"Weeks 1–4",   days:5, focus:"3–4 sets × 12–15. Wake everything up without burying yourself. Moderate load, continuous tension — let the joints catch up.", color:"#3d8eff" },
     { num:2, name:"Pump",        weeks:"Weeks 5–9",   days:5, focus:"6 sets × 15–20. Full high-volume pump training, short rest, fresh exercise rotation.", color:"#9b5de5" },
     { num:3, name:"Peak Volume", weeks:"Weeks 10–13", days:5, focus:"7–8 sets × 15–20. Highest volume of these 90 days, another rotation. Chase the pump.", color:"#e8ff00" },
   ][phase - 1];
@@ -2055,9 +2055,20 @@ function buildBPProgram(profile) {
   const reps  = phase === 1 ? "12-15" : "15-20";
 
   return BP_SESSIONS.map((group, i) => {
-    const sets = phase === 1 ? "4" : phase === 2 ? "6" : (BP_PRIORITY.includes(group) ? "8" : "7");
     const label = BP_DAY_LABELS[i];
-    const block = (BP_EX[`p${phase}${group}`] || []).map(ex => ({ ...ex, sets, reps }));
+    // Sets per exercise. Stage 1 ramps 4/4/3/3/3 rather than a flat 4 — Neal:
+    // "make sure we're starting reasonably... that way there's no early burnout,
+    // you get demotivated and give it up because you just can't do it."
+    //
+    // The two compounds that open each day carry the volume; the accessories ease in.
+    // 17 working sets instead of 20 — enough to feel like training, not enough to
+    // bury someone in week one, which is when quitting actually happens.
+    const setsFor = (idx) => {
+      if (phase === 1) return idx < 2 ? "4" : "3";
+      if (phase === 2) return "6";
+      return BP_PRIORITY.includes(group) ? "8" : "7";
+    };
+    const block = (BP_EX[`p${phase}${group}`] || []).map((ex, idx) => ({ ...ex, sets: setsFor(idx), reps }));
     // Core rides along on Chest, Legs and Arms — three times a week, not five.
     const core = (i === 0 || i === 2 || i === 4) ? BP_CORE : [];
     return {
