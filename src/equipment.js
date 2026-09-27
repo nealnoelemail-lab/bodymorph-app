@@ -298,5 +298,8 @@ export function setupProgress(profile, exercises) {
   const reach = expand(have);
   const covered = [...need].filter((id) => reach.has(id));
   const missing = [...need].filter((id) => !reach.has(id));
-  return { need: need.size, covered: covered.length, missing, ready: missing.length === 0 };
+  // `ready` needs something to have been required in the first place. A program whose
+  // exercises carry no equipment tags produces an empty need set, and "0 of 0 missing"
+  // would announce the gym was fully covered before a single photo was taken.
+  return { need: need.size, covered: covered.length, missing, ready: need.size > 0 && missing.length === 0, untagged: need.size === 0 };
 }

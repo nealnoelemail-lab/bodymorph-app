@@ -4,6 +4,8 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { startRealtimeCoach, stopRealtimeCoach } from "./realtime";
+import { EQUIPMENT, setupProgress, resolveExercise, tileEquipment } from "./equipment";
+import { loadGym, captureMachine, forgetMachine, gymPhotoUrl } from "./gymsetup";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode, startAuthKeepAlive } from "./aiproxy";
 import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
 import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, generateInvite, fetchMyInvite, fetchRoster, fetchClientDetail, generateClientSummary, fetchClientSummary, saveClientSummary, parseSummary,
@@ -4460,14 +4462,174 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
   );
 }
 
+// ── GYM SETUP SCREEN ────────────────────────────────────────────────────────────
+// Walk the gym, two photos per machine, coach narrating if the voice coach is on.
+// Works silently too — narration is a bonus, never a requirement.
+function GymSetup({ userId, programExercises, onBack, say }) {
+  const [gym, setGym] = useState({ items: [] });
+  const [loading, setLoading] = useState(true);
+  const [front, setFront] = useState(null);      // dataURL of the front shot
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);          // { kind, text }
+  const frontRef = useRef();
+  const sideRef = useRef();
+
+  useEffect(() => {
+    let on = true;
+    loadGym(userId).then(g => { if (on) { setGym(g); setLoading(false); } });
+    return () => { on = false; };
+  }, [userId]);
+
+  const progress = setupProgress(gym, programExercises || []);
+
+  const shoot = (which) => (which === "front" ? frontRef : sideRef).current?.click();
+
+  const onFront = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    setFront(await mealPhotoDataUrl(f));
+    setMsg({ kind: "step", text: "Now step to the side and take the second shot." });
+    try { say && say("Good. Now step to the side and take one more."); } catch {}
+  };
+
+  const onSide = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f || !front) return;
+    const sideUrl = await mealPhotoDataUrl(f);
+    setBusy(true); setMsg({ kind: "step", text: "Looking at it…" });
+    try {
+      const r = await captureMachine({ userId, gym, frontDataUrl: front, sideDataUrl: sideUrl, say });
+      if (r.item) setGym(g => ({ items: [...g.items, r.item] }));
+      setMsg({ kind: r.action === "unclear" || r.action === "error" ? "warn" : "ok", text: r.line });
+    } catch (err) {
+      setMsg({ kind: "warn", text: err.message || "Something went wrong — try that one again." });
+      try { say && say("Didn't catch that one. Try again."); } catch {}
+    }
+    setFront(null);
+    setBusy(false);
+  };
+
+  const remove = async (item) => {
+    if (!(await forgetMachine(userId, item.equip_id))) return;
+    setGym(g => ({ items: g.items.filter(x => x.equip_id !== item.equip_id) }));
+  };
+
+  const accent = "#e8ff00";
+  return (
+    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
+      <style>{GLOBAL_CSS}</style><WatermarkPlain />
+      <input ref={frontRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={onFront} />
+      <input ref={sideRef}  type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={onSide} />
+
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 0 8px" }}>
+        <BackBtn onClick={onBack} />
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>GYM SETUP</div>
+      </div>
+
+      {/* Readiness measured against THEIR program, not against the building. Nobody
+          finishes "photograph the whole gym"; everybody can finish "what Monday needs". */}
+      <div style={{ background:"#12121a", border:"1px solid #1e1e2e", borderRadius:12, padding:"13px 15px", marginBottom:14 }}>
+        {progress.untagged ? (
+          <div style={{ color:"#9898b8", fontSize:13.5, lineHeight:1.5 }}>
+            Photograph whatever you use. Your current program doesn't call for specific machines,
+            but anything you save here carries over when you switch to one that does.
+          </div>
+        ) : progress.ready ? (
+          <div style={{ color:"#3ddc84", fontSize:14, fontWeight:700 }}>
+            ✓ Your gym covers everything your program needs.
+          </div>
+        ) : (
+          <>
+            <div style={{ color:"#f0f0f8", fontSize:14, fontWeight:600, marginBottom:6 }}>
+              {progress.covered} of {progress.need} things your program needs
+            </div>
+            <div style={{ background:"#1e1e2e", borderRadius:99, height:6, overflow:"hidden", marginBottom:8 }}>
+              <div style={{ width: (progress.need ? Math.round(progress.covered / progress.need * 100) : 0) + "%", height:"100%", background:accent }} />
+            </div>
+            <div style={{ color:"#9898b8", fontSize:12, lineHeight:1.5 }}>
+              Still to find: {progress.missing.slice(0, 5).map(id => (EQUIPMENT[id] || {}).label || id).join(", ")}
+              {progress.missing.length > 5 ? ` +${progress.missing.length - 5} more` : ""}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{ color:"#9898b8", fontSize:13, lineHeight:1.6, marginBottom:14 }}>
+        Walk up to a machine and take two shots — one from the front, one from the side. The side view
+        is what tells a seated row from a chest-supported row. You don't need the whole gym: anything
+        missing gets swapped for something you do have.
+      </div>
+
+      {msg && (
+        <div style={{ background: msg.kind === "warn" ? "rgba(255,157,92,0.1)" : "rgba(61,220,132,0.1)",
+                      border: `1px solid ${msg.kind === "warn" ? "#ff9d5c" : "#3ddc84"}`,
+                      borderRadius:12, padding:"11px 14px", marginBottom:14,
+                      color: msg.kind === "warn" ? "#ff9d5c" : "#3ddc84", fontSize:13.5, lineHeight:1.45 }}>
+          {msg.text}
+        </div>
+      )}
+
+      <button onClick={()=>shoot(front ? "side" : "front")} disabled={busy}
+        style={{ width:"100%", background: busy ? "#2a2a3d" : accent, border:"none", borderRadius:14, color: busy ? "#9898b8" : "#000",
+                 padding:"16px", cursor: busy ? "default" : "pointer", fontFamily:"'Bebas Neue'", fontSize:24, letterSpacing:1.5, marginBottom:18 }}>
+        {busy ? "WORKING…" : front ? "NOW THE SIDE VIEW" : "PHOTOGRAPH A MACHINE"}
+      </button>
+
+      {loading ? (
+        <div style={{ color:"#9898b8", fontSize:13 }}>Loading your gym…</div>
+      ) : gym.items.length === 0 ? (
+        <div style={{ color:"#7a7a95", fontSize:13, textAlign:"center", padding:"20px 0" }}>
+          Nothing saved yet. Start with whatever is nearest.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontFamily:"'Bebas Neue'", fontSize:17, letterSpacing:1.2, color:"#dcdcf0", marginBottom:8 }}>
+            YOUR GYM · {gym.items.length} {gym.items.length === 1 ? "MACHINE" : "MACHINES"}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+            {gym.items.map(item => (
+              <div key={item.equip_id} style={{ display:"flex", alignItems:"center", gap:11, background:"#12121a", border:"1px solid #1e1e2e", borderRadius:12, padding:"9px 12px" }}>
+                <EquipThumb path={item.photo_front} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ color:"#f0f0f8", fontSize:14, fontWeight:600, lineHeight:1.25 }}>{item.label}</div>
+                  {item.confidence === "medium" && (
+                    <div style={{ color:"#ff9d5c", fontSize:11.5, marginTop:2 }}>Fairly sure — tap ✕ if that's wrong</div>
+                  )}
+                </div>
+                <button onClick={()=>remove(item)} aria-label={`Remove ${item.label}`}
+                  style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:14, color:"#9898b8", padding:"5px 10px", cursor:"pointer", fontSize:12, flexShrink:0 }}>&#10005;</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// A machine's photo, resolved from its private Storage path.
+function EquipThumb({ path, size = 46 }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => { let on = true; gymPhotoUrl(path).then(u => { if (on) setSrc(u); }); return () => { on = false; }; }, [path]);
+  return (
+    <div style={{ width:size, height:size, borderRadius:9, background:"#1e1e2e", flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      {src ? <img src={src} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+           : <span style={{ fontSize:17, opacity:0.45 }}>🏋️</span>}
+    </div>
+  );
+}
+
 // ── MENU PAGE ─────────────────────────────────────────────────────────────────
 // Full-page list of every action, reached from the dashboard's MENU button.
-function MenuPage({ profile, onBack, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary, onMessages, unreadMsgs }) {
+function MenuPage({ profile, onBack, onGymSetup, onCalendar, onTrainingWeek, onCardio, onStretch, onNutrition, onSupplements, onPeptides, onProgress, onProgramSummary, onMessages, unreadMsgs }) {
   const accent = (profile && profile.gender === "Female") ? APP_PINK : "#e8ff00";
   const items = [
     ...(onMessages ? [[`MESSAGES${unreadMsgs ? ` (${unreadMsgs} NEW)` : ""}`, <MsgIcon size={22} color={unreadMsgs ? accent : "#f0f0f8"} />, unreadMsgs ? accent : "#f0f0f8", onMessages]] : []),
     ["TO DO DAILY",        <IconToDo color="#3ddc84" />,    "#3ddc84", onCalendar],
     ["TRAINING",           <IconTraining color={accent} />, accent,    onTrainingWeek],
+    ...(onGymSetup ? [["MY GYM EQUIPMENT", <IconTraining color="#f0f0f8" />, "#f0f0f8", onGymSetup]] : []),
     ["CARDIO",             <IconCardio />,                  "#f0f0f8", onCardio],
     ["STRETCH",            <IconStretch />,                 "#f0f0f8", onStretch],
     ["NUTRITION",          <IconNutrition />,               "#f0f0f8", onNutrition],
@@ -14080,7 +14242,7 @@ export default function BodyMorph() {
     </>
   );
 
-  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={navBack} onCalendar={()=>navTo("calendar")} onTrainingWeek={()=>navTo("trainingweek")} onCardio={()=>navTo("cardio")} onStretch={()=>navTo("stretch")} onNutrition={()=>navTo("nutrition")} onSupplements={()=>navTo("supplements")} onPeptides={()=>navTo("peptides")} onProgress={()=>navTo("progress")} onProgramSummary={()=>navTo("programsummary")} onMessages={myCoach ? ()=>navTo("chat") : null} unreadMsgs={unreadMsgs} /></>);
+  if (phase === "menu") return (<><Toast /><MenuPage profile={profile} onBack={navBack} onGymSetup={(profile?.focus || "").includes("No Gym") ? null : ()=>navTo("gymsetup")} onCalendar={()=>navTo("calendar")} onTrainingWeek={()=>navTo("trainingweek")} onCardio={()=>navTo("cardio")} onStretch={()=>navTo("stretch")} onNutrition={()=>navTo("nutrition")} onSupplements={()=>navTo("supplements")} onPeptides={()=>navTo("peptides")} onProgress={()=>navTo("progress")} onProgramSummary={()=>navTo("programsummary")} onMessages={myCoach ? ()=>navTo("chat") : null} unreadMsgs={unreadMsgs} /></>);
   if (phase === "chat") return (
     <><Toast />
       <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
@@ -14120,6 +14282,7 @@ export default function BodyMorph() {
   if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={navBack} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={navBack} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={navBack} /></>);
+  if (phase === "gymsetup") return (<><Toast /><GymSetup userId={user?.id} programExercises={((program && program.weeklySchedule) || []).flatMap(d => (d.workout || []).map(e => e.exercise))} onBack={navBack} /></>);
   if (phase === "supplements") return (<><Toast /><Regimen kind="supplement" catalog={SUPPLEMENTS} entries={supplements} onSave={saveSupplement} onBack={navBack} /></>);
   if (phase === "peptides")  return (<><Toast /><Regimen kind="peptide" catalog={PEPTIDES} caution={PEPTIDE_CAUTION} entries={peptides} onSave={savePeptide} onBack={navBack} /></>);
   if (phase === "calendar")  return (<><Toast /><DailyCalendar program={program} supplements={supplements} peptides={peptides} meals={meals} cardioPlan={cardioPlan} foodLog={foodLog} dietPref={dietPref} onBack={navBack} checked={todoChecked} onToggle={toggleTodo} /></>);
