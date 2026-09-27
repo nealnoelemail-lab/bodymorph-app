@@ -1876,6 +1876,195 @@ function buildCalisthenicsProgram(profile) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── THE BLACK PANTHER — 90-DAY HIGH-VOLUME AESTHETIC PROGRAM ────────────────
+// Neal's spec (artifact 552bbcac). Five-day body-part split, constant across all
+// three phases: Chest / Back / Legs / Shoulders / Arms. The SPLIT never changes —
+// progression comes from sets, reps, and a fresh exercise rotation each phase.
+//
+// Design intent from the spec: an advanced lifter returning after time off. Phase 1
+// is a deliberate re-entry ramp so tendons and joints catch up with muscle memory,
+// which comes back faster than connective tissue does.
+//
+// Goal is aesthetic — lean, defined, symmetrical — NOT strength. Hence moderate
+// load, strict form, short rest, and never training to failure.
+function getBPPhase(bpStartDate) {
+  if (!bpStartDate) return 1;
+  const days = Math.floor((new Date() - new Date(bpStartDate)) / 86400000);
+  if (days < 28) return 1;   // weeks 1–4
+  if (days < 63) return 2;   // weeks 5–9
+  return 3;                  // weeks 10–13, and holds there after day 90
+}
+
+function getBPPhaseInfo(phase) {
+  return [
+    { num:1, name:"Re-entry",    weeks:"Weeks 1–4",   days:5, focus:"4 sets × 12–15. Wake everything up. Moderate load, strict form — let the joints catch up.", color:"#3d8eff" },
+    { num:2, name:"Pump",        weeks:"Weeks 5–9",   days:5, focus:"6 sets × 15–20. Full high-volume pump training, short rest, fresh exercise rotation.", color:"#9b5de5" },
+    { num:3, name:"Peak Volume", weeks:"Weeks 10–13", days:5, focus:"7–8 sets × 15–20. Highest volume of the program, another rotation. Chase the pump.", color:"#e8ff00" },
+  ][phase - 1];
+}
+
+// Sets/reps are phase-wide, so they're stamped on below rather than repeated 75 times.
+// Priority groups in Phase 3 get the extra set: chest, back and shoulders, because
+// those are what build the V-taper the program is aiming at.
+const BP_EX = {
+  // ── PHASE 1 — Re-entry (4 × 12–15) ──
+  p1Chest: [
+    { exercise:"Flat Barbell Bench Press", rest:"60s", tempo:"3-1-2", coachCue:"Shoulder blades pinned back, bar to the lower chest, press without locking out — keep tension on the pecs." },
+    { exercise:"Incline Dumbbell Press",   rest:"60s", tempo:"3-1-2", coachCue:"Bench at 30 degrees. Lower until you feel the stretch across the upper chest, then drive up." },
+    { exercise:"Machine Chest Press",      rest:"45s", tempo:"2-1-2", coachCue:"Let the machine hold the path so you can just think about squeezing the chest." },
+    { exercise:"Cable Flyes",              rest:"45s", tempo:"3-1-2", coachCue:"Slight bend in the elbows the whole way. Hug the arms together and squeeze one second at the middle." },
+    { exercise:"Push-Ups",                 rest:"45s", tempo:"2-1-2", coachCue:"Finish the chest off. Slow on the way down, full range, stop a couple of reps short of failure." },
+  ],
+  p1Back: [
+    { exercise:"Lat Pulldown",             rest:"60s", tempo:"3-1-2", coachCue:"Lead with the elbows, pull to the upper chest, and hold the squeeze before letting it rise." },
+    { exercise:"Seated Cable Row",         rest:"60s", tempo:"3-1-2", coachCue:"Torso still — no rocking. Pull to the belly and pinch the shoulder blades together." },
+    { exercise:"Bent-Over Barbell Row",    rest:"60s", tempo:"3-1-1", coachCue:"Hinge to about 45 degrees, flat back, pull the bar into the lower ribs." },
+    { exercise:"Single-Arm Dumbbell Row",  rest:"45s", tempo:"3-1-2", coachCue:"Drive the elbow back past your hip and let the lat do the work, not the arm." },
+    { exercise:"Straight-Arm Pulldown",    rest:"45s", tempo:"2-1-2", coachCue:"Arms locked straight. Sweep the bar to your thighs and feel the lats stretch on the way back." },
+  ],
+  p1Legs: [
+    { exercise:"Leg Press",                rest:"60s", tempo:"3-1-2", coachCue:"Feet shoulder-width, lower until the knees reach 90, and never let the lower back round off the pad." },
+    { exercise:"Leg Extension",            rest:"45s", tempo:"2-1-3", coachCue:"Lock out at the top and hold one second. The squeeze is the whole point here." },
+    { exercise:"Lying Leg Curl",           rest:"45s", tempo:"2-1-3", coachCue:"Hips down on the pad. Curl all the way and lower slowly — the negative builds the hamstring." },
+    { exercise:"Walking Lunges",           rest:"60s", tempo:"2-1-2", coachCue:"Long stride, back knee toward the floor, push through the front heel to stand." },
+    { exercise:"Standing Calf Raise",      rest:"45s", tempo:"2-2-2", coachCue:"Full stretch at the bottom, all the way up onto the toes, pause at both ends." },
+  ],
+  p1Shoulders: [
+    { exercise:"Seated Dumbbell Shoulder Press", rest:"60s", tempo:"3-1-2", coachCue:"Back flat against the pad, press up without clanging the dumbbells together." },
+    { exercise:"Dumbbell Lateral Raise",   rest:"45s", tempo:"2-1-3", coachCue:"Lead with the elbows, stop at shoulder height, lower slowly. Light weight — this is the width builder." },
+    { exercise:"Rear-Delt Cable Fly",      rest:"45s", tempo:"2-1-2", coachCue:"Pull wide and back, thumbs leading. Rear delts, not traps — keep the shoulders down." },
+    { exercise:"Front Raise",              rest:"45s", tempo:"2-1-2", coachCue:"Raise to eye level with no swing. If the hips move, the weight's too heavy." },
+    { exercise:"Machine Shoulder Press",   rest:"45s", tempo:"2-1-2", coachCue:"Finish the delts off on the machine where you can push safely without balancing." },
+  ],
+  p1Arms: [
+    { exercise:"Barbell Curl",             rest:"60s", tempo:"2-1-3", coachCue:"Elbows pinned to your ribs. No swinging — squeeze hard at the top." },
+    { exercise:"Rope Triceps Pushdown",    rest:"45s", tempo:"2-1-3", coachCue:"Elbows tucked, split the rope at the bottom, then resist on the way up." },
+    { exercise:"Incline Dumbbell Curl",    rest:"45s", tempo:"3-1-2", coachCue:"Let the arms hang back behind you — that stretch is what makes this one work." },
+    { exercise:"Overhead Dumbbell Triceps Extension", rest:"45s", tempo:"3-1-2", coachCue:"Elbows close to your head and pointed up. Deep stretch, then lock out." },
+    { exercise:"Cable Curl superset with Triceps Dips", rest:"60s", tempo:"2-1-2", coachCue:"Straight from curls into dips with no rest. Both arms get flooded — that's the finisher." },
+  ],
+
+  // ── PHASE 2 — Pump (6 × 15–20) — fresh rotation ──
+  p2Chest: [
+    { exercise:"Incline Barbell Bench Press", rest:"60s", tempo:"3-1-2", coachCue:"Bar to the collarbone line, elbows tucked slightly. Upper chest leads this phase." },
+    { exercise:"Flat Dumbbell Press",      rest:"60s", tempo:"3-1-2", coachCue:"Go deeper than a barbell lets you — that extra stretch is the reason we switched." },
+    { exercise:"Pec-Deck Machine",         rest:"45s", tempo:"2-1-3", coachCue:"Squeeze and hold a full second where the hands meet. Chase the burn, not the weight." },
+    { exercise:"Low-to-High Cable Fly",    rest:"45s", tempo:"2-1-2", coachCue:"Scoop upward and finish with the hands high and crossed — hits the upper chest hard." },
+    { exercise:"Dips (chest-lean)",        rest:"45s", tempo:"3-1-2", coachCue:"Lean the torso forward and let the elbows flare a little. Upright turns this into triceps." },
+  ],
+  p2Back: [
+    { exercise:"Wide-Grip Pull-Ups",       rest:"60s", tempo:"3-1-2", coachCue:"Full hang at the bottom, chest to the bar. Use a band or the machine if you need to hit the reps." },
+    { exercise:"T-Bar Row",                rest:"60s", tempo:"3-1-1", coachCue:"Chest up, pull into the belly, squeeze the mid-back at the top." },
+    { exercise:"Chest-Supported Machine Row", rest:"45s", tempo:"2-1-2", coachCue:"Chest stays on the pad. No body English — pure back." },
+    { exercise:"Wide-Grip Lat Pulldown",   rest:"45s", tempo:"2-1-2", coachCue:"Wide grip, pull to the upper chest. This is the one building the lat spread." },
+    { exercise:"Cable Pullover",           rest:"45s", tempo:"2-1-3", coachCue:"Arms long, sweep down in an arc, and hold the stretch at the top of each rep." },
+  ],
+  p2Legs: [
+    { exercise:"Hack Squat",               rest:"60s", tempo:"3-1-2", coachCue:"Feet mid-platform, go deep, drive through the whole foot. Quads take the load here." },
+    { exercise:"Romanian Deadlift",        rest:"60s", tempo:"3-1-2", coachCue:"Hinge from the hips, bar close to your legs, stop when you feel the hamstrings load up." },
+    { exercise:"Bulgarian Split Squat",    rest:"60s", tempo:"3-1-2", coachCue:"Back foot elevated, drop straight down, push through the front heel. Brutal but it works." },
+    { exercise:"Seated Leg Curl",          rest:"45s", tempo:"2-1-3", coachCue:"Curl fully and lower slow. Hamstrings respond to the slow part." },
+    { exercise:"Seated Calf Raise",        rest:"45s", tempo:"2-2-2", coachCue:"Bent knee hits the soleus — the muscle that gives the calf its thickness. Full range." },
+  ],
+  p2Shoulders: [
+    { exercise:"Standing Barbell Overhead Press", rest:"60s", tempo:"3-1-2", coachCue:"Squeeze the glutes and brace hard so the press comes from the shoulders, not the back." },
+    { exercise:"Cable Lateral Raise",      rest:"45s", tempo:"2-1-3", coachCue:"Cable keeps tension the whole way, unlike dumbbells. Slow and strict." },
+    { exercise:"Reverse Pec-Deck",         rest:"45s", tempo:"2-1-2", coachCue:"Wide arc, squeeze the rear delts, keep the traps out of it." },
+    { exercise:"Arnold Press",             rest:"45s", tempo:"3-1-2", coachCue:"Rotate the palms as you press. The twist brings the front delt through a longer range." },
+    { exercise:"Upright Row",              rest:"45s", tempo:"2-1-2", coachCue:"Pull to mid-chest, elbows leading. Stop if the shoulders pinch — go wider on the grip." },
+  ],
+  p2Arms: [
+    { exercise:"EZ-Bar Curl",              rest:"60s", tempo:"2-1-3", coachCue:"Angled grip is easier on the wrists. Elbows still, squeeze at the top." },
+    { exercise:"Close-Grip Bench Press",   rest:"60s", tempo:"3-1-2", coachCue:"Hands shoulder-width, elbows tucked tight. This is the mass builder for triceps." },
+    { exercise:"Hammer Curl",              rest:"45s", tempo:"2-1-3", coachCue:"Neutral grip hits the brachialis — the muscle that pushes the bicep up and adds width." },
+    { exercise:"Skull Crushers",           rest:"45s", tempo:"3-1-2", coachCue:"Elbows pointed at the ceiling and fixed there. Lower to the forehead, press back." },
+    { exercise:"Concentration Curl superset with Rope Pushdown", rest:"60s", tempo:"2-1-2", coachCue:"Curls straight into pushdowns, no rest. Finish both heads and walk away pumped." },
+  ],
+
+  // ── PHASE 3 — Peak Volume (7–8 × 15–20) — fresh rotation ──
+  p3Chest: [
+    { exercise:"Incline Dumbbell Press",   rest:"60s", tempo:"3-1-2", coachCue:"Highest volume phase — pick a weight you could get for twenty and stay strict." },
+    { exercise:"Machine Flat Press",       rest:"45s", tempo:"2-1-2", coachCue:"Machine lets you push hard without a spotter. Squeeze the chest at lockout." },
+    { exercise:"Cable Crossover (high)",   rest:"45s", tempo:"2-1-3", coachCue:"Cables set high, pull down and across. Hits the lower chest line." },
+    { exercise:"Cable Crossover (low)",    rest:"45s", tempo:"2-1-3", coachCue:"Cables set low, sweep up and across for the upper chest. Hold the squeeze." },
+    { exercise:"Decline Barbell Press",    rest:"60s", tempo:"3-1-2", coachCue:"Finishes the lower chest and sharpens the line under the pec." },
+  ],
+  p3Back: [
+    { exercise:"Rack Pull (moderate)",     rest:"60s", tempo:"2-1-2", coachCue:"Bar from just below the knee. Moderate weight — we want thickness, not a max attempt." },
+    { exercise:"Neutral-Grip Pulldown",    rest:"45s", tempo:"2-1-2", coachCue:"Palms facing, pull to the chest. Easier on the shoulders at high reps." },
+    { exercise:"Seated Wide-Grip Row",     rest:"45s", tempo:"2-1-2", coachCue:"Wide grip pulls the upper back and rear delts. Elbows flared, squeeze." },
+    { exercise:"Single-Arm Cable Row",     rest:"45s", tempo:"3-1-2", coachCue:"One side at a time. Let the shoulder stretch forward, then drive the elbow back." },
+    { exercise:"Straight-Arm Cable Pullover", rest:"45s", tempo:"2-1-3", coachCue:"Finish the lats with a pure stretch-and-squeeze. Arms stay locked." },
+  ],
+  p3Legs: [
+    { exercise:"Front Squat",              rest:"60s", tempo:"3-1-2", coachCue:"Elbows high, chest tall. Front-loaded so the quads take it — moderate weight, full depth." },
+    { exercise:"Leg Press (feet high)",    rest:"60s", tempo:"3-1-2", coachCue:"Feet high on the platform shifts it to glutes and hamstrings. Deep but controlled." },
+    { exercise:"Lying Leg Curl",           rest:"45s", tempo:"2-1-3", coachCue:"Hips pressed down, full curl, slow release." },
+    { exercise:"Walking Dumbbell Lunges",  rest:"60s", tempo:"2-1-2", coachCue:"Dumbbells at your sides, long stride, push through the front heel." },
+    { exercise:"Donkey / Standing Calf Raise", rest:"45s", tempo:"2-2-2", coachCue:"Bent-over position stretches the calf further. Pause top and bottom." },
+  ],
+  p3Shoulders: [
+    { exercise:"Seated Dumbbell Press",    rest:"60s", tempo:"3-1-2", coachCue:"Strict and seated. High reps here — leave a couple in the tank every set." },
+    { exercise:"Leaning Cable Lateral Raise", rest:"45s", tempo:"2-1-3", coachCue:"Lean away from the stack. The lean loads the delt from the very bottom of the range." },
+    { exercise:"Rear-Delt Dumbbell Fly",   rest:"45s", tempo:"2-1-2", coachCue:"Hinge over, thumbs down, raise wide. Small weight, long squeeze." },
+    { exercise:"Plate Front Raise",        rest:"45s", tempo:"2-1-2", coachCue:"Hold the plate at the edges and raise to eye level. No swing." },
+    { exercise:"Cable Upright Row",        rest:"45s", tempo:"2-1-2", coachCue:"Elbows lead to mid-chest height. Stop short if you feel any pinch." },
+  ],
+  p3Arms: [
+    { exercise:"Preacher Curl",            rest:"60s", tempo:"3-1-2", coachCue:"Arms locked on the pad — nowhere to cheat. Full extension at the bottom." },
+    { exercise:"Dip Machine / Weighted Dips", rest:"60s", tempo:"3-1-2", coachCue:"Stay upright to keep it on the triceps. Full lockout each rep." },
+    { exercise:"Cable Curl",               rest:"45s", tempo:"2-1-3", coachCue:"Constant tension top to bottom. Squeeze hard and lower slow." },
+    { exercise:"Overhead Cable Triceps Extension", rest:"45s", tempo:"3-1-2", coachCue:"Face away from the stack, elbows high. Stretches the long head — where the size is." },
+    { exercise:"Spider Curl superset with Kickbacks", rest:"60s", tempo:"2-1-2", coachCue:"Spider curls into kickbacks, back to back. Last set of the week — empty the tank." },
+  ],
+};
+
+// Core finisher — appended to Chest, Legs and Arms days (~10 minutes).
+// Obliques stay deliberately LIGHT: the goal is a tapered waist, and loaded side
+// work thickens it. Width comes from shoulders and lats up top, not from the waist.
+const BP_CORE = [
+  { exercise:"Hanging Leg Raises", sets:"3", reps:"12-15", rest:"45s", tempo:"2-1-3", coachCue:"Curl the pelvis up rather than just swinging the legs. Lower slowly and don't swing." },
+  { exercise:"Cable Crunches",     sets:"3", reps:"15-20", rest:"45s", tempo:"2-1-3", coachCue:"Rope behind the head, crunch the ribs toward the hips. It's a spinal curl, not a hip fold." },
+  { exercise:"Back Extensions",    sets:"3", reps:"15",    rest:"45s", tempo:"2-1-2", coachCue:"Bodyweight only, controlled. Squeeze the glutes at the top, never hyperextend." },
+  { exercise:"Light Woodchoppers / Rotational Plank", sets:"2", reps:"12-15 each side", rest:"45s", tempo:"2-1-2", coachCue:"Light cable or bodyweight only. We train the obliques but never load them heavy — heavy side work thickens the waist." },
+];
+
+const BP_DAY_LABELS = [
+  { day:"Monday",    type:"Chest",     focus:"Press, incline, flyes — full chest volume" },
+  { day:"Tuesday",   type:"Back",      focus:"Pulldowns, rows, pullovers — width and thickness" },
+  { day:"Wednesday", type:"Legs",      focus:"Quads, hamstrings, calves" },
+  { day:"Thursday",  type:"Shoulders", focus:"Press and laterals — the width that makes the taper" },
+  { day:"Friday",    type:"Arms",      focus:"Biceps and triceps, finishing on a superset" },
+];
+
+const BP_SESSIONS = ["Chest","Back","Legs","Shoulders","Arms"];
+// Phase 3 gives the extra set to the V-taper groups: chest, back, shoulders.
+const BP_PRIORITY = ["Chest","Back","Shoulders"];
+
+function buildBPProgram(profile) {
+  const phase = getBPPhase(profile.bpStartDate);
+  const info  = getBPPhaseInfo(phase);
+  const reps  = phase === 1 ? "12-15" : "15-20";
+
+  return BP_SESSIONS.map((group, i) => {
+    const sets = phase === 1 ? "4" : phase === 2 ? "6" : (BP_PRIORITY.includes(group) ? "8" : "7");
+    const label = BP_DAY_LABELS[i];
+    const block = (BP_EX[`p${phase}${group}`] || []).map(ex => ({ ...ex, sets, reps }));
+    // Core rides along on Chest, Legs and Arms — three times a week, not five.
+    const core = (i === 0 || i === 2 || i === 4) ? BP_CORE : [];
+    return {
+      day: label.day,
+      type: label.type,
+      focus: `${label.focus} · Phase ${phase} — ${info.name}`,
+      workout: [...block, ...core],
+      phase,
+      phaseName: info.name,
+      phaseColor: info.color,
+      program: "Black Panther",
+    };
+  });
+}
+
 function buildProgram(profile) {
   // Route to At-Home / Active-Aging builder if selected (no gym, low-impact)
   if (profile.focus && profile.focus.includes("Active Aging")) {
@@ -1888,6 +2077,10 @@ function buildProgram(profile) {
   // Route to HFT builder if selected
   if (profile.focus && profile.focus.includes("HFT")) {
     return buildHFTProgram(profile);
+  }
+  // Route to the Black Panther builder if selected
+  if (profile.focus && profile.focus.includes("Black Panther")) {
+    return buildBPProgram(profile);
   }
   // Route to Glute & Lower Body builder if selected
   if (profile.focus && profile.focus.includes("Booty")) {
@@ -2298,6 +2491,90 @@ const HFTBackground = () => (
 );
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Full-screen explainer for the Black Panther, reached from the ⓘ on the program picker.
+function BPInfo({ onClose }) {
+  const ACCENT = "#e8ff00";
+  const phases = [1,2,3].map(getBPPhaseInfo);
+  const split = [
+    ["Day 1", "Chest"], ["Day 2", "Back"], ["Day 3", "Legs"], ["Day 4", "Shoulders"], ["Day 5", "Arms"],
+  ];
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:400, background:"#0a0a0f", overflowY:"auto", maxWidth:480, margin:"0 auto", paddingBottom:"calc(env(safe-area-inset-bottom) + 30px)" }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"calc(env(safe-area-inset-top) + 14px) 18px 12px", position:"sticky", top:0, background:"#0a0a0f", borderBottom:"1px solid #1a1a26" }}>
+        <div style={{ fontFamily:"'Bebas Neue'", fontSize:26, letterSpacing:1 }}>THE BLACK PANTHER</div>
+        <button onClick={onClose} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:"50%", width:34, height:34, color:"#c8c8e0", fontSize:16, cursor:"pointer" }}>&#10005;</button>
+      </div>
+
+      <div style={{ padding:"18px" }}>
+        <div style={{ color:ACCENT, fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2, marginBottom:8 }}>WHAT THIS IS</div>
+        <div style={{ fontSize:14, color:"#c8c8e0", lineHeight:1.6, marginBottom:22 }}>
+          A 90-day, five-day body-part split built for high-volume, high-rep pump training. The goal is an
+          aesthetic physique — lean, defined, symmetrical — not strength or powerlifting. Moderate weight,
+          strict form, short rest, and you never train to failure.
+        </div>
+
+        <div style={{ color:ACCENT, fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2, marginBottom:8 }}>WHO IT'S FOR</div>
+        <div style={{ fontSize:14, color:"#c8c8e0", lineHeight:1.6, marginBottom:22 }}>
+          An advanced lifter coming back after time off — someone whose muscle returns quickly. Phase 1 is a
+          deliberate re-entry ramp, because muscle memory comes back faster than tendons and joints do. Ease in
+          and they catch up. Skip that and they're what breaks.
+        </div>
+
+        <div style={{ color:ACCENT, fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2, marginBottom:8 }}>THE SPLIT — NEVER CHANGES</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:8 }}>
+          {split.map(([d, g]) => (
+            <div key={d} style={{ display:"flex", gap:12, background:"#12121a", border:"1px solid #1e1e2e", borderRadius:10, padding:"10px 13px" }}>
+              <span style={{ color:"#7a7a95", fontSize:13, width:46, flexShrink:0 }}>{d}</span>
+              <span style={{ color:"#f0f0f8", fontSize:14, fontWeight:600 }}>{g}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:13, color:"#9898b8", lineHeight:1.55, marginBottom:22 }}>
+          Five exercises per muscle group, 45–60 seconds between sets. What changes over the 90 days is the
+          number of sets, the rep range, and a fresh set of exercises each phase.
+        </div>
+
+        <div style={{ color:ACCENT, fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2, marginBottom:8 }}>HOW THE 90 DAYS WORK</div>
+        <div style={{ fontSize:13, color:"#9898b8", lineHeight:1.6, marginBottom:14 }}>
+          The program advances through three phases automatically — you don't have to do anything.
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:0, marginBottom:22 }}>
+          {phases.map((ph, i) => (
+            <div key={ph.num} style={{ display:"flex", gap:14 }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", flexShrink:0 }}>
+                <div style={{ width:38, height:38, borderRadius:"50%", background:ph.color, color:"#000", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue'", fontSize:20, fontWeight:700 }}>{ph.num}</div>
+                {i < phases.length - 1 && <div style={{ width:2, flex:1, minHeight:30, background:`linear-gradient(${ph.color}, ${phases[i+1].color})`, opacity:0.5 }} />}
+              </div>
+              <div style={{ paddingBottom:18 }}>
+                <div style={{ fontFamily:"'DM Sans'", fontWeight:700, fontSize:15.5, color:"#f0f0f8" }}>{ph.name}</div>
+                <div style={{ fontSize:12.5, color:ph.color, marginTop:2 }}>{ph.weeks}</div>
+                <div style={{ fontSize:13, color:"#9898b8", lineHeight:1.55, marginTop:4 }}>{ph.focus}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ color:ACCENT, fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2, marginBottom:8 }}>THE WAIST RULE</div>
+        <div style={{ fontSize:14, color:"#c8c8e0", lineHeight:1.6, marginBottom:22 }}>
+          A ten-minute core finisher runs on chest, legs and arms days. Abs and lower back get worked properly,
+          but oblique work stays deliberately light — loaded side work thickens the waist and fights the taper
+          you're building. The V comes from width up top, shoulders and lats, against a tight waist below.
+        </div>
+
+        <div style={{ background:"rgba(255,157,92,0.09)", border:"1px solid rgba(255,157,92,0.4)", borderRadius:12, padding:"13px 15px" }}>
+          <div style={{ color:"#ff9d5c", fontFamily:"'DM Sans'", fontWeight:700, fontSize:14, marginBottom:5 }}>Never to failure</div>
+          <div style={{ fontSize:13, color:"#c8c8e0", lineHeight:1.55 }}>
+            Pick a weight you could manage for about twenty reps, then work in the range prescribed. The stimulus
+            here is volume and blood flow, not grinding out a last rep. Leaving a couple in the tank every set is
+            what lets you train five days a week without breaking down.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HFTInfo({ onClose }) {
   const benefits = [
     { icon:"💪", title:"Build Muscle Faster", text:"Training each muscle more often means more growth signals per week — proven to accelerate muscle gain for intermediate and advanced lifters." },
@@ -2493,6 +2770,7 @@ const COACH_TIPS = {
 function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, onCancel }) {
   const [step, setStep] = useState(startStep || 0);
   const [showHFTInfo, setShowHFTInfo] = useState(false);
+  const [showBPInfo, setShowBPInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
   // Pre-fill the client's name from a coach invite, when present.
   const seedName = (seed && seed.name) ? String(seed.name).trim() : "";
@@ -2560,7 +2838,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, 
     () => true,             // store + allergies optional
   ];
 
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","The Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = p.gender === "Female" ? femaleFocuses : maleFocuses;
 
@@ -2614,10 +2892,11 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, 
         {focuses.map(fo => {
           const isHFT = fo.includes("HFT");
           const isGLB = fo.includes("Booty");
+          const isBP  = fo.includes("Black Panther");
           const active = p.focus === fo;
-          if (isHFT || isGLB) {
-            const openInfo = isHFT ? () => setShowHFTInfo(true) : () => setShowGLBInfo(true);
-            const startKey = isHFT ? "hftStartDate" : "glbStartDate";
+          if (isHFT || isGLB || isBP) {
+            const openInfo = isHFT ? () => setShowHFTInfo(true) : isBP ? () => setShowBPInfo(true) : () => setShowGLBInfo(true);
+            const startKey = isHFT ? "hftStartDate" : isBP ? "bpStartDate" : "glbStartDate";
             return (
               <button key={fo} onClick={() => {
                 set("focus", fo);
@@ -2801,6 +3080,7 @@ function Wizard({ onComplete, onCoachCode, seed, initial, startStep, coachMode, 
       <style>{GLOBAL_CSS}</style>
       <Watermark />
       {showHFTInfo && <HFTInfo onClose={()=>setShowHFTInfo(false)} />}
+      {showBPInfo && <BPInfo onClose={()=>setShowBPInfo(false)} />}
       {showGLBInfo && <GLBInfo onClose={()=>setShowGLBInfo(false)} />}
       {coachMode ? (
         <div style={{ width:"92%", maxWidth:480, textAlign:"center", position:"relative" }}>
@@ -3050,16 +3330,18 @@ function Loading({ name }) {
 // ── HOME ──────────────────────────────────────────────────────────────────────
 // Clean landing: greeting, program summary, then the Mon-Fri week to pick from.
 function ChangeProgram({ profile, onSave, onBack }) {
-  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
+  const maleFocuses   = ["Upper Body (Chest, Back, Arms, Shoulders)","Lower Body (Legs, Glutes, Calves)","Full Body","Core & Abs","Iconic Physique — HFT (90-Day)","The Black Panther — 90-Day Aesthetic (5-Day Split)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const femaleFocuses = ["Lower Body (Hips, Glutes, Legs, Calves)","Upper Body (Arms, Back, Shoulders)","Full Body","Core & Abs","Tight Waist, Booty & Lower Body Blast (90-Day)","Active Aging — At-Home, Low Impact (No Gym)","BodyMorph (No Gym) — Bodyweight / Calisthenics"];
   const focuses = profile.gender === "Female" ? femaleFocuses : maleFocuses;
   const [focus, setFocus] = useState(profile.focus || "Full Body");
   const [showHFTInfo, setShowHFTInfo] = useState(false);
+  const [showBPInfo, setShowBPInfo] = useState(false);
   const [showGLBInfo, setShowGLBInfo] = useState(false);
   const changed = focus !== profile.focus;
 
   const descFor = (f) => {
     if (f.includes("HFT")) return "A 90-day program that gradually builds from 3 to 6 training days per week. Advanced — works your way up to an iconic, complete physique.";
+    if (f.includes("Black Panther")) return "A 90-day, 5-day body-part split for an aesthetic, lean, symmetrical physique. High volume, high reps, short rest, never to failure. Built for an advanced lifter coming back after time off.";
     if (f.includes("Booty")) return "A 90-day program for the hourglass build — a tighter waist, round lifted booty, fuller hips and toned thighs. Builds up gradually over 4 phases.";
     if (f.includes("Full Body")) return "Every session trains your whole body. Great for 2-4 days per week and balanced development.";
     if (f.includes("Upper Body")) return "Emphasis on chest, back, shoulders and arms. Builds upper-body strength and size.";
@@ -3073,6 +3355,7 @@ function ChangeProgram({ profile, onSave, onBack }) {
       <style>{GLOBAL_CSS}</style>
       <Watermark />
       {showHFTInfo && <HFTInfo onClose={()=>setShowHFTInfo(false)} />}
+      {showBPInfo && <BPInfo onClose={()=>setShowBPInfo(false)} />}
       {showGLBInfo && <GLBInfo onClose={()=>setShowGLBInfo(false)} />}
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
         <BackBtn onClick={onBack} />
@@ -3089,13 +3372,14 @@ function ChangeProgram({ profile, onSave, onBack }) {
             const on = focus === fo;
             const isHFT = fo.includes("HFT");
             const isGLB = fo.includes("Booty");
-            const hasInfo = isHFT || isGLB;
+            const isBP  = fo.includes("Black Panther");
+            const hasInfo = isHFT || isGLB || isBP;
             return (
               <button key={fo} onClick={()=>setFocus(fo)} style={{ position:"relative", width:"100%", textAlign:"left", background: on ? "rgba(232,255,0,0.1)" : "#1a1a26", border:"2px solid " + (on ? "#e8ff00" : "#2a2a3d"), borderRadius:10, padding:"12px 14px", cursor:"pointer", transition:"all 0.15s" }}>
                 <div style={{ fontFamily:"'DM Sans'", fontSize:16, fontWeight:600, color: on ? "#e8ff00" : "#f0f0f8", paddingRight: hasInfo ? 30 : 0 }}>{fo}</div>
                 <div style={{ fontSize:12, color:"#9898b8", marginTop:3, lineHeight:1.5 }}>{descFor(fo)}</div>
                 {hasInfo && (
-                  <span onClick={(e)=>{ e.stopPropagation(); (isHFT ? setShowHFTInfo : setShowGLBInfo)(true); }} title="What is this?" style={{ position:"absolute", top:8, right:8, width:22, height:22, borderRadius:"50%", border:"1.5px solid #e8ff00", color:"#e8ff00", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, fontStyle:"italic", fontFamily:"Georgia, serif", cursor:"pointer", lineHeight:1 }}>i</span>
+                  <span onClick={(e)=>{ e.stopPropagation(); (isHFT ? setShowHFTInfo : isBP ? setShowBPInfo : setShowGLBInfo)(true); }} title="What is this?" style={{ position:"absolute", top:8, right:8, width:22, height:22, borderRadius:"50%", border:"1.5px solid #e8ff00", color:"#e8ff00", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, fontStyle:"italic", fontFamily:"Georgia, serif", cursor:"pointer", lineHeight:1 }}>i</span>
                 )}
               </button>
             );
@@ -10262,6 +10546,7 @@ function migrateProfile(p) {
     goalBodyFat:   "",
     deficit:       "moderate",
     hftStartDate: null,
+    bpStartDate: null,
     glbStartDate: null,
     basicStartDate: null,
   };
@@ -13394,6 +13679,10 @@ export default function BodyMorph() {
     // Starting HFT fresh resets the 90-day clock to today
     if (focus.includes("HFT")) {
       updated.hftStartDate = ymdLocal();
+    }
+    // Starting the Black Panther fresh resets its 90-day clock to today
+    if (focus.includes("Black Panther")) {
+      updated.bpStartDate = ymdLocal();
     }
     // Starting Glute & Lower Body fresh resets its 90-day clock to today
     if (focus.includes("Booty")) {
