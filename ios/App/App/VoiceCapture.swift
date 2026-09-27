@@ -1065,7 +1065,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // so the coach stops mid-sentence like a person would, instead of finishing
         // its turn into a conversation that has already moved on.
         case "input_audio_buffer.speech_started":
-            if !GATE_MIC_WHILE_SPEAKING { flushPlayback() }
+            flushPlayback()
             notifyListeners("rtUserSpeaking", data: [:])
 
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
@@ -1186,8 +1186,6 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func sendMic(_ buffer: AVAudioPCMBuffer) {
         guard running, let converter = converter else { return }
-        if GATE_MIC_WHILE_SPEAKING,
-           (CFAbsoluteTimeGetCurrent() - lastAudioOutAt) * 1000 < micGateTailMs { return }
         let ratio = outFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
         guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
@@ -1209,8 +1207,17 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
         // ── Is anyone actually talking? ────────────────────────────────────────
         let level = levelDb(buffer)
-        let gate = Swift.min(Swift.max(micFloorDb + 8.0, -48.0), -20.0)
         let now = CFAbsoluteTimeGetCurrent()
+
+        // While the coach is talking, raise the bar instead of muting. Muting lost the
+        // start of anything said over the coach — "Coach, I did not say that" reached
+        // the server as "Not say that" — and with nothing getting through, the coach
+        // talked straight over him. Ducking keeps real speech (which is loud, and close
+        // to the phone) while residual echo stays under the line.
+        let coachTalking = (now - lastAudioOutAt) * 1000 < micGateTailMs
+        let margin: Float = coachTalking ? 20.0 : 8.0
+        let floorClamp: Float = coachTalking ? -34.0 : -48.0
+        let gate = Swift.min(Swift.max(micFloorDb + margin, floorClamp), -20.0)
 
         if level > gate {
             lastVoiceAt = now
@@ -1225,8 +1232,12 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         } else {
             // Only learn the floor from NON-speech, or loud talking would drag the
             // threshold up behind it and the gate would slowly go deaf.
-            micFloorDb = level < micFloorDb ? (0.8 * micFloorDb + 0.2 * level)
-                                            : (0.95 * micFloorDb + 0.05 * level)
+            let next = level < micFloorDb ? (0.8 * micFloorDb + 0.2 * level)
+                                          : (0.9 * micFloorDb + 0.1 * level)
+            // A real room floor lives between roughly -70 and -25 dB. Anything below
+            // that is digital silence, and letting the average chase it made the gate
+            // deaf to its own threshold.
+            micFloorDb = Swift.min(Swift.max(next, -70.0), -25.0)
             if micSpeaking && (now - lastVoiceAt) > voiceHangSec { micSpeaking = false }
         }
 
@@ -1234,6 +1245,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             sendAudio(data)
             framesSent += 1
         } else {
+            // Always buffered, never dropped — this is what preserves the first word.
             preRoll.append(data)
             if preRoll.count > preRollMax { preRoll.removeFirst() }
             framesSkipped += 1
