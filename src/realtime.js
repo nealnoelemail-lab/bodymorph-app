@@ -194,7 +194,22 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
     catch { /* socket already closed */ }
   }));
   listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => { rtLog(`coach: ${e.text}`); onEvent && onEvent({ type: "coach", text: e.text }); }));
-  listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => { rtLog(`you: ${e.text}`); onEvent && onEvent({ type: "user", text: e.text }); }));
+  // Whisper invents text when handed a near-empty segment, and it invents in whatever
+  // language it feels like — the device log caught a phantom "MBC 뉴스 이덕영입니다.",
+  // a Korean news sign-off, from a man speaking English in his kitchen. The mic gate
+  // now refuses to open on a blip, which is the real cure; this is the backstop for
+  // whatever still slips past, so it never reaches the conversation memory and comes
+  // back later as something the client supposedly said.
+  //
+  // Scope is deliberately narrow: CJK and Hangul only, and only because the coach is
+  // English-only today. The moment BodyMorph ships another language this has to go.
+  const INVENTED = /[぀-ヿ㐀-䶿一-鿿가-힯]/;
+  listeners.push(RealtimeVoice.addListener("rtUserSaid", (e) => {
+    const text = (e.text || "").trim();
+    if (text && INVENTED.test(text)) { rtLog(`ignored invented transcript: ${text}`); return; }
+    rtLog(`you: ${text}`);
+    onEvent && onEvent({ type: "user", text: e.text });
+  }));
   listeners.push(RealtimeVoice.addListener("rtUserSpeaking", () => onEvent && onEvent({ type: "listening" })));
   listeners.push(RealtimeVoice.addListener("rtTurnDone", async (e) => {
     // Meter every turn from the API's own numbers.

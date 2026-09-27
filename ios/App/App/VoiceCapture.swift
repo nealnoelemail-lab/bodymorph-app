@@ -971,6 +971,21 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private var speechRunStart: CFAbsoluteTime = 0
     private var bargeInPending = false
     private let bargeInMinSec: Double = 0.25
+
+    // ── A blip must not become a turn ──────────────────────────────────────────
+    // Whisper invents words when it is handed a segment with nothing much in it. The
+    // log is proof: a phantom "MBC 뉴스 이덕영입니다." — a Korean news sign-off, from a
+    // man speaking English in his kitchen — plus a run of stray "Bye."/"Bye-bye."
+    // Each one costs a turn, and each one lands in the conversation memory as
+    // something the client supposedly said.
+    //
+    // They come from segments that opened on a single loud blip and then carried a
+    // second of near-silence. So the gate now has to hear speech SUSTAIN before it
+    // opens at all. A door closing never becomes a turn; the pre-roll still carries
+    // the onset, so nothing real is clipped.
+    private var candidateStart: CFAbsoluteTime = 0
+    private let speechOpenMinSec: Double = 0.18   // under a syllable, over a thump
+    private let dipToleranceSec: Double = 0.15    // natural speech dips; don't restart on one
     private let voiceHangSec: Double = 1.2      // MUST exceed the server's silence window
     private let preRollMax = 10                 // ~400ms of buffers
     private var preRoll: [(Data, Float)] = []
@@ -999,6 +1014,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         lastPeakAt = 0
         speechRunStart = 0
         bargeInPending = false
+        candidateStart = 0
         micFloorDb = -55
         framesSent = 0
         framesSkipped = 0
@@ -1319,10 +1335,21 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         gate = Swift.min(gate, -20.0)
 
         if level > gate {
+            let dip = now - lastVoiceAt
             lastVoiceAt = now
             if !micSpeaking {
+                // Start (or continue) a candidate run. A gap longer than a natural dip
+                // means the last one died, so this is a fresh attempt.
+                if candidateStart == 0 || dip > dipToleranceSec { candidateStart = now }
+                guard now - candidateStart >= speechOpenMinSec else {
+                    preRoll.append((data, level))
+                    if preRoll.count > preRollMax { preRoll.removeFirst() }
+                    framesSkipped += 1
+                    return                                   // not proven yet — keep listening
+                }
                 micSpeaking = true
-                speechRunStart = now
+                speechRunStart = candidateStart              // the run began at the onset
+                candidateStart = 0
                 // Flush the pre-roll so the server hears the word that started this,
                 // not the middle of it — but ONLY the rising edge of it.
                 //
