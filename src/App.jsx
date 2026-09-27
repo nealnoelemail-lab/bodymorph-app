@@ -5270,6 +5270,33 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
     });
   }, [day, videoOverrides, coachCues]);
 
+  // ── Conversation memory for the realtime coach ──────────────────────────────
+  // Neal, mid-conversation: "every time I turn you on you're starting from the
+  // beginning. Why is that?" — it knew today's NUMBERS (companionData) but had no
+  // memory of having TALKED to him, so it re-asked things already settled.
+  //
+  // The legacy coach carries history by replaying prior messages into each Claude
+  // call. Speech-to-speech has no message array to replay, so the recap goes into the
+  // instructions instead — and condensed rather than verbatim, because every token of
+  // it is re-sent on every turn of the session and audio time is already the bill.
+  const rtHistoryRef = useRef([]);
+  const rtRecap = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COACH_CONVO_KEY) || "null");
+      if (!saved || saved.date !== ymdLocal()) return "";
+      const msgs = (saved.messages || []).slice(-12);
+      if (!msgs.length) return "";
+      rtHistoryRef.current = msgs;
+      const lines = msgs.map(m => `${m.role === "assistant" ? "You" : profile.name}: ${String(m.content || "").slice(0, 160)}`);
+      return `\n\nEARLIER TODAY — you have ALREADY talked with ${profile.name} today. Do not greet them as if this is the first time, and do not re-ask anything settled below. Pick up where you left off.\n${lines.join("\n")}`;
+    } catch { return ""; }
+  };
+  const rtRemember = (role, content) => {
+    if (!content) return;
+    rtHistoryRef.current = [...rtHistoryRef.current, { role, content }].slice(-20);
+    try { localStorage.setItem(COACH_CONVO_KEY, JSON.stringify({ date: ymdLocal(), messages: rtHistoryRef.current })); } catch { /* private mode */ }
+  };
+
   // ── OpenAI Realtime engine (experimental) ───────────────────────────────────
   // Uses buildSysPrompt() — the SAME persona the Grok coach runs on — so the only
   // thing that differs between the two engines is the engine. The action handlers
@@ -5292,7 +5319,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         requestWakeLock();
       }
       await startRealtimeCoach({
-        instructions: buildSysPrompt(),
+        instructions: buildSysPrompt() + rtRecap(),
         voice: voiceId || undefined,
         userId,
         handlers: { onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo },
@@ -5302,8 +5329,8 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           if (e.type === "listening") setState("listening");
           if (e.type === "idle")      setState("listening");
           if (e.type === "audio")     log(e.text);
-          if (e.type === "user")      log(`you: ${e.text}`);
-          if (e.type === "coach")     { log(`coach: ${e.text}`); setState("listening"); }
+          if (e.type === "user")      { log(`you: ${e.text}`); rtRemember("user", e.text); }
+          if (e.type === "coach")     { log(`coach: ${e.text}`); rtRemember("assistant", e.text); setState("listening"); }
           if (e.type === "action")    { setLogConfirm(`\u2713 ${e.result}`); setTimeout(() => setLogConfirm(null), 2200); }
           if (e.type === "error")     { try { console.log(`[RT] ERROR: ${e.error}`); } catch {} log(`realtime error: ${e.error}`); setState("idle"); }
         },
