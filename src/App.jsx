@@ -4085,6 +4085,17 @@ const FOOD_SLOTS = [
 ];
 const FOOD_SLOT_IDS = FOOD_SLOTS.map((s) => s.id);
 
+// Which meal is it, roughly? The dashboard's CALORIE INTAKE tile has to open the food
+// page on SOME meal, and the clock is the only honest guess. It is only a starting
+// point — the page names the meal it's adding to, and Macro AI still asks.
+function slotForNow(d = new Date()) {
+  const h = d.getHours();
+  if (h < 11) return FOOD_SLOTS[0];      // breakfast
+  if (h < 16) return FOOD_SLOTS[1];      // lunch
+  if (h < 21) return FOOD_SLOTS[2];      // dinner
+  return FOOD_SLOTS[3];                  // snacks
+}
+
 function dayNutrition(foodLog, dateKey) {
   const day = (foodLog && foodLog[dateKey]) || {};
   let cal = 0, protein = 0, carbs = 0, fats = 0;
@@ -4132,7 +4143,7 @@ const BURN_STATE_LABEL = {
   unsupported: "Apple Health",
 };
 
-function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConnectHealth, onQuickLog, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
+function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConnectHealth, onAddFood, profile, program, rewards, onPickDay, onProgress, onNutrition, onStretch, onCardio, onEditDays, onEditTime, onTrainingWeek, onSupplements, onPeptides, onCalendar, onReset, stepEntries, onSaveSteps, sleepEntries, onSaveSleep, foodLog, dietPref, onProgramSummary, onSettings, hydration, onSetCups, onVoiceCoach, voiceActive, voiceState, onMenu, brand, unreadMsgs, onMessages }) {
   const goalColor = profile.goal.includes("Bulk") ? C.blue : profile.goal.includes("Cut") ? C.red : C.purple;
   const sched = program.weeklySchedule || [];
   const todayName = DAY_NAMES[new Date().getDay()];
@@ -4242,17 +4253,10 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
     onFlash({ title: label, color: over ? "#ff7070" : color, total: `${val}g`, lines });
   };
 
-  // The camera shortcut behind the CALORIES INTAKE tile. The ref is filled in by
-  // MealPhotoFlow; calling it inside the tile's onClick keeps the file-input click inside
-  // the user's gesture, which iOS requires before it will open the camera.
-  const quickMacroRef = useRef(null);
-  const onQuickMacro = () => quickMacroRef.current && quickMacroRef.current();
-
   return (
     <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, paddingLeft:"5%", paddingRight:"5%", position:"relative" }}>
       <style>{GLOBAL_CSS}</style>
       <WatermarkPlain />
-      <MealPhotoFlow openRef={quickMacroRef} onLog={onQuickLog} />
 
       {/* Top bar */}
       <div style={{ padding:"16px 0 10px" }}>
@@ -4321,11 +4325,14 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
 
           {/* ── ROW 2: CALORIES INTAKE | CALORIES BURNED | NET CALORIES ── */}
 
-          {/* CALORIES INTAKE — tapping it is a SHORTCUT STRAIGHT TO THE CAMERA, not a
-              readout. Neal: "connect it directly to Macro AI ... take a picture, add it
-              to whichever meal, and keep it moving." Logging a plate is the thing you
-              actually want from this tile; the meal-by-meal breakdown lives in Nutrition. */}
-          <button onClick={onQuickMacro} type="button"
+          {/* CALORIES INTAKE — a SHORTCUT INTO LOGGING FOOD, not a readout. It used to
+              jump straight to the camera, which assumed the answer: Neal wanted the
+              choice. "I just want this page to pop up when I click that link, not just
+              the camera. That way I can search foods, or if I'm shopping I can scan by
+              Food Facts, or I can just add the items in."
+              So it opens the add-food page with all three routes, on whichever meal the
+              clock says it is. The breakdown still lives in Nutrition. */}
+          <button onClick={onAddFood} type="button"
                   style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
             <span style={lbl}>CALORIES<br/>INTAKE</span>
             <span style={big(calOver?"#ff7070":"#e8ff00")}>{totalCal.toLocaleString()}</span>
@@ -10039,7 +10046,7 @@ function FoodItemRow({ it, index, canRemove, onField, onRemove }) {
   );
 }
 
-function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onSaveMealPlan, mealPlan, onBack }) {
+function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, foodLog, onSaveFoodLog, nutritionGoals, onSaveNutritionGoals, dietPref, onSaveDietPref, onSaveMealPlan, mealPlan, onBack, openAddFood, onAddFoodUsed }) {
   // Recalculate macros using the selected diet style so keto gets low-carb/high-fat,
   // bodybuilder gets high-protein, etc. Don't rely on the stored program.nutrition alone.
   const dietAwareMacros = macrosFor(profile || {}, dietPref);
@@ -10049,7 +10056,18 @@ function Nutrition({ program, profile, onUpdateProfile, meals, onSaveMeals, food
   const [confirmClear, setConfirmClear] = useState(false); // "Clear Log" confirmation dialog
   const [editSlot, setEditSlot] = useState(null);  // which meal slot is being edited
   const [confirmDelete, setConfirmDelete] = useState(null); // slot id pending delete confirmation
-  const [foodLogger, setFoodLogger] = useState(null);
+  // Opened straight from the dashboard's CALORIE INTAKE tile: land on the add-food
+  // page rather than making them find the meal row first. Seeded from state so it
+  // opens ONCE — reopening it on every render would trap them on the page, unable to
+  // close it and see the day.
+  const [foodLogger, setFoodLogger] = useState(() => {
+    if (!openAddFood) return null;
+    const slot = slotForNow();
+    return { slotId: slot.id, slotLabel: slot.label, sug: null };
+  });
+  // Spend the flag the moment we've used it. Leaving it set would make the NEXT visit
+  // to Nutrition — from the menu, from the coach — land on the add-food page too.
+  useEffect(() => { if (openAddFood && onAddFoodUsed) onAddFoodUsed(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // AI meal-plan generator
   const [genOpen, setGenOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false); // goal + diet selection page before generating
@@ -13246,6 +13264,12 @@ export default function BodyMorph() {
   const [phase, setPhase]     = useState("init");   // init | wizard | loading | home | session | progress | nutrition
   const [profile, setProfile] = useState(null);
   const [videoOverrides, setVideoOverrides] = useState({});
+
+  // The dashboard's CALORIE INTAKE tile opens Nutrition ALREADY on the add-food page,
+  // so the choice of Macro AI / Search Food / Food Facts is one tap from the home
+  // screen. Every other route into Nutrition lands on the day as usual.
+  const [openAddFood, setOpenAddFood] = useState(false);
+  const goAddFood = () => { setOpenAddFood(true); navTo("nutrition"); };
   const [program, setProgram] = useState(null);
   const [aiGenerating, setAiGenerating] = useState(false);  // AI program generation in flight
   const aiGenSigRef = useRef(null);                          // guards against duplicate auto-gen
@@ -14368,7 +14392,7 @@ export default function BodyMorph() {
 
   if (phase === "home") return (
     <><Toast />
-      <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} onQuickLog={logFoodQuick} profile={profile} program={program} rewards={rewards}
+      <Home burnedToday={burnedToday} burnState={burnState} dashFlash={dashFlash} onFlash={showFlash} onCloseFlash={closeFlash} onConnectHealth={connectHealth} onAddFood={goAddFood} profile={profile} program={program} rewards={rewards}
         onPickDay={(i)=>{ setDayIdx(i); setLiveSets({}); navTo("session"); }}
         onProgress={()=>navTo("progress")} onNutrition={()=>navTo("nutrition")} onStretch={()=>navTo("stretch")} onCardio={()=>navTo("cardio")}
         onEditDays={()=>navTo("editdays")}
@@ -14422,7 +14446,7 @@ export default function BodyMorph() {
   if (phase === "settings") return (<><Toast /><Settings profile={profile} onBack={navBack} onResetProfile={resetProfile} coachVoice={coachVoice} onSetVoice={setCoachVoice} user={user} onSignOut={handleSignOut} subscription={subscription} onBecomeCoach={becomeCoach} onLinkCoach={linkToCoach} onCoachDashboard={role === "coach" ? backToDashboard : null} /></>);
   if (phase === "programsummary") return (<><Toast /><ProgramSummary profile={profile} program={program} mealPlan={mealPlan} dietPref={dietPref} onReset={resetProfile} onBack={navBack} onEditPlan={()=>navTo("fatloss")} /></>);
   if (phase === "progress")  return (<><Toast /><Progress logs={logs} rewards={rewards} bodyEntries={bodyEntries} onAddBody={addBodyEntry} onDeleteBody={deleteBodyEntry} cardioSessions={cardioSessions} onBack={navBack} userId={user?.id} watch={watchInsights} watchDaily={watchDaily} /></>);
-  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} onBack={navBack} /></>);
+  if (phase === "nutrition") return (<><Toast /><Nutrition program={program} profile={profile} onUpdateProfile={updateProfileFields} meals={meals} onSaveMeals={setMeals} foodLog={foodLog} onSaveFoodLog={setFoodLog} nutritionGoals={nutritionGoals} onSaveNutritionGoals={setNutritionGoals} dietPref={dietPref} onSaveDietPref={setDietPref} onSaveMealPlan={setMealPlan} mealPlan={mealPlan} openAddFood={openAddFood} onAddFoodUsed={()=>setOpenAddFood(false)} onBack={navBack} /></>);
   if (phase === "stretch")   return (<><Toast /><StretchPlanner plan={stretchPlan} onSave={setStretchPlan} routines={stretchRoutines} onSaveRoutines={setStretchRoutines} onBack={navBack} gender={profile.gender} videoOverrides={videoOverrides} onSaveVideo={saveVideo} activeStretch={stretchSession} stretchProgress={stretchProgress} onStopStretch={()=>{ setHomeVoice(false); setVoiceState(null); setStretchSession(null); }} onGuidedStretch={(session, fresh)=>{ primeTTS(); const p = stretchProgress; const recent = !fresh && !!(p && p.name === session.name && p.index > 0 && p.index < session.items.length && (Date.now() - (p.at||0) < 30*60*1000)); if (!recent) clearStretchProgress(); setStretchSession(recent ? { ...session, startIndex: p.index } : session); setHomeVoice(true); }} /></>);
   if (phase === "cardio")    return (<><Toast /><Cardio profile={profile} onSaveSession={addCardioSession} stepEntries={stepEntries} onSaveSteps={saveStepEntry} cardioPlan={cardioPlan} onSavePlan={setCardioPlan} onBack={navBack} /></>);
   if (phase === "gymsetup") return (<><Toast /><GymSetup userId={user?.id} programExercises={((program && program.weeklySchedule) || []).flatMap(d => (d.workout || []).map(e => e.exercise))} onBack={navBack} /></>);
