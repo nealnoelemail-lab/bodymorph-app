@@ -958,9 +958,22 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private let peakDecayDbPerSec: Float = 2.0 // forget a loud moment slowly
     private let realSpeechDb: Float = -35.0    // above this = genuinely close-mic
     private let talkWindowDb: Float = 16.0     // how far under their own voice we accept
+
+    // ── Barge-in has to be EARNED ──────────────────────────────────────────────
+    // A single 100ms buffer over the line used to kill the coach mid-sentence, and
+    // in a room with a television that fires constantly — Neal heard it as the coach
+    // "snapping in and out", and the log is full of replies cut off after two words
+    // ("Hey Neal,", "You're coming through", "Alright, let's keep rolling,").
+    //
+    // So speech now has to SUSTAIN before it cancels playback. A burst of TV or a
+    // cough no longer takes the coach's turn away; a person actually talking over it
+    // still does, a quarter second later, which is faster than a human would react.
+    private var speechRunStart: CFAbsoluteTime = 0
+    private var bargeInPending = false
+    private let bargeInMinSec: Double = 0.25
     private let voiceHangSec: Double = 1.2      // MUST exceed the server's silence window
     private let preRollMax = 10                 // ~400ms of buffers
-    private var preRoll: [Data] = []
+    private var preRoll: [(Data, Float)] = []
     private var framesSent = 0
     private var framesSkipped = 0
     private var lastGateReport: CFAbsoluteTime = 0
@@ -984,6 +997,8 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // at home the next morning.
         micPeakDb = -100
         lastPeakAt = 0
+        speechRunStart = 0
+        bargeInPending = false
         micFloorDb = -55
         framesSent = 0
         framesSkipped = 0
@@ -1110,9 +1125,13 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             // micSpeaking is the local gate, which during playback sits 20dB above the
             // room floor — far above residual echo, but well under someone actually
             // talking into the phone. Real barge-in still works; phantom ones don't.
+            //
+            // And it must have LASTED. One buffer over the line is a TV consonant or a
+            // chair scraping; a person interrupting keeps going. If the run is already
+            // long enough, cut now — otherwise arm it and let the mic tap confirm.
             if micSpeaking {
-                flushPlayback()
-                notifyListeners("rtUserSpeaking", data: [:])
+                if CFAbsoluteTimeGetCurrent() - speechRunStart >= bargeInMinSec { confirmBargeIn() }
+                else { bargeInPending = true }
             }
 
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
@@ -1178,6 +1197,17 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         player.stop()
         player.reset()
         if engine.isRunning { player.play() }
+    }
+
+    // Barge-in confirmed. Hops to main because the mic tap runs on an audio thread and
+    // stopping player nodes from there is asking for trouble.
+    private func confirmBargeIn() {
+        bargeInPending = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.flushPlayback()
+            self.notifyListeners("rtUserSpeaking", data: [:])
+        }
     }
 
     private func stopPlayback() {
@@ -1281,17 +1311,35 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         let heardRealSpeech = micPeakDb > realSpeechDb
         let floorClamp: Float = coachTalking ? -34.0 : (heardRealSpeech ? -42.0 : -44.0)
         var gate = Swift.max(micFloorDb + margin, floorClamp)
-        if heardRealSpeech && !coachTalking { gate = Swift.max(gate, micPeakDb - talkWindowDb) }
+        if heardRealSpeech {
+            // While the coach is speaking the bar is higher still: interrupting should
+            // take a proper, close-up voice, not a TV that happens to clear the line.
+            gate = Swift.max(gate, micPeakDb - (coachTalking ? 10.0 : talkWindowDb))
+        }
         gate = Swift.min(gate, -20.0)
 
         if level > gate {
             lastVoiceAt = now
             if !micSpeaking {
                 micSpeaking = true
+                speechRunStart = now
                 // Flush the pre-roll so the server hears the word that started this,
-                // not the middle of it.
-                for chunk in preRoll { sendAudio(chunk) }
-                framesSent += preRoll.count
+                // not the middle of it — but ONLY the rising edge of it.
+                //
+                // Flushing all 400ms sent whatever the room was doing beforehand, and
+                // in front of a television that meant broadcast dialogue arriving glued
+                // to the front of the client's sentence: "in your veins, anything you
+                // hold can turn into an instrument. Can you hear me?" was one utterance
+                // in the log — the first half the TV, the second half Neal.
+                //
+                // A word's onset is already climbing, so keep only the tail of the
+                // buffer that is near the threshold and drop the quiet room ahead of it.
+                let onsetFloor = gate - 10.0
+                var kept: [Data] = []
+                for (chunk, lvl) in preRoll where lvl > onsetFloor { kept.append(chunk) }
+                for chunk in kept { sendAudio(chunk) }
+                framesSent += kept.count
+                framesSkipped += preRoll.count - kept.count
                 preRoll.removeAll()
             }
         } else {
@@ -1303,7 +1351,16 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             // that is digital silence, and letting the average chase it made the gate
             // deaf to its own threshold.
             micFloorDb = Swift.min(Swift.max(next, -70.0), -25.0)
-            if micSpeaking && (now - lastVoiceAt) > voiceHangSec { micSpeaking = false }
+            if micSpeaking && (now - lastVoiceAt) > voiceHangSec {
+                micSpeaking = false
+                bargeInPending = false      // it stopped before it earned the interruption
+            }
+        }
+
+        // The server flagged an interruption and we're waiting to see if it holds up.
+        // Once the run is long enough to be a person rather than a noise, cut the coach.
+        if bargeInPending && micSpeaking && (now - speechRunStart) >= bargeInMinSec {
+            confirmBargeIn()
         }
 
         if micSpeaking {
@@ -1311,7 +1368,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             framesSent += 1
         } else {
             // Always buffered, never dropped — this is what preserves the first word.
-            preRoll.append(data)
+            preRoll.append((data, level))
             if preRoll.count > preRollMax { preRoll.removeFirst() }
             framesSkipped += 1
         }
