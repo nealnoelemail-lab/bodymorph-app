@@ -914,7 +914,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     // it. Set GATE_MIC_WHILE_SPEAKING = false to get interruption back at the cost of
     // the self-triggering above.
     private let GATE_MIC_WHILE_SPEAKING = true
-    private let micGateTailMs: Double = 400
+    private let micGateTailMs: Double = 600
     private var lastAudioOutAt: CFAbsoluteTime = 0
 
     // ── Local speech gate: don't pay to stream silence ─────────────────────────
@@ -1065,8 +1065,21 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // so the coach stops mid-sentence like a person would, instead of finishing
         // its turn into a conversation that has already moved on.
         case "input_audio_buffer.speech_started":
-            flushPlayback()
-            notifyListeners("rtUserSpeaking", data: [:])
+            // ONLY cut the coach off if OUR OWN gate also heard speech.
+            //
+            // The server's detector judges whatever we send it, and during playback
+            // that includes echo the cancellation didn't fully remove. Honouring it
+            // unconditionally chopped the coach off mid-word — Neal heard it as a
+            // "snapping noise, like you're shutting off abruptly", and the log shows
+            // sentences ending mid-phrase plus a run of cancelled zero-token turns.
+            //
+            // micSpeaking is the local gate, which during playback sits 20dB above the
+            // room floor — far above residual echo, but well under someone actually
+            // talking into the phone. Real barge-in still works; phantom ones don't.
+            if micSpeaking {
+                flushPlayback()
+                notifyListeners("rtUserSpeaking", data: [:])
+            }
 
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
             notifyListeners("rtCoachSaid", data: ["text": obj["transcript"] as? String ?? ""])
@@ -1215,7 +1228,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // talked straight over him. Ducking keeps real speech (which is loud, and close
         // to the phone) while residual echo stays under the line.
         let coachTalking = (now - lastAudioOutAt) * 1000 < micGateTailMs
-        let margin: Float = coachTalking ? 20.0 : 8.0
+        let margin: Float = coachTalking ? 26.0 : 8.0
         let floorClamp: Float = coachTalking ? -34.0 : -48.0
         let gate = Swift.min(Swift.max(micFloorDb + margin, floorClamp), -20.0)
 
