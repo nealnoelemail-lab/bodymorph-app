@@ -2070,7 +2070,12 @@ function buildBPProgram(profile) {
     };
     const block = (BP_EX[`p${phase}${group}`] || []).map((ex, idx) => ({ ...ex, sets: setsFor(idx), reps }));
     // Core rides along on Chest, Legs and Arms — three times a week, not five.
-    const core = (i === 0 || i === 2 || i === 4) ? BP_CORE : [];
+    // In Stage 1 it drops to two sets a movement for the same reason the main work
+    // ramps: 11 core sets against 17 working sets is a big share of a first-month
+    // session, and the finisher is where people quietly start dreading the gym.
+    const core = (i === 0 || i === 2 || i === 4)
+      ? (phase === 1 ? BP_CORE.map(ex => ({ ...ex, sets: "2" })) : BP_CORE)
+      : [];
     return {
       day: label.day,
       type: label.type,
