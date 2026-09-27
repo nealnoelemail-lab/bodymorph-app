@@ -5278,6 +5278,19 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   const startRT = useCallback(async () => {
     try {
       setState("thinking");
+      // The legacy coach gets these from arm(); skipping arm() skipped them, so the
+      // screen slept, iOS suspended the web layer and the socket died mid-conversation
+      // with no error — "my coach stopped talking". configure() starts the looping
+      // silent-audio keep-alive and holds the screen awake; the wake lock is the
+      // web-layer half of the same job. Tokens are empty on purpose: this path doesn't
+      // use Grok, it only needs the audio session and the keep-alive.
+      if (IS_NATIVE) {
+        try {
+          await VoiceCapture.configure({ openaiKey:"", cartesiaKey:"", xaiKey:"", provider: VOICE_PROVIDER,
+                                         apiBase: USE_PROXY ? PROXY_BASE : "", authToken:"", ttsToken:"" });
+        } catch (e) { log(`keepalive setup: ${e?.message || e}`); }
+        requestWakeLock();
+      }
       await startRealtimeCoach({
         instructions: buildSysPrompt(),
         voice: voiceId || undefined,
