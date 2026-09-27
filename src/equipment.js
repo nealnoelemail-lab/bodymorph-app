@@ -50,6 +50,20 @@ export const EQUIPMENT = {
   "standing-calf-raise": { label: "Standing calf raise",   area: "lower body" },
   "seated-calf-raise":   { label: "Seated calf raise",     area: "lower body" },
 
+  "hip-abduction-machine":{ label: "Hip abduction machine", area: "lower body" },
+  "hip-adductor-machine": { label: "Adductor machine",      area: "lower body" },
+  "lateral-raise-machine":{ label: "Lateral raise machine", area: "upper body" },
+  "smith-machine":       { label: "Smith machine",          area: "free weights" },
+  "glute-ham-bench":     { label: "Glute-ham / Nordic bench", area: "lower body" },
+  "step-box":            { label: "Step or plyo box",       area: "free weights" },
+  "resistance-band":     { label: "Resistance band",        area: "bodyweight" },
+  "chair":               { label: "Chair",                  area: "bodyweight" },
+  "treadmill":           { label: "Treadmill",              area: "cardio" },
+  "stationary-bike":     { label: "Stationary bike",        area: "cardio" },
+  "elliptical":          { label: "Elliptical",             area: "cardio" },
+  "rower":               { label: "Rowing machine",         area: "cardio" },
+  "stair-climber":       { label: "Stair climber",          area: "cardio" },
+
   // Bodyweight
   "pull-up-bar":         { label: "Pull-up bar",           area: "bodyweight" },
   "dip-station":         { label: "Dip station",           area: "bodyweight" },
@@ -138,9 +152,150 @@ export const EXERCISE_EQUIPMENT = {
   "Skull Crushers":                ["ez-bar", "flat-bench"],
   "Close-Grip Bench Press":        ["flat-bench", "barbell"],
   "Dip Machine / Weighted Dips":   ["dip-station"],
-  "Cable Curl superset with Triceps Dips":        ["cable-station", "dip-station"],
+  // A cable and something solid to dip on. A dedicated dip station is nice, not required.
+  "Cable Curl superset with Triceps Dips":        ["cable-station", "chair"],
   "Concentration Curl superset with Rope Pushdown": ["dumbbells", "cable-station"],
   "Spider Curl superset with Kickbacks":          ["incline-bench", "dumbbells"],
+
+
+  // ── The rest of the app's programs ────────────────────────────────────────
+  // Basic splits, HFT, Glute & Lower Body, Calisthenics and Active Aging. Tagged so
+  // the machine tile works everywhere, not only in Black Panther.
+
+  // Barbell / dumbbell compounds
+  "Barbell Back Squat":            ["squat-rack", "barbell"],
+  "Barbell Bicep Curl":            ["barbell"],
+  "Barbell Hip Thrust":            ["flat-bench", "barbell"],
+  "Barbell RDL":                   ["barbell"],
+  "Barbell Romanian Deadlift":     ["barbell"],
+  "Conventional Deadlift":         ["barbell"],
+  "Dumbbell Bench Press":          ["flat-bench", "dumbbells"],
+  "Dumbbell Shoulder Press":       ["adjustable-bench", "dumbbells"],
+  "Incline Barbell Press":         ["incline-bench", "barbell"],
+  "Standing Overhead Press":       ["barbell"],
+  "Goblet Squat":                  ["dumbbells"],
+  "Sumo Squat":                    ["bodyweight"],
+  "Sumo Squat (Dumbbell)":         ["dumbbells"],
+  "EZ-Bar Reverse Curl":           ["ez-bar"],
+  "Skull Crusher":                 ["ez-bar", "flat-bench"],
+  "Light Bicep Curl":              ["dumbbells"],
+  "Front Plate Raise":             ["weight-plate"],
+  "Wide-Grip Upright Row":         ["barbell"],
+  "Hammer Strength Decline Press": ["chest-press-machine"],
+  "Incline Dumbbell Row":          ["incline-bench", "dumbbells"],
+  "Chest-Supported Dumbbell Row":  ["incline-bench", "dumbbells"],
+
+  // Machines
+  "Adductor Machine":              ["hip-adductor-machine"],
+  "Hip Abduction":                 ["hip-abduction-machine"],
+  "Hip Abduction (Machine/Band)":  ["hip-abduction-machine"],
+  "Lateral Raise Machine":         ["lateral-raise-machine"],
+  "Leg Press (Feet High & Wide)":  ["leg-press"],
+  "Leg Press (High & Wide)":       ["leg-press"],
+  "Leg Press (feet high and wide)":["leg-press"],
+  "Leg Press Calf Press":          ["leg-press"],
+  "Pec Deck Fly":                  ["pec-deck"],
+  "Reverse Pec Deck":              ["pec-deck"],
+  "Seated Knee Extension":         ["leg-extension"],
+  "Nordic / Lying Leg Curl":       ["lying-leg-curl"],
+  "Nordic Hamstring Curl":         ["glute-ham-bench"],
+  "Incline Bench Lat Pulldown":    ["lat-pulldown"],
+
+  // Cables
+  "Cable Abduction":               ["cable-station"],
+  "Cable Crossover":               ["cable-crossover"],
+  "Cable Fly":                     ["cable-crossover"],
+  "Cable Glute Kickback":          ["cable-station"],
+  "Cable Hip Abduction":           ["cable-station"],
+  "Cable Kickback":                ["cable-station"],
+  "Cable Overhead Extension":      ["cable-station"],
+  "Overhead Cable Extension":      ["cable-station"],
+  "Cable Tricep Pushdown":         ["cable-station"],
+  "Rope Pushdown":                 ["cable-station"],
+  "Cable Woodchop":                ["cable-station"],
+  "Cable Woodchopper":             ["cable-station"],
+  "Kneeling Rope Crunch":          ["cable-station"],
+  "Face Pull":                     ["cable-station"],
+  "Rear Delt Fly":                 ["dumbbells"],
+
+  // Loaded bodyweight / bars
+  "Pull-Up / Chin-Up":             ["pull-up-bar"],
+  "Weighted Pull-Up":              ["pull-up-bar"],
+  "Hanging Knee Raise":            ["pull-up-bar"],
+  "Hanging Leg Raise":             ["pull-up-bar"],
+  "Chest Dip":                     ["dip-station"],
+  "Weighted Dip":                  ["dip-station"],
+  "Inverted Row":                  ["barbell"],
+
+  // Loaded variants of bodyweight moves
+  "Bulgarian Split Squat (Loaded)":["dumbbells", "flat-bench"],
+  "Curtsy Lunge (Dumbbell)":       ["dumbbells"],
+  "Curtsy Lunge (Loaded)":         ["dumbbells"],
+  "Glute Bridge (Barbell)":        ["barbell"],
+  "Glute Bridge (Feet Elevated)":  ["flat-bench"],
+  "Hip Thrust":                    ["flat-bench"],
+  "Romanian Deadlift (Light DB)":  ["dumbbells"],
+  "Single-Leg RDL (Loaded)":       ["dumbbells"],
+  "Step-Up (Loaded)":              ["step-box", "dumbbells"],
+  "Step-Up (Bodyweight)":          ["step-box"],
+  "Walking Lunge (Loaded)":        ["dumbbells"],
+  "Dead Bug (Weighted)":           ["dumbbells"],
+  "Weighted Dead Bug":             ["dumbbells"],
+  "Banded Lateral Walk":           ["resistance-band"],
+
+  // No equipment — Active Aging, Calisthenics, core and mobility work.
+  // Tagged explicitly rather than left blank: an untagged exercise means "we don't
+  // know", and that reads the same as "needs nothing" if you don't say which.
+  "Ankle Circles":                 ["bodyweight"],
+  "Bicycle Crunch":                ["bodyweight"],
+  "Bird Dog":                      ["bodyweight"],
+  "Bodyweight Squat":              ["bodyweight"],
+  "Chest Opener":                  ["bodyweight"],
+  "Curtsy Lunge":                  ["bodyweight"],
+  "Daily Walk":                    ["bodyweight"],
+  "Dead Bug":                      ["bodyweight"],
+  "Diamond Push-Up":               ["bodyweight"],
+  "Gentle Side Bend":              ["bodyweight"],
+  "Glute Bridge":                  ["bodyweight"],
+  "Glute Bridge (Bodyweight)":     ["bodyweight"],
+  "Glute Bridge Burnout":          ["bodyweight"],
+  "Glute Bridge March":            ["bodyweight"],
+  "Heel-to-Toe Walk":              ["bodyweight"],
+  "Hip Thrust (Bodyweight/Light)": ["bodyweight"],
+  "Hollow Hold":                   ["bodyweight"],
+  "Lying Leg Raise":               ["bodyweight"],
+  "Mountain Climbers":             ["bodyweight"],
+  "Neck & Shoulder Rolls":         ["bodyweight"],
+  "Pike Push-Up":                  ["bodyweight"],
+  "Plank":                         ["bodyweight"],
+  "Plank Circuit":                 ["bodyweight"],
+  "Plank with Shoulder Tap":       ["bodyweight"],
+  "Push-Up":                       ["bodyweight"],
+  "Push-Up (feet elevated)":       ["bodyweight"],
+  "Reverse Lunge":                 ["bodyweight"],
+  "Seated Cat-Cow":                ["bodyweight"],
+  "Seated Hamstring Stretch":      ["bodyweight"],
+  "Side Plank":                    ["bodyweight"],
+  "Side-Lying Hip Abduction":      ["bodyweight"],
+  "Single-Leg Hip Thrust":         ["bodyweight"],
+  "Single-Leg RDL":                ["bodyweight"],
+  "Single-Leg Stand":              ["bodyweight"],
+  "Standing March":                ["bodyweight"],
+  "Standing Side Leg Raise":       ["bodyweight"],
+  "Stomach Vacuum":                ["bodyweight"],
+  "Stomach Vacuum + Side Plank":   ["bodyweight"],
+  "Superman Hold":                 ["bodyweight"],
+  "Toe & Heel Raises":             ["bodyweight"],
+  "Walking Lunge":                 ["bodyweight"],
+  "Wall Push-Up":                  ["bodyweight"],
+  "Calf Raise":                    ["bodyweight"],
+  "Frog Pump":                     ["bodyweight"],
+
+  // Improvised — the no-gym programs deliberately use what's in a room.
+  "Chair / Bench Dip":             ["chair"],
+  "Sit-to-Stand (Chair Squat)":    ["chair"],
+  "Towel Door Row":                ["bodyweight"],
+  "Adductor Squeeze / Inner-Thigh":["bodyweight"],
 
   // Core finisher
   "Hanging Leg Raises":            ["pull-up-bar"],
@@ -177,6 +332,48 @@ export const SUBSTITUTIONS = {
   "Preacher Curl":               ["EZ-Bar Curl", "Barbell Curl"],
   "Front Squat":                 ["Hack Squat", "Leg Press"],
   "Rack Pull (moderate)":        ["Romanian Deadlift", "Bent-Over Barbell Row"],
+
+  // ── The rest of the app's programs ────────────────────────────────────────
+  "Pec Deck Fly":                  ["Cable Fly", "Dumbbell Bench Press"],
+  "Reverse Pec Deck":              ["Rear Delt Fly", "Face Pull"],
+  "Nordic Hamstring Curl":         ["Nordic / Lying Leg Curl", "Barbell Romanian Deadlift"],
+  "Nordic / Lying Leg Curl":       ["Seated Leg Curl", "Barbell Romanian Deadlift"],
+  "Hip Abduction":                 ["Cable Hip Abduction", "Banded Lateral Walk", "Side-Lying Hip Abduction"],
+  "Hip Abduction (Machine/Band)":  ["Cable Hip Abduction", "Banded Lateral Walk", "Side-Lying Hip Abduction"],
+  "Adductor Machine":              ["Sumo Squat (Dumbbell)", "Adductor Squeeze / Inner-Thigh"],
+  "Lateral Raise Machine":         ["Dumbbell Lateral Raise", "Cable Lateral Raise"],
+  "Seated Knee Extension":         ["Leg Extension", "Bodyweight Squat"],
+  "Leg Extension":                 ["Seated Knee Extension", "Bodyweight Squat"],
+  "Leg Press Calf Press":          ["Standing Calf Raise", "Calf Raise"],
+  "Hammer Strength Decline Press": ["Dumbbell Bench Press", "Push-Up"],
+  "Incline Bench Lat Pulldown":    ["Lat Pulldown", "Pull-Up / Chin-Up"],
+  "Lat Pulldown":                  ["Pull-Up / Chin-Up", "Inverted Row"],
+  "Pull-Up / Chin-Up":             ["Lat Pulldown", "Inverted Row"],
+  "Weighted Pull-Up":              ["Pull-Up / Chin-Up", "Lat Pulldown"],
+  "Weighted Dip":                  ["Chest Dip", "Chair / Bench Dip"],
+  "Chest Dip":                     ["Chair / Bench Dip", "Diamond Push-Up"],
+  "Inverted Row":                  ["Seated Cable Row", "Towel Door Row"],
+  "Goblet Squat":                  ["Bodyweight Squat"],
+  "Step-Up (Loaded)":              ["Walking Lunge (Loaded)", "Reverse Lunge"],
+  "Step-Up (Bodyweight)":          ["Reverse Lunge", "Walking Lunge"],
+  "Barbell Hip Thrust":            ["Hip Thrust", "Glute Bridge"],
+  "Hip Thrust":                    ["Glute Bridge"],
+  "Barbell Back Squat":            ["Goblet Squat", "Leg Press"],
+  "Conventional Deadlift":         ["Barbell Romanian Deadlift", "Single-Leg RDL"],
+  "Hanging Knee Raise":            ["Lying Leg Raise", "Dead Bug"],
+  "Hanging Leg Raise":             ["Lying Leg Raise", "Dead Bug"],
+  "Kneeling Rope Crunch":          ["Bicycle Crunch", "Dead Bug"],
+  "Face Pull":                     ["Rear Delt Fly"],
+  "Seated Cable Row":              ["Single-Arm Cable Row", "Bent-Over Barbell Row", "Inverted Row"],
+  "Seated Wide-Grip Row":          ["Seated Cable Row", "Lat Pulldown", "Bent-Over Barbell Row"],
+  "Standing Calf Raise":           ["Leg Press Calf Press", "Calf Raise"],
+  "Seated Calf Raise":             ["Standing Calf Raise", "Leg Press Calf Press", "Calf Raise"],
+  "Donkey / Standing Calf Raise":  ["Leg Press Calf Press", "Calf Raise"],
+  "Banded Lateral Walk":           ["Cable Hip Abduction", "Side-Lying Hip Abduction"],
+  "Dips (chest-lean)":             ["Chest Dip", "Chair / Bench Dip"],
+  "Dip Machine / Weighted Dips":   ["Chest Dip", "Chair / Bench Dip"],
+  "T-Bar Row":                     ["Bent-Over Barbell Row", "Single-Arm Dumbbell Row"],
+  "Chest-Supported Machine Row":   ["Chest-Supported Dumbbell Row", "Seated Cable Row"],
 };
 
 
@@ -186,11 +383,13 @@ export const SUBSTITUTIONS = {
 // this, a gym with a cable crossover gets told it can't do cable flyes.
 const IMPLIES = {
   "cable-crossover":  ["cable-station"],
-  "barbell":          ["ez-bar"],
+  "barbell":          ["ez-bar", "weight-plate"],
   "ez-bar":           ["barbell"],
   "adjustable-bench": ["flat-bench", "incline-bench", "decline-bench"],
   "power-rack":       ["squat-rack"],
   "squat-rack":       ["power-rack"],
+  "flat-bench":       ["chair", "step-box"],
+  "step-box":         ["chair"],
 };
 
 // Expand a set of owned ids to everything they cover.
@@ -200,7 +399,18 @@ function expand(owned) {
   return out;
 }
 
-export const equipmentFor = (exercise) => EXERCISE_EQUIPMENT[exercise] || [];
+// Programs label the same movement by how hard it is that week — "Barbell Hip Thrust
+// (Heavy)", "(Peak)", "(Drop Set)". Intensity doesn't change what you stand on, so
+// those resolve to the base movement rather than needing their own entry, and any
+// future intensity label works without a code change.
+//
+// Equipment qualifiers are NOT stripped: "Glute Bridge (Barbell)" and "(Bodyweight)"
+// are different answers to this question, and collapsing them would be wrong.
+const INTENSITY_LABEL = /\s*\((?:heavy|peak|volume|drop set|burnout|advanced|constant tension|light, high rep|high rep)\)/ig;
+export const normalizeExercise = (name) => String(name || "").replace(INTENSITY_LABEL, "").replace(/\s+/g, " ").trim();
+
+export const equipmentFor = (exercise) =>
+  EXERCISE_EQUIPMENT[exercise] || EXERCISE_EQUIPMENT[normalizeExercise(exercise)] || [];
 
 // Does the client's gym cover this exercise? `owned` is the set of equipment ids from
 // their photographed profile. Bodyweight always passes.
@@ -219,7 +429,8 @@ export function resolveExercise(exercise, owned) {
   if (canDo(exercise, owned)) return { exercise, substituted: false };
   const have = expand(owned);
   const missing = equipmentFor(exercise).filter((id) => id !== "bodyweight" && !have.has(id));
-  for (const alt of SUBSTITUTIONS[exercise] || []) {
+  const subs = SUBSTITUTIONS[exercise] || SUBSTITUTIONS[normalizeExercise(exercise)] || [];
+  for (const alt of subs) {
     if (canDo(alt, owned)) return { exercise: alt, substituted: true, original: exercise, missing };
   }
   // Nothing fits. Keep the original and say so — better than dropping it silently and
