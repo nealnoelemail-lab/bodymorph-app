@@ -29,8 +29,8 @@ export const EQUIPMENT = {
   "weight-plate":        { label: "Weight plate",          area: "free weights" },
 
   // Cables
-  "cable-station":       { label: "Cable machine",         area: "cables" },
-  "cable-crossover":     { label: "Cable crossover",       area: "cables" },
+  "cable-station":       { label: "Cable machine",         area: "cables", search: "" },
+  "cable-crossover":     { label: "Cable crossover",       area: "cables", search: "" },
 
   // Chest / back / shoulder machines
   "chest-press-machine": { label: "Chest press machine",   area: "upper body" },
@@ -50,9 +50,9 @@ export const EQUIPMENT = {
   "standing-calf-raise": { label: "Standing calf raise",   area: "lower body" },
   "seated-calf-raise":   { label: "Seated calf raise",     area: "lower body" },
 
-  "hip-abduction-machine":{ label: "Hip abduction machine", area: "lower body" },
-  "hip-adductor-machine": { label: "Adductor machine",      area: "lower body" },
-  "lateral-raise-machine":{ label: "Lateral raise machine", area: "upper body" },
+  "hip-abduction-machine":{ label: "Hip abduction machine", area: "lower body", search: "machine" },
+  "hip-adductor-machine": { label: "Adductor machine",      area: "lower body", search: "machine" },
+  "lateral-raise-machine":{ label: "Lateral raise machine", area: "upper body", search: "machine" },
   "smith-machine":       { label: "Smith machine",          area: "free weights" },
   "glute-ham-bench":     { label: "Glute-ham / Nordic bench", area: "lower body" },
   "step-box":            { label: "Step or plyo box",       area: "accessories", kind: "accessory" },
@@ -96,14 +96,14 @@ export const EQUIPMENT = {
   // These are ADVISORY, never required — see EXERCISE_ATTACHMENT below. They exist so
   // the tile can say "use the wide bar", which is the difference between a client
   // doing the prescribed exercise and doing something adjacent to it.
-  "wide-lat-bar":        { label: "Wide-grip lat bar",      area: "attachments", kind: "attachment" },
-  "narrow-lat-bar":      { label: "Narrow-grip bar",        area: "attachments", kind: "attachment" },
-  "v-handle":            { label: "V-handle / neutral grip", area: "attachments", kind: "attachment" },
-  "straight-cable-bar":  { label: "Straight cable bar",     area: "attachments", kind: "attachment" },
-  "ez-cable-bar":        { label: "EZ cable bar",           area: "attachments", kind: "attachment" },
-  "rope-attachment":     { label: "Rope attachment",        area: "attachments", kind: "attachment" },
-  "single-handle":       { label: "Single D-handle",        area: "attachments", kind: "attachment" },
-  "ankle-strap":         { label: "Ankle strap",            area: "attachments", kind: "attachment" },
+  "wide-lat-bar":        { label: "Wide-grip lat bar",      area: "attachments", kind: "attachment", search: "wide grip" },
+  "narrow-lat-bar":      { label: "Narrow-grip bar",        area: "attachments", kind: "attachment", search: "close grip" },
+  "v-handle":            { label: "V-handle / neutral grip", area: "attachments", kind: "attachment", search: "v-bar neutral grip" },
+  "straight-cable-bar":  { label: "Straight cable bar",     area: "attachments", kind: "attachment", search: "straight bar" },
+  "ez-cable-bar":        { label: "EZ cable bar",           area: "attachments", kind: "attachment", search: "ez bar" },
+  "rope-attachment":     { label: "Rope attachment",        area: "attachments", kind: "attachment", search: "rope" },
+  "single-handle":       { label: "Single D-handle",        area: "attachments", kind: "attachment", search: "d-handle" },
+  "ankle-strap":         { label: "Ankle strap",            area: "attachments", kind: "attachment", search: "ankle strap" },
 
   // Bodyweight
   "pull-up-bar":         { label: "Pull-up bar",           area: "bodyweight" },
@@ -686,4 +686,52 @@ export function sweepSuggestions(profile, limit = 6) {
   const have = ownedSet(profile);
   return SWEEP.filter((id) => !have.has(id)).slice(0, limit)
     .map((id) => ({ id, label: (EQUIPMENT[id] || {}).label || id, kind: kindOf(id) }));
+}
+
+// ── The demo video should match the machine in front of them ────────────────────
+// Neal: "the YouTube program will be set up based on that machine."
+//
+// Searching the raw program name is worse than it looks. "Cable Kickback (Drop Set)"
+// sends "(Drop Set)" to YouTube, which describes an intensity technique and has nothing
+// to do with the movement — so the intensity label comes off first. Then the machine and
+// the handle go on, because a client watching a rope pushdown demo while holding a
+// straight bar is being taught the wrong exercise.
+//
+// Only words that ADD something get appended. A search for "Leg Press" doesn't need
+// "leg press machine" bolted on, and free weights and bodyweight never contribute: a
+// barbell hip thrust demo isn't improved by the words "flat bench".
+const words = (s) => String(s || "").toLowerCase().match(/[a-z0-9]+/g) || [];
+
+const addPhrase = (parts, have, phrase) => {
+  const ws = words(phrase);
+  if (!ws.length) return;                       // "" means: contributes nothing
+  if (ws.some((w) => have.has(w))) return;      // already covered — adding it makes orphans
+  ws.forEach((w) => have.add(w));
+  parts.push(ws.join(" "));
+};
+
+export function videoQueryFor(exercise) {
+  // Equipment qualifiers survive normalizeExercise on purpose — "Glute Bridge (Barbell)"
+  // really is a different lift. For a search box the WORDS are wanted and the brackets
+  // are not, and a slash ("Pull-Up / Chin-Up") is just two ways of saying it.
+  const name = (normalizeExercise(exercise) || String(exercise || ""))
+    .replace(/[()]/g, " ").replace(/\s*\/\s*/g, " ").replace(/\s+/g, " ").trim();
+  const have = new Set(words(name));
+  const parts = [name];
+
+  // The thing they walk up to — but only when naming it teaches the search something.
+  const first = equipmentFor(exercise)[0];
+  const e = first ? EQUIPMENT[baseId(first)] : null;
+  if (e && first !== "bodyweight" && e.kind !== "accessory" && e.kind !== "attachment"
+      && e.area !== "free weights" && e.area !== "bodyweight") {
+    addPhrase(parts, have, e.search !== undefined ? e.search : e.label);
+  }
+
+  // The handle. This is the part that most often separates a matching demo from a
+  // near miss, which is exactly why it's here.
+  const att = attachmentFor(exercise)[0];
+  const a = att ? EQUIPMENT[att] : null;
+  if (a) addPhrase(parts, have, a.search !== undefined ? a.search : a.label);
+
+  return parts.join(" ").replace(/\s+/g, " ").trim();
 }

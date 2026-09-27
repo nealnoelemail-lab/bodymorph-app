@@ -4,7 +4,7 @@ import { hasBackend, signUpEmail, signInEmail, signOut, sendPasswordReset, getUs
 import { pullMergeDomain, pushDomainDebounced, pullMergeProfile, pushProfileDebounced } from "./sync";
 import { billingEnabled, isActive, fetchSubscription, startCheckout, openPortal } from "./billing";
 import { startRealtimeCoach, stopRealtimeCoach } from "./realtime";
-import { EQUIPMENT, setupProgress, resolveExercise, tileEquipment, sweepSuggestions, tileFor, needsNoEquipment, attachmentFor } from "./equipment";
+import { EQUIPMENT, setupProgress, resolveExercise, tileEquipment, sweepSuggestions, tileFor, needsNoEquipment, attachmentFor, videoQueryFor } from "./equipment";
 import { loadGym, captureMachine, forgetMachine, gymPhotoUrl } from "./gymsetup";
 import { anthropicFetch, grokSttFetch, grokTtsFetch, grokEphemeralToken, supabaseAccessToken, PROXY_BASE, USE_PROXY, warmProxy, lookupBarcode, startAuthKeepAlive } from "./aiproxy";
 import { decodeBarcodeFromFile, novaInfo, processedBreakdown, foodVerdict } from "./barcode";
@@ -2383,11 +2383,15 @@ function ytEmbedSrc(videoId, autoplay = false) {
 
 function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
   const vpAccent = gender === "Female" ? APP_PINK : "#e8ff00";
+  // NOTE: the pin key stays the raw exercise name. The search query is machine-aware,
+  // but a client's saved video is filed under the exercise as the program names it —
+  // changing that key would orphan every video anyone has already pinned.
   const pinnedId = videoOverrides && videoOverrides[exName];
+  const demoQ = videoQueryFor(exName);
   const [showSearch, setShowSearch] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   const [previewId, setPreviewId] = useState(null);
-  const [query, setQuery] = useState(exName);
+  const [query, setQuery] = useState(demoQ);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -2396,9 +2400,9 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
     setLoading(true); setError(null); setResults([]); setPreviewId(null);
     try {
       const isMale = gender === "Male";
-      const isDefault = q.trim().toLowerCase() === exName.trim().toLowerCase();
+      const isDefault = q.trim().toLowerCase() === demoQ.trim().toLowerCase();
       const bias = (isMale && isDefault) ? " form tutorial Charles Glass OR Athlean-X OR Jeff Nippard OR Jeremy Ethier" : "";
-      const encoded = encodeURIComponent((q || exName) + bias);
+      const encoded = encodeURIComponent((q || demoQ) + bias);
       const url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=6&q=" + encoded + "&key=" + YT_API_KEY;
       const res = await fetch(url);
       const data = await res.json();
@@ -2466,7 +2470,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
       </div>
       <div style={{ display:"flex", gap:8, marginTop:6 }}>
         <button onClick={close} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>✕ Close</button>
-        <button onClick={()=>{ setQuery(exName); setShowSearch(true); doSearch(exName); }} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>Change</button>
+        <button onClick={()=>{ setQuery(demoQ); setShowSearch(true); doSearch(demoQ); }} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:6, padding:"4px 10px", color:"#c8c8e0", fontSize:12, cursor:"pointer" }}>Change</button>
         <button onClick={unpin} style={{ background:"transparent", border:"1px solid rgba(255,60,60,0.3)", borderRadius:6, padding:"4px 10px", color:"#ff7070", fontSize:12, cursor:"pointer" }}>Remove</button>
       </div>
     </div>
@@ -2474,7 +2478,7 @@ function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
 
   /* ── Default button — Video or show pinned ── */
   return (
-    <button onClick={()=>{ if(pinnedId){ setShowVideo(true); } else { setQuery(exName); setShowSearch(true); doSearch(exName); } }}
+    <button onClick={()=>{ if(pinnedId){ setShowVideo(true); } else { setQuery(demoQ); setShowSearch(true); doSearch(demoQ); } }}
       style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, color:vpAccent, fontSize:13, fontWeight:600, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
       &#9654; {pinnedId ? "Show Video" : "Video"}
     </button>
