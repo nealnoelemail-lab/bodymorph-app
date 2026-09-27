@@ -202,6 +202,8 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
   listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
+  // Proof the silence gate is earning its keep: what share of mic audio we paid to send.
+  listeners.push(RealtimeVoice.addListener("rtGate", (e) => rtLog(`gate: sending ${e.sentPct}% of mic audio (room floor ${e.floorDb}dB)`)));
 
   rtLog("opening socket...");
   await RealtimeVoice.start({

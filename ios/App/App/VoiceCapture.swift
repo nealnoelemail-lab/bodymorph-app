@@ -917,6 +917,30 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private let micGateTailMs: Double = 400
     private var lastAudioOutAt: CFAbsoluteTime = 0
 
+    // ── Local speech gate: don't pay to stream silence ─────────────────────────
+    // Realtime bills every 100ms of audio we SEND, at $32/1M tokens. Holding the
+    // socket open costs nothing — shipping silence down it does. In a gym the coach
+    // may be open for 45 minutes and spoken to for five, so streaming the other 40
+    // is most of the bill for no benefit.
+    //
+    // Same self-calibrating approach the legacy capture already uses: track the room's
+    // noise floor and put the gate a fixed margin above it, so it adapts per room
+    // rather than fighting a hand-tuned constant.
+    //
+    // PRE-ROLL is what makes this safe. Gating on speech alone clips the first word,
+    // because by the time the level crosses the threshold the word has begun. So the
+    // most recent ~400ms is always kept buffered and flushed the instant speech starts
+    // — the server receives the full onset and its own turn detection still works.
+    private var micFloorDb: Float = -55
+    private var micSpeaking = false
+    private var lastVoiceAt: CFAbsoluteTime = 0
+    private let voiceHangSec: Double = 1.2      // MUST exceed the server's silence window
+    private let preRollMax = 10                 // ~400ms of buffers
+    private var preRoll: [Data] = []
+    private var framesSent = 0
+    private var framesSkipped = 0
+    private var lastGateReport: CFAbsoluteTime = 0
+
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
 
     // MARK: - Lifecycle
@@ -1182,7 +1206,63 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         guard bytes > 0 else { return }
         guard let ch = out.int16ChannelData else { return }
         let data = Data(bytes: ch[0], count: bytes)
+
+        // ── Is anyone actually talking? ────────────────────────────────────────
+        let level = levelDb(buffer)
+        let gate = Swift.min(Swift.max(micFloorDb + 8.0, -48.0), -20.0)
+        let now = CFAbsoluteTimeGetCurrent()
+
+        if level > gate {
+            lastVoiceAt = now
+            if !micSpeaking {
+                micSpeaking = true
+                // Flush the pre-roll so the server hears the word that started this,
+                // not the middle of it.
+                for chunk in preRoll { sendAudio(chunk) }
+                framesSent += preRoll.count
+                preRoll.removeAll()
+            }
+        } else {
+            // Only learn the floor from NON-speech, or loud talking would drag the
+            // threshold up behind it and the gate would slowly go deaf.
+            micFloorDb = level < micFloorDb ? (0.8 * micFloorDb + 0.2 * level)
+                                            : (0.95 * micFloorDb + 0.05 * level)
+            if micSpeaking && (now - lastVoiceAt) > voiceHangSec { micSpeaking = false }
+        }
+
+        if micSpeaking {
+            sendAudio(data)
+            framesSent += 1
+        } else {
+            preRoll.append(data)
+            if preRoll.count > preRollMax { preRoll.removeFirst() }
+            framesSkipped += 1
+        }
+
+        // Periodic proof it's working, and by how much.
+        if now - lastGateReport > 15 {
+            lastGateReport = now
+            let total = framesSent + framesSkipped
+            if total > 0 {
+                notifyListeners("rtGate", data: ["sentPct": Int(Double(framesSent) / Double(total) * 100),
+                                                 "floorDb": Int(micFloorDb)])
+            }
+        }
+    }
+
+    private func sendAudio(_ data: Data) {
         sendRaw("{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(data.base64EncodedString())\"}")
+    }
+
+    // RMS of the mic buffer in dBFS: ~-160 silent, 0 clipping. Same scale the legacy
+    // capture's averagePower reports, so the +8dB margin carries over.
+    private func levelDb(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let ch = buffer.floatChannelData, buffer.frameLength > 0 else { return -160 }
+        let n = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<n { let v = ch[0][i]; sum += v * v }
+        let rms = sqrtf(sum / Float(n))
+        return rms > 0 ? 20 * log10f(rms) : -160
     }
 }
 
