@@ -934,6 +934,30 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private var micFloorDb: Float = -55
     private var micSpeaking = false
     private var lastVoiceAt: CFAbsoluteTime = 0
+
+    // ── Telling the client apart from the television ───────────────────────────
+    // Confirmed on device: a TV in the room was transcribed and sent as the client's
+    // own speech. Level-versus-floor cannot fix that, because broadcast speech IS
+    // speech — and worse, the floor never learned the TV at all. The floor only
+    // updates from buffers BELOW the gate, so chatter loud enough to pass left the
+    // floor sitting at its -70 clamp while the gate stayed pinned at the -48 backstop,
+    // which is exactly where across-room dialogue lands.
+    //
+    // The discriminator that does exist is DISTANCE. The client's mouth is about a
+    // foot from the phone; a television is across the room and arrives 15-25 dB
+    // quieter. So track how loud this person is when they genuinely speak, and refuse
+    // anything far below it.
+    //
+    // Deliberate trade: someone speaking very softly, or with the phone on a bench
+    // several feet away, has to speak up. That is the right side to err on — a coach
+    // answering the television is worse than a coach missing a murmur, and the client
+    // can always move closer. `peakDb` is reported in the gate telemetry so this can
+    // be retuned from a real log rather than by guesswork.
+    private var micPeakDb: Float = -100        // -100 = haven't heard them talk yet
+    private var lastPeakAt: CFAbsoluteTime = 0
+    private let peakDecayDbPerSec: Float = 2.0 // forget a loud moment slowly
+    private let realSpeechDb: Float = -35.0    // above this = genuinely close-mic
+    private let talkWindowDb: Float = 16.0     // how far under their own voice we accept
     private let voiceHangSec: Double = 1.2      // MUST exceed the server's silence window
     private let preRollMax = 10                 // ~400ms of buffers
     private var preRoll: [Data] = []
@@ -954,6 +978,16 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         guard !token.isEmpty else { call.reject("no token"); return }
 
         stopInternal()
+
+        // Forget the last session's room. The plugin outlives a conversation, and a
+        // voice reference learned shouting over a gym would make the gate too strict
+        // at home the next morning.
+        micPeakDb = -100
+        lastPeakAt = 0
+        micFloorDb = -55
+        framesSent = 0
+        framesSkipped = 0
+        preRoll.removeAll()
 
         guard var comps = URLComponents(string: "wss://api.openai.com/v1/realtime") else { call.reject("bad url"); return }
         comps.queryItems = [URLQueryItem(name: "model", value: model)]
@@ -1229,8 +1263,26 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         // to the phone) while residual echo stays under the line.
         let coachTalking = (now - lastAudioOutAt) * 1000 < micGateTailMs
         let margin: Float = coachTalking ? 26.0 : 8.0
-        let floorClamp: Float = coachTalking ? -34.0 : -48.0
-        let gate = Swift.min(Swift.max(micFloorDb + margin, floorClamp), -20.0)
+
+        // Learn how loud this person is — but never from the coach's own playback, or
+        // the echo would inflate the reference and deafen the gate to the client.
+        if !coachTalking {
+            let dt = lastPeakAt > 0 ? Float(now - lastPeakAt) : 0
+            lastPeakAt = now
+            if micPeakDb <= -99 { micPeakDb = level }                            // seed, don't crawl
+            else if level > micPeakDb { micPeakDb = 0.4 * micPeakDb + 0.6 * level }
+            else { micPeakDb -= peakDecayDbPerSec * dt }                         // slow release
+            micPeakDb = Swift.min(Swift.max(micPeakDb, -100.0), -6.0)
+        }
+
+        // Once we know what they sound like, hold the line relative to THEM. Until
+        // then stay at -44: strict enough to sit above typical across-room dialogue,
+        // loose enough that a normal voice opens it on the first word.
+        let heardRealSpeech = micPeakDb > realSpeechDb
+        let floorClamp: Float = coachTalking ? -34.0 : (heardRealSpeech ? -42.0 : -44.0)
+        var gate = Swift.max(micFloorDb + margin, floorClamp)
+        if heardRealSpeech && !coachTalking { gate = Swift.max(gate, micPeakDb - talkWindowDb) }
+        gate = Swift.min(gate, -20.0)
 
         if level > gate {
             lastVoiceAt = now
@@ -1270,7 +1322,9 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             let total = framesSent + framesSkipped
             if total > 0 {
                 notifyListeners("rtGate", data: ["sentPct": Int(Double(framesSent) / Double(total) * 100),
-                                                 "floorDb": Int(micFloorDb)])
+                                                 "floorDb": Int(micFloorDb),
+                                                 "peakDb": Int(micPeakDb),
+                                                 "gateDb": Int(gate)])
             }
         }
     }

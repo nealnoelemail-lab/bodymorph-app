@@ -211,7 +211,11 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
   // Proof the silence gate is earning its keep: what share of mic audio we paid to send.
-  listeners.push(RealtimeVoice.addListener("rtGate", (e) => rtLog(`gate: sending ${e.sentPct}% of mic audio (room floor ${e.floorDb}dB)`)));
+  // peak = how loud this client is when they genuinely speak; gate = the line anything
+  // must clear to be sent. If background chatter is getting through, those two numbers
+  // are what say whether the window is too wide or the reference never formed.
+  listeners.push(RealtimeVoice.addListener("rtGate", (e) => rtLog(
+    `gate: sending ${e.sentPct}% of mic audio (floor ${e.floorDb}dB, your voice ${e.peakDb > -100 ? e.peakDb + "dB" : "not heard yet"}, cutoff ${e.gateDb}dB)`)));
 
   rtLog("opening socket...");
   await RealtimeVoice.start({
