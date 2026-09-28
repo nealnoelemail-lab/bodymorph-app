@@ -222,7 +222,7 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
     } catch (err) { rtLog(`cost meter: ${err.message}`); }
     onEvent && onEvent({ type: "idle" });
   }));
-  listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error })));
+  listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error, fatal: !!e.fatal })));
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
   // Proof the silence gate is earning its keep: what share of mic audio we paid to send.

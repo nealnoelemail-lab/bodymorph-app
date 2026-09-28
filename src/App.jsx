@@ -5957,7 +5957,15 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           if (e.type === "user")      { log(`you: ${e.text}`); rtRemember("user", e.text); }
           if (e.type === "coach")     { log(`coach: ${e.text}`); rtRemember("assistant", e.text); setState("listening"); }
           if (e.type === "action")    { setLogConfirm(`\u2713 ${e.result}`); setTimeout(() => setLogConfirm(null), 2200); }
-          if (e.type === "error")     { try { console.log(`[RT] ERROR: ${e.error}`); } catch {} log(`realtime error: ${e.error}`); setState("idle"); }
+          if (e.type === "error")     {
+            try { console.log(`[RT] ERROR: ${e.error}`); } catch {}
+            log(`realtime error: ${e.error}`);
+            setState("idle");
+            // A fatal one already tore the session down natively. Say so on screen —
+            // the debug strip is off, so otherwise the coach just goes quiet and the
+            // client has no idea why or that Try Again would fix it.
+            if (e.fatal) setError(e.error);
+          }
         },
       });
     } catch (err) {

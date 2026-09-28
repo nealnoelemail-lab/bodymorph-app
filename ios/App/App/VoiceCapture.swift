@@ -9,6 +9,16 @@ import UIKit
 // back to JS as a base64 m4a clip (which JS sends to Whisper exactly as before).
 // We also force the audio session to the SPEAKER and pair it with the "audio"
 // background mode so it keeps listening with the screen off.
+// A format with no sample rate or no channels means the audio hardware isn't ours — the
+// session never activated, usually because another app holds it (error 561017449, '!pri':
+// a call, Siri, a voice memo). Connecting a node to a graph in that state does not return
+// an error, it throws an OBJECTIVE-C exception, which Swift cannot catch, so the app is
+// killed outright. Both audio graphs in this file check this before touching a node.
+func audioFormatUsable(_ f: AVAudioFormat?) -> Bool {
+    guard let f = f else { return false }
+    return f.sampleRate > 0 && f.channelCount > 0
+}
+
 @objc(VoiceCapturePlugin)
 public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
     public let identifier = "VoiceCapturePlugin"
@@ -433,14 +443,20 @@ public class VoiceCapturePlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDel
         }
     }
 
-    private func setupTTSEngine() {
-        if ttsEngineReady { return }
-        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)
+    @discardableResult
+    private func setupTTSEngine() -> Bool {
+        if ttsEngineReady { return true }
+        guard audioFormatUsable(ttsEngine.outputNode.outputFormat(forBus: 0)),
+              let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false) else {
+            print("[VoiceCapture] no output device — refusing to build the TTS graph")
+            return false
+        }
         ttsFormat = fmt
         ttsEngine.attach(ttsPlayer)
         ttsEngine.connect(ttsPlayer, to: ttsEngine.mainMixerNode, format: fmt)
         ttsEngine.prepare()
         ttsEngineReady = true
+        return true
     }
 
     // Shared: reset state + open the Grok TTS WebSocket. Auth: PROXY mode hands the
@@ -1185,13 +1201,21 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - Playback (model voice out)
 
-    private func setupEngine() {
-        if engineReady { return }
-        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)
+    @discardableResult
+    private func setupEngine() -> Bool {
+        if engineReady { return true }
+        // mainMixerNode is lazily created from the output hardware, so reading its format
+        // is the cheap way to ask "do we actually have an audio device right now?"
+        guard audioFormatUsable(engine.outputNode.outputFormat(forBus: 0)) else {
+            print("[Realtime] no output device — refusing to build the graph")
+            return false
+        }
+        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false) else { return false }
         playFormat = fmt
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: fmt)
         engineReady = true
+        return true
     }
 
     private func playPCM16(base64: String) {
@@ -1244,16 +1268,42 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
             try session.setCategory(.playAndRecord, mode: .voiceChat,
                                     options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
             try session.setActive(true)
-        } catch { print("[Realtime] audio session: \(error)") }
+        } catch {
+            // 561017449 is '!pri' — another app owns the audio session: a call, Siri, a
+            // voice memo, a Bluetooth handoff. Usually a moment later it's ours. Stand
+            // fully down and ask once more before giving up.
+            print("[Realtime] audio session: \(error) — retrying")
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            do { try session.setActive(true) }
+            catch {
+                // Refusing the microphone is survivable. Building an audio graph without
+                // one is not: the engine throws an Objective-C exception that Swift
+                // cannot catch, and the app is killed mid-sentence. So stop here.
+                print("[Realtime] audio session unavailable: \(error)")
+                notifyListeners("rtError", data: ["error": "Couldn't get the microphone — something else on your phone is using it. Close it and tap the coach again.", "fatal": true])
+                stopInternal()
+                return
+            }
+        }
 
-        setupEngine()
+        guard setupEngine() else {
+            notifyListeners("rtError", data: ["error": "Audio isn't available right now. Close anything else using sound and try again.", "fatal": true])
+            stopInternal()
+            return
+        }
         let input = engine.inputNode
         // Hardware/OS echo cancellation + noise suppression on the input.
         if #available(iOS 13.0, *) { try? input.setVoiceProcessingEnabled(true) }
 
         let inFmt = input.outputFormat(forBus: 0)
+        guard audioFormatUsable(inFmt), let conv = AVAudioConverter(from: inFmt, to: outFormat) else {
+            print("[Realtime] mic format unusable: \(inFmt)")
+            notifyListeners("rtError", data: ["error": "Couldn't open the microphone. Close anything else using it and try again.", "fatal": true])
+            stopInternal()
+            return
+        }
         micFormat = inFmt
-        converter = AVAudioConverter(from: inFmt, to: outFormat)
+        converter = conv
 
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inFmt) { [weak self] buffer, _ in
