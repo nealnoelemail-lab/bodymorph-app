@@ -999,6 +999,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     // second of near-silence. So the gate now has to hear speech SUSTAIN before it
     // opens at all. A door closing never becomes a turn; the pre-roll still carries
     // the onset, so nothing real is clipped.
+    private var interruptionObserver: NSObjectProtocol?
     private var candidateStart: CFAbsoluteTime = 0
     private let speechOpenMinSec: Double = 0.18   // under a syllable, over a thump
     private let dipToleranceSec: Double = 0.15    // natural speech dips; don't restart on one
@@ -1031,6 +1032,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         speechRunStart = 0
         bargeInPending = false
         candidateStart = 0
+        observeInterruptions()
         micFloorDb = -55
         framesSent = 0
         framesSkipped = 0
@@ -1089,6 +1091,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func stopInternal() {
         running = false
+        stopObservingInterruptions()
         stopCapture()
         stopPlayback()
         ws?.cancel(with: .goingAway, reason: nil)
@@ -1212,6 +1215,7 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false) else { return false }
         playFormat = fmt
+        if engine.attachedNodes.contains(player) { engine.detach(player) }
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: fmt)
         engineReady = true
@@ -1325,6 +1329,60 @@ public class RealtimeVoicePlugin: CAPPlugin, CAPBridgedPlugin {
     private func stopCapture() {
         if capturing { engine.inputNode.removeTap(onBus: 0); capturing = false }
         converter = nil
+    }
+
+    // ── Phone calls ────────────────────────────────────────────────────────────
+    // Neal crashed the app by opening the coach WHILE ON A CALL. That path is now
+    // handled, but it exposed the other half: a call arriving while the coach is
+    // ALREADY running. iOS deactivates our session and stops the engine without
+    // asking, so the coach would simply go dead mid-workout — no audio, no
+    // explanation, and no way back short of force-quitting.
+    //
+    // The socket costs nothing to hold (we only pay for audio we SEND), so an
+    // interruption parks the audio and keeps the conversation. When the call ends,
+    // iOS tells us whether we may resume, and we pick the microphone back up.
+    private func observeInterruptions() {
+        guard interruptionObserver == nil else { return }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self = self, self.running else { return }
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+
+            switch type {
+            case .began:
+                // The call owns the hardware now. Let go of it cleanly rather than
+                // letting the engine die under us.
+                self.stopCapture()
+                self.stopPlayback()
+                self.engine.stop()
+                self.engineReady = false          // the graph must be rebuilt after this
+                self.notifyListeners("rtPaused", data: ["reason": "call"])
+
+            case .ended:
+                // .shouldResume is iOS saying the hardware is ours again. Without it,
+                // grabbing the session back would fail exactly as it did on the call.
+                let opts = AVAudioSession.InterruptionOptions(
+                    rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+                guard opts.contains(.shouldResume) else {
+                    self.notifyListeners("rtError", data: ["error": "Audio stopped and iOS didn't hand it back. Tap the coach to start again.", "fatal": true])
+                    self.stopInternal()
+                    return
+                }
+                self.startAudio()                 // re-activates, re-validates, re-taps
+                // startAudio tears the session down if the mic still isn't ours, and
+                // has already told JS why. Don't announce a recovery that didn't happen.
+                if self.running && self.capturing { self.notifyListeners("rtResumed", data: [:]) }
+
+            @unknown default: break
+            }
+        }
+    }
+
+    private func stopObservingInterruptions() {
+        if let o = interruptionObserver { NotificationCenter.default.removeObserver(o) }
+        interruptionObserver = nil
     }
 
     private func sendMic(_ buffer: AVAudioPCMBuffer) {

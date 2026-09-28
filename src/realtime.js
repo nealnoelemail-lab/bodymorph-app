@@ -222,6 +222,17 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
     } catch (err) { rtLog(`cost meter: ${err.message}`); }
     onEvent && onEvent({ type: "idle" });
   }));
+  // A phone call takes the microphone and iOS gives it back when the call ends. The
+  // conversation survives — the socket costs nothing to hold, only sent audio bills —
+  // so this is a pause, not a failure, and it should read like one.
+  listeners.push(RealtimeVoice.addListener("rtPaused", (e) => {
+    rtLog(`paused (${e.reason || "interrupted"}) — holding the conversation`);
+    onEvent && onEvent({ type: "paused", reason: e.reason || "interrupted" });
+  }));
+  listeners.push(RealtimeVoice.addListener("rtResumed", () => {
+    rtLog("resumed — microphone is back");
+    onEvent && onEvent({ type: "resumed" });
+  }));
   listeners.push(RealtimeVoice.addListener("rtError", (e) => onEvent && onEvent({ type: "error", error: e.error, fatal: !!e.fatal })));
   listeners.push(RealtimeVoice.addListener("rtOpen", () => onEvent && onEvent({ type: "open" })));
   listeners.push(RealtimeVoice.addListener("rtAudio", (e) => onEvent && onEvent({ type: "audio", text: `mic ${e.micHz}Hz` })));
