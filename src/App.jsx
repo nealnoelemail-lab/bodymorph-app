@@ -2056,7 +2056,7 @@ function buildBPProgram(profile) {
   const info  = getBPPhaseInfo(phase);
   const reps  = phase === 1 ? "12-15" : "15-20";
 
-  return BP_SESSIONS.map((group, i) => {
+  const weeklySchedule = BP_SESSIONS.map((group, i) => {
     const label = BP_DAY_LABELS[i];
     // Sets per exercise. Stage 1 ramps 4/4/3/3/3 rather than a flat 4 — Neal:
     // "make sure we're starting reasonably... that way there's no early burnout,
@@ -2089,28 +2089,64 @@ function buildBPProgram(profile) {
       program: "Black Panther",
     };
   });
+
+  // EVERY builder must return this shape, not a bare array of days. The app reads
+  // `program.weeklySchedule` everywhere — the session screen, the training week, the
+  // printable chart, the gym-equipment needs list. Returning the array directly made
+  // `weeklySchedule` undefined, every one of those fell back to [], and the program
+  // rendered completely empty: pick Black Panther and there is nothing there at all.
+  // It fails silently too, because `(program.weeklySchedule || [])` is exactly the
+  // defensive idiom that turns a missing field into a blank screen instead of an error.
+  return {
+    bpPhase: phase,
+    overview: `Black Panther — Phase 1 of a three-phase build. Stage ${phase}: ${info.name} (${info.weeks}). ${info.focus}`,
+    weeklySchedule,
+    stretching: "full",
+    nutrition: macrosFor(profile),
+    progressMilestones: [
+      { week:1,  goal:"Re-entry. Leave two reps in the tank on every set — the point of these four weeks is connective tissue catching up with muscle memory, not a number." },
+      { week:5,  goal:"Volume steps to 6 sets and the exercises rotate. Rest stays short; chase the pump, not the load." },
+      { week:10, goal:"Peak volume, final rotation. Chest, back and shoulders carry the extra set — that's the V-taper this phase is building toward." },
+    ],
+  };
+}
+
+// Every builder owes the app the same shape. Black Panther shipped returning a bare
+// array of days, and because the whole app reads `program.weeklySchedule` behind a
+// `|| []`, the result wasn't an error — it was a program with no exercises in it, which
+// is a far worse thing to hand a paying client. This catches it at the boundary: a
+// builder that returns an array still WORKS, and says so loudly enough to get fixed.
+function asProgram(built, who) {
+  if (Array.isArray(built)) {
+    try { console.error(`[program] ${who} returned a bare array — wrapping it. It should return { weeklySchedule }.`); } catch {}
+    return { weeklySchedule: built };
+  }
+  if (!built || !Array.isArray(built.weeklySchedule)) {
+    try { console.error(`[program] ${who} returned no weeklySchedule.`, built); } catch {}
+  }
+  return built;
 }
 
 function buildProgram(profile) {
   // Route to At-Home / Active-Aging builder if selected (no gym, low-impact)
   if (profile.focus && profile.focus.includes("Active Aging")) {
-    return buildHomeProgram(profile);
+    return asProgram(buildHomeProgram(profile), "Active Aging");
   }
   // Route to BodyMorph (No Gym) bodyweight / calisthenics builder if selected
   if (profile.focus && profile.focus.includes("BodyMorph (No Gym)")) {
-    return buildCalisthenicsProgram(profile);
+    return asProgram(buildCalisthenicsProgram(profile), "Calisthenics");
   }
   // Route to HFT builder if selected
   if (profile.focus && profile.focus.includes("HFT")) {
-    return buildHFTProgram(profile);
+    return asProgram(buildHFTProgram(profile), "HFT");
   }
   // Route to the Black Panther builder if selected
   if (profile.focus && profile.focus.includes("Black Panther")) {
-    return buildBPProgram(profile);
+    return asProgram(buildBPProgram(profile), "Black Panther");
   }
   // Route to Glute & Lower Body builder if selected
   if (profile.focus && profile.focus.includes("Booty")) {
-    return buildGLBProgram(profile);
+    return asProgram(buildGLBProgram(profile), "Glute & Lower Body");
   }
 
   const { stretch } = pickFocusGroups(profile);
