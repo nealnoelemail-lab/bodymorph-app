@@ -16,7 +16,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
-  pushHealthSummary, pushDailyBurn, burnPeriods, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
+  pushHealthSummary, pushDailyBurn, fetchDailyBurn, burnPeriods, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt, listConversations } from "./messaging";
 import { syncHealth, healthInsights, healthDaily, todayEnergyBurned } from "./healthkit";
@@ -6743,6 +6743,15 @@ function ExerciseLogger({ index, ex, history, dateStr, onSave, gender, videoOver
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────────
 function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioSessions, onBack, userId, watch, watchDaily }) {
+  // The client's own burn history, same rows the coach's report reads.
+  const [burnRows, setBurnRows] = useState([]);
+  const [burnPeriod, setBurnPeriod] = useState("week");
+  useEffect(() => {
+    if (!userId) { setBurnRows([]); return; }
+    let on = true;
+    fetchDailyBurn(userId, 365).then(r => { if (on) setBurnRows(r || []); }).catch(() => {});
+    return () => { on = false; };
+  }, [userId]);
   const [view, setView] = useState("body");          // body | charts | log | report
   const exNames = Object.keys(logs);
   const [selectedEx, setSelectedEx] = useState(exNames[0] || null);
@@ -6897,6 +6906,50 @@ function Progress({ logs, rewards, bodyEntries, onAddBody, onDeleteBody, cardioS
                     Over {periodName} you've logged <b style={{ color:"#fff" }}>{periodSessions.length}</b> set entries across <b style={{ color:"#fff" }}>{periodExNames.length}</b> exercises on <b style={{ color:"#fff" }}>{periodDateKeys.length}</b> training days.
                   </div>
                 </div>
+
+                {/* ── CALORIES BURNED, the client's own view ───────────────────
+                    The same roll-up the coach sees, because a client who asks "why is
+                    my burn low" deserves the same answer their coach gets rather than
+                    a different number in a different place. Estimated share shown for
+                    the same reason it is shown everywhere else: a figure that is half
+                    inferred should never look like a measurement. */}
+                {burnRows.length > 0 && (() => {
+                  const P = [["week","7d"],["month","30d"],["quarter","90d"],["year","1yr"]];
+                  const b = burnPeriods(burnRows)[burnPeriod];
+                  if (!b) return null;
+                  const thin = b.coverage < 60, heavy = b.estimatedPct >= 40;
+                  const cell = { background:"#12121a", border:"1px solid #2a2a3d", borderRadius:10, padding:"9px 6px", textAlign:"center" };
+                  const num  = (c) => ({ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:19, color:c || "#f0f0f8" });
+                  const cap  = { fontSize:11, color:"#9898b8", marginTop:2 };
+                  return (
+                    <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:16, marginBottom:14 }}>
+                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:10, flexWrap:"wrap" }}>
+                        <div style={{ fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:1, color:"#ff9d5c" }}>CALORIES BURNED</div>
+                        <div style={{ display:"flex", gap:4 }}>
+                          {P.map(([k,lbl]) => (
+                            <button key={k} onClick={()=>setBurnPeriod(k)}
+                              style={{ background: burnPeriod===k ? "#ff9d5c" : "transparent", color: burnPeriod===k ? "#000" : "#9898b8",
+                                       border:`1px solid ${burnPeriod===k ? "#ff9d5c" : "#2a2a3d"}`, borderRadius:99,
+                                       padding:"3px 9px", fontSize:11.5, cursor:"pointer", fontWeight:600 }}>{lbl}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:7 }}>
+                        <div style={cell}><div style={num("#ff9d5c")}>{b.avgTotal.toLocaleString()}</div><div style={cap}>avg/day</div></div>
+                        <div style={cell}><div style={num()}>{b.avgMoving.toLocaleString()}</div><div style={cap}>moving</div></div>
+                        <div style={cell}><div style={num()}>{b.avgResting.toLocaleString()}</div><div style={cap}>resting</div></div>
+                        <div style={cell}><div style={num(heavy ? "#ff9d5c" : "#3ddc84")}>{b.estimatedPct}%</div><div style={cap}>estimated</div></div>
+                      </div>
+                      <div style={{ fontSize:12, color: thin || heavy ? "#ff9d5c" : "#8a8aa4", marginTop:9, lineHeight:1.45 }}>
+                        {thin
+                          ? `Only ${b.days} of ${b.windowDays} days have data — this is a sample, not an average.`
+                          : heavy
+                            ? `${b.estimatedPct}% of this is estimated for the hours your watch was off — about ${b.avgUntrackedHrs}h a day. Wearing it overnight would make this measured.`
+                            : `${b.days} days of data · watch off about ${b.avgUntrackedHrs}h a day.`}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Watch summary — appears automatically when Apple Health has watch data; no setup. */}
                 {watch && (
@@ -13599,11 +13652,11 @@ export default function BodyMorph() {
   const [dashFlash, setDashFlash]     = useState(null);   // readout over the Voice Coach circle
   const flashTimer = useRef(null);
   const dashFlashRef = useRef(null);                      // for the async tile handlers
-  // FIFTEEN seconds, not five. Neal: "it goes and looks at it for about five seconds,
-  // then it flips back." Five is fine for a single number you glance at; the burn
-  // breakdown is three figures you're expected to add up, and it was gone before you'd
-  // finished reading it.
-  const FLASH_MS = 15000;
+  // TWENTY seconds. Five was the original, fifteen wasn't quite enough either: the
+  // burn breakdown is three figures you're meant to add up and then reason about, and
+  // reading it is not the same as glancing at it. There are two ways to dismiss it
+  // early, so a longer hold costs nothing.
+  const FLASH_MS = 20000;
   // Re-tapping restarts the clock rather than letting the first timer cut the second short.
   const showFlash = (payload) => {
     clearTimeout(flashTimer.current);
@@ -14123,7 +14176,8 @@ export default function BodyMorph() {
       const moving = (e.active || 0) + (e.activeEst || 0);
       if (moving > 0)     rows.push({ value: moving.toLocaleString(),        label: "moving" });
       if (e.resting)      rows.push({ value: e.resting.toLocaleString(),     label: "resting" });
-      if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "resting · est.", muted: true });
+      // "estimated", not "resting · est." — see the note below, which explains it.
+      if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "estimated", muted: true });
 
       // The one piece of context the figures can't carry: how long the watch was off.
       const lines = [];
