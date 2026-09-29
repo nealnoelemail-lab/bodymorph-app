@@ -1749,6 +1749,11 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         let specs: [(HKQuantityTypeIdentifier, HKStatisticsOptions, HKUnit, String, Double)] = [
             (.restingHeartRate, .discreteAverage, HKUnit.count().unitDivided(by: .minute()), "restingHR", 1),
             (.activeEnergyBurned, .cumulativeSum, .kilocalorie(), "activeKcal", 1),
+            // Basal per day, so a completed day's watch-off gap can be reconstructed
+            // for history. A FULL past day needs no hourly detail — the shortfall
+            // against a whole day's BMR is the answer. Hourly buckets only matter for
+            // today, where billing hours that haven't happened yet would be wrong.
+            (.basalEnergyBurned, .cumulativeSum, .kilocalorie(), "restingKcal", 1),
             (.appleExerciseTime, .cumulativeSum, .minute(), "exerciseMin", 1),
             (.distanceWalkingRunning, .cumulativeSum, .meterUnit(with: .kilo), "distanceKm", 10),
             (.heartRateVariabilitySDNN, .discreteAverage, .secondUnit(with: .milli), "hrvMs", 1),

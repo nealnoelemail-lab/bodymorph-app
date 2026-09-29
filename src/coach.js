@@ -213,6 +213,40 @@ export async function pushHealthSummary(userId, insights, daily = null) {
   );
 }
 
+// ── Daily burn, measured and estimated (daily_burn table) ───────────────────────
+// The bridge between what the watch recorded and what the client actually burned is
+// computed on device from HealthKit's hourly detail. That detail is not something a
+// report can go back and re-derive, so each day is stored once, as it was computed.
+//
+// UPSERT ONLY, NEVER DELETE. Reports need an unbroken series — a missing day reads as
+// a day of no activity rather than a day nobody recorded, which is exactly the lie
+// this whole feature exists to stop telling.
+export async function pushDailyBurn(userId, rows) {
+  if (!supabase || !userId || !Array.isArray(rows) || !rows.length) return 0;
+  // Today's row is rewritten on every sync as the day fills in; past days settle once
+  // and then stop changing. Chunked because a first run backfills months at once.
+  const stamped = rows.map(r => ({ ...r, user_id: userId, updated_at: new Date().toISOString() }));
+  let written = 0;
+  for (let i = 0; i < stamped.length; i += 200) {
+    const { error } = await supabase.from("daily_burn")
+      .upsert(stamped.slice(i, i + 200), { onConflict: "user_id,day" });
+    if (error) { console.warn("pushDailyBurn:", error.message); break; }
+    written += Math.min(200, stamped.length - i);
+  }
+  return written;
+}
+
+// Report side: the burn series for a window. Returns oldest-first, ready to chart.
+export async function fetchDailyBurn(userId, days = 90) {
+  if (!supabase || !userId) return [];
+  const cut = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const { data, error } = await supabase.from("daily_burn")
+    .select("day, active_kcal, resting_kcal, active_est, resting_est, total_kcal, untracked_min, est_source")
+    .eq("user_id", userId).gte("day", cut).order("day", { ascending: true });
+  if (error) { console.warn("fetchDailyBurn:", error.message); return []; }
+  return data || [];
+}
+
 // Either side: the latest weekly watch summary for a user (null if none/no watch).
 export async function fetchHealthSummary(userId) {
   if (!supabase || !userId) return null;

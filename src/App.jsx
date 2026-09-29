@@ -16,7 +16,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
-  pushHealthSummary, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
+  pushHealthSummary, pushDailyBurn, fetchDailyBurn, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt, listConversations } from "./messaging";
 import { syncHealth, healthInsights, healthDaily, todayEnergyBurned } from "./healthkit";
@@ -589,6 +589,42 @@ function allTimelines(profile, now) {
 function isQuickHit(profile) {
   const tl = goalTimeline(profile, profile.deficit || "moderate");
   return !tl || tl.weeks <= 6;
+}
+
+// A COMPLETED day needs no hourly detail. The hourly buckets exist so that today
+// doesn't get billed for hours that haven't happened yet; for a day that is fully in
+// the past the shortfall against a whole day's resting floor IS the answer.
+//
+// Same rule as the live bridge and for the same reason: fill the floor, never the
+// movement. Movement is only credited where the watch recorded no active energy at
+// all AND the phone measured distance — a day where the watch was on keeps its own
+// figure untouched.
+function dayBurnSplit(row, profile, perMinHint) {
+  const activeKcal  = Math.max(0, Math.round(row.activeKcal  || 0));
+  const restingKcal = Math.max(0, Math.round(row.restingKcal || 0));
+  const bmr = calorieTargets(profile, profile?.deficit)?.bmr || 0;
+  // Prefer the rate their own watch implies — see bridgeBurn for why a population
+  // formula next to measured hours puts a visible step in the client's own data.
+  const perMin = perMinHint > 0 ? perMinHint : (bmr > 0 ? bmr / 1440 : 0);
+  if (!perMin) return null;
+
+  const restingEst = Math.max(0, Math.round(perMin * 1440 - restingKcal));
+  const kg = (parseFloat(profile?.weight) || 0) * 0.453592;
+  const km = row.distanceKm || 0;
+  // Only when the watch credited NOTHING all day. Anything else risks stacking an
+  // estimate on top of real data, which is the one thing that would make this
+  // indefensible.
+  const activeEst = (activeKcal === 0 && km > 0 && kg > 0) ? Math.round(0.6 * kg * km) : 0;
+
+  return {
+    active_kcal: activeKcal,
+    resting_kcal: restingKcal,
+    active_est: activeEst,
+    resting_est: restingEst,
+    total_kcal: activeKcal + restingKcal + activeEst + restingEst,
+    untracked_min: Math.round(Math.min(1440, restingEst / perMin)),
+    est_source: perMinHint > 0 ? "observed" : "formula",
+  };
 }
 
 // ── BRIDGING MEASURED AND UNMEASURED BURN ──────────────────────────────────────
@@ -13928,7 +13964,44 @@ export default function BodyMorph() {
       const energy = await todayEnergyBurned();
       // Measured burn alone omits every hour the watch spent charging. Bridge it here,
       // once, so every consumer — tile, Net Calories, the coach — sees the same number.
-      setBurnedToday(energy?.ok ? bridgeBurn(energy, profileRef.current) : null);
+      const bridged = energy?.ok ? bridgeBurn(energy, profileRef.current) : null;
+      setBurnedToday(bridged);
+
+      // STORE THE SPLIT. The hourly detail this is derived from can't be re-queried for
+      // a day that has passed, so if it isn't written down as it happens, a report has
+      // nothing to draw. Today's row is rewritten each sync as the day fills in; the
+      // completed days behind it settle once.
+      if (userRef.current?.id && profileRef.current) {
+        try {
+          const prof = profileRef.current;
+          // The client's own observed resting rate, carried across to the backfill so
+          // history is filled at the same rate today is — otherwise a chart would step
+          // where the estimator changed rather than where the client's life did.
+          const perMinHint = bridged?.estimateSource === "observed" && bridged?.restingByHour
+            ? Math.max(...bridged.restingByHour.slice(0, new Date().getHours())) / 60
+            : 0;
+          const today = ymdLocal();
+          const rows = [];
+          for (const d of (daily?.metrics || [])) {
+            if (!d.day || d.day >= today) continue;          // today is written from the exact split
+            const split = dayBurnSplit(d, prof, perMinHint);
+            if (split) rows.push({ day: d.day, ...split });
+          }
+          if (bridged?.ok) {
+            rows.push({
+              day: today,
+              active_kcal: bridged.active || 0,
+              resting_kcal: bridged.resting || 0,
+              active_est: bridged.activeEst || 0,
+              resting_est: bridged.restingEst || 0,
+              total_kcal: bridged.total || 0,
+              untracked_min: bridged.untrackedMin || 0,
+              est_source: bridged.estimateSource || "formula",
+            });
+          }
+          await pushDailyBurn(userRef.current.id, rows);
+        } catch (e) { console.warn("daily burn store:", e?.message || e); }
+      }
       setBurnState(energy?.ok ? null : (energy?.reason || "error"));
       if (insights && userRef.current?.id) {
         setWatchInsights(insights);
