@@ -4596,16 +4596,39 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                   overflows the circle at the roomy sizes. Step everything down a notch
                   once there are 4+ lines rather than let text spill past the edge. */}
               {(() => {
-                const n = (dashFlash.lines || []).length;
+                const n = (dashFlash.lines || []).length + (dashFlash.rows || []).length;
                 const dense = n >= 4;
                 return (
               <div style={{ width:196, height:196, boxSizing:"border-box", padding:dense?11:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
                 {/* Emoji only where a tile actually carries one (the burn flame Neal
                     asked for). No decorative default. */}
                 {dashFlash.emoji && <span style={{ fontSize:dense?18:24, lineHeight:1 }}>{dashFlash.emoji}</span>}
-                <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title}</span>
+                {/* With rows, the TITLE is dropped. Neal: "instead of repeating what's
+                    there, show the three basic lines where the calories came from."
+                    The tile that was just tapped already said what this is; the circle's
+                    one screenful of room is better spent on the breakdown. */}
+                {dashFlash.title && !dashFlash.rows && (
+                  <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title}</span>
+                )}
                 {dashFlash.total && (
                   <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
+                )}
+                {/* ROWS — number right-aligned in its own column so the values stack and
+                    visibly ADD UP to the figure above them. Centred text can't do that,
+                    and "do these add up to the total" is the exact question a coach is
+                    asking when they open this. */}
+                {dashFlash.rows && (
+                  <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:3 }}>
+                    {dashFlash.rows.map((r) => (
+                      <div key={r.label} style={{ display:"flex", alignItems:"baseline", gap:7 }}>
+                        <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:600, fontSize:dense?13:14,
+                                       color:r.muted ? "#7a7a95" : "#dcdcf0", minWidth:42, textAlign:"right" }}>
+                          {r.value}
+                        </span>
+                        <span style={{ color:"#9898b8", fontSize:dense?11:11.5, lineHeight:1.2 }}>{r.label}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {/* One per line — a single "X active + Y resting" row runs to the circle's
                     edge at four digits and reads cramped. */}
@@ -13934,27 +13957,38 @@ export default function BodyMorph() {
       setBurnedToday(e);
       setBurnState(null);
       syncAppleHealth();
-      // Show the SPLIT, not just "updated". The tile can only show one number, and the
-      // whole point of this metric is that it's active + resting — seeing both is how
-      // you check it against the Fitness app's Move ring, which counts active only.
-      const parts = [];
-      if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
-      if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting (tracked)`);
-      // Say plainly that this part was not measured, and WHY — "watch off 7h 20m" is
-      // the difference between a number the client trusts and a number they argue with.
+      // WHERE THE NUMBER CAME FROM. Neal: "show the three basic lines where the
+      // calories came from that added up to 1,896... that can be a good indicator for
+      // a coach who is coaching somebody, or a user who is concerned about where his
+      // calories are coming from."
+      //
+      // Three sources, and they MUST sum to the headline — that is the thing being
+      // communicated, so the rows are laid out as a column of figures rather than
+      // centred prose. Most clients will never open this and don't need to; the ones
+      // who do are usually asking "is this number real", and an addition they can
+      // check in their head answers that faster than any wording.
+      //
+      // Moving folds measured active and distance-derived active together on purpose:
+      // from the client's side it is all "I moved", and the watch-on/watch-off split
+      // within it is a device detail, not a physiology one. The resting split is the
+      // opposite — tracked vs estimated is exactly what they'd want to interrogate.
+      const rows = [];
+      const moving = (e.active || 0) + (e.activeEst || 0);
+      if (moving > 0)     rows.push({ value: moving.toLocaleString(),        label: "moving" });
+      if (e.resting)      rows.push({ value: e.resting.toLocaleString(),     label: "resting · tracked" });
+      if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "resting · est.", muted: true });
+
+      // The one piece of context the figures can't carry: how long the watch was off.
+      const lines = [];
       if (e.restingEst > 0) {
         const h = Math.floor(e.untrackedMin / 60), m = e.untrackedMin % 60;
-        const off = h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
-        parts.push(`${e.restingEst.toLocaleString()} resting (estimated)`);
-        parts.push(`watch off ${off}`);
+        lines.push(`watch off ${h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`}`);
       }
-      // Separate line on purpose: "my watch was charging" and "I walked and got no
-      // credit for it" are different problems with different fixes.
-      if (e.activeEst > 0) parts.push(`${e.activeEst.toLocaleString()} from ${e.uncreditedKm} km walked`);
       showFlash({
-        emoji: "\u{1F525}", title: "CALORIES BURNED", color: "#ff9d5c",
+        emoji: "\u{1F525}", color: "#ff9d5c",
         total: e.total.toLocaleString(),
-        lines: parts.length ? parts : ["from Apple Health"],
+        rows: rows.length ? rows : null,
+        lines: rows.length ? lines : ["from Apple Health"],
       });
       return;
     }
