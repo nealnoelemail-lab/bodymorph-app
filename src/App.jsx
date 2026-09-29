@@ -14172,12 +14172,23 @@ export default function BodyMorph() {
       // from the client's side it is all "I moved", and the watch-on/watch-off split
       // within it is a device detail, not a physiology one. The resting split is the
       // opposite — tracked vs estimated is exactly what they'd want to interrogate.
+      // ONE resting number. Neal, after three attempts at splitting it: "what's the
+      // difference between 662 resting and 1,050 resting? It's not making sense."
+      //
+      // He was right each time, and the reason is that the difference was never the
+      // KIND of energy — both rows were resting metabolism — it was WHEN: one measured
+      // while the watch was worn, one filled for the hours it charged. Any label
+      // omitting the time read as two contradictory answers to one question.
+      //
+      // His call, and the right one: "I don't think anyone is going to split hairs over
+      // where the resting came from, whether it was the device or your sleeping without
+      // your device." So resting is a single figure, and the line underneath says what
+      // went into it for anyone who does want to know.
       const rows = [];
       const moving = (e.active || 0) + (e.activeEst || 0);
-      if (moving > 0)     rows.push({ value: moving.toLocaleString(),        label: "moving" });
-      if (e.resting)      rows.push({ value: e.resting.toLocaleString(),     label: "resting" });
-      // "estimated", not "resting · est." — see the note below, which explains it.
-      if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "estimated", muted: true });
+      const resting = (e.resting || 0) + (e.restingEst || 0);
+      if (moving > 0)  rows.push({ value: moving.toLocaleString(),  label: "moving" });
+      if (resting > 0) rows.push({ value: resting.toLocaleString(), label: "resting" });
 
       // WHAT THE ESTIMATE IS BUILT ON. Neal asked whether it was BMI — it isn't, and
       // that question is the answer to why this line should say so. BMI is weight over
@@ -14192,15 +14203,12 @@ export default function BodyMorph() {
       // This replaces "watch off 7h 40m" at Neal's request. The duration said how big
       // the gap was; this says why the number filling it can be trusted, which is the
       // question anyone looking at an estimate is actually asking.
+      // What went into that combined figure. Only shown when some of it actually WAS
+      // estimated — on a day the watch never came off, claiming an estimate that
+      // doesn't exist would be its own small lie.
       const lines = [];
-      if (e.restingEst > 0) {
-        // Short and parallel. "based on your resting rate" clipped the circle at both
-        // edges — the note sits at the bottom, where a circle is narrowest — and
-        // wrapping it left the word "rate" stranded on a line of its own.
-        lines.push(e.estimateSource === "observed"
-          ? "your resting rate"
-          : "your BMR");
-      }
+      const est = (e.restingEst || 0) + (e.activeEst || 0);
+      if (est > 0) lines.push("measured and estimated");
       showFlash({
         id: "burn", emoji: "\u{1F525}", color: "#ff9d5c",
         total: e.total.toLocaleString(),
