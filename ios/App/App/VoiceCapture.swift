@@ -1645,23 +1645,33 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         // off at 21:15, a gap while it charges over lunch. A bucket that is partly
         // filled gets partly topped up.
         var restByHour = [Double](repeating: 0, count: 24)
-        if let bt = HKObjectType.quantityType(forIdentifier: .basalEnergyBurned) {
+        var activeByHour = [Double](repeating: 0, count: 24)
+        var distByHour = [Double](repeating: 0, count: 24)     // km
+
+        func byHour(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, into sink: @escaping (Int, Double) -> Void) {
+            guard let t = HKObjectType.quantityType(forIdentifier: id) else { return }
             group.enter()
             let q = HKStatisticsCollectionQuery(
-                quantityType: bt, quantitySamplePredicate: pred,
+                quantityType: t, quantitySamplePredicate: pred,
                 options: .cumulativeSum, anchorDate: start,
                 intervalComponents: DateComponents(hour: 1))
             q.initialResultsHandler = { _, collection, _ in
                 collection?.enumerateStatistics(from: start, to: Date()) { stat, _ in
                     let h = Calendar.current.component(.hour, from: stat.startDate)
-                    if h >= 0 && h < 24 {
-                        restByHour[h] = stat.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
-                    }
+                    if h >= 0 && h < 24 { sink(h, stat.sumQuantity()?.doubleValue(for: unit) ?? 0) }
                 }
                 group.leave()
             }
             self.store.execute(q)
         }
+
+        byHour(.basalEnergyBurned,  .kilocalorie())      { restByHour[$0] = $1 }
+        byHour(.activeEnergyBurned, .kilocalorie())      { activeByHour[$0] = $1 }
+        // DISTANCE, because it is the one measurement a phone in a pocket still makes.
+        // A client with no watch has no active-energy samples at all, but the iPhone
+        // has been counting their steps and their distance the whole time — so their
+        // movement is not unknown, only uncredited.
+        byHour(.distanceWalkingRunning, .meterUnit(with: .kilo)) { distByHour[$0] = $1 }
 
         group.notify(queue: .main) {
             let a = active >= 0 ? active : 0
@@ -1676,6 +1686,8 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
                 // estimate there means there is exactly one BMR formula in the app.
                 "totalKcal": haveAny ? Int((a + b).rounded()) : -1,
                 "restingByHour": restByHour.map { Int($0.rounded()) },
+                "activeByHour": activeByHour.map { Int($0.rounded()) },
+                "distanceByHour": distByHour.map { ($0 * 100).rounded() / 100 },   // km, 2dp
             ])
         }
     }

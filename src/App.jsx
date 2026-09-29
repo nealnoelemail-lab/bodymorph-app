@@ -669,14 +669,48 @@ function bridgeBurn(energy, profile) {
     }
   }
 
+  // ── MOVEMENT, FOR SOMEONE WITH NO WATCH AT ALL ───────────────────────────────
+  // Active energy is an Apple Watch feature. A client with only an iPhone has NO
+  // active-energy samples, ever — so filling only the resting floor would credit them
+  // for lying still and nothing else, and a 12,000-step day would read the same as a
+  // day on the sofa. That's a worse lie than the one we started with.
+  //
+  // But their movement is not unknown, only uncredited: the phone in their pocket has
+  // been counting steps and DISTANCE the whole time. Distance is a measurement, not a
+  // guess, and the energy cost of moving a known mass a known distance is one of the
+  // better-established numbers in exercise physiology — about 0.6 kcal per kg per km,
+  // NET of resting, which is what we want here because resting is already counted
+  // separately above. (Sanity-checked against Neal's own watch: 3.07 miles logged 296
+  // active kcal, and 0.6 x kg x km lands within a few percent of that.)
+  //
+  // Credited HOUR BY HOUR, and only where the watch recorded nothing. An hour the watch
+  // did measure keeps its measured figure — the estimate never stacks on top of real
+  // data, which is the only way this stays honest rather than double-counted.
+  const kg = (parseFloat(profile.weight) || 0) * 0.453592;
+  const dist = energy?.distanceByHour;
+  const act = energy?.activeByHour;
+  let activeEst = 0, movedKm = 0;
+  if (kg > 0 && Array.isArray(dist) && Array.isArray(act)) {
+    for (let h = 0; h <= hourNow && h < 24; h++) {
+      const km = dist[h] || 0;
+      if (km <= 0) continue;
+      if ((act[h] || 0) > 0) continue;          // the watch already credited this hour
+      activeEst += 0.6 * kg * km;
+      movedKm += km;
+    }
+  }
+
   return {
     ...energy,
     active: measuredActive,
     resting: measuredResting,
     measured: energy?.total ?? 0,
-    estimated: Math.round(estimated),
+    estimated: Math.round(estimated + activeEst),
+    restingEst: Math.round(estimated),
+    activeEst: Math.round(activeEst),
+    uncreditedKm: Math.round(movedKm * 10) / 10,
     untrackedMin: Math.round(untrackedMin),
-    total: (energy?.total ?? 0) + Math.round(estimated),
+    total: (energy?.total ?? 0) + Math.round(estimated + activeEst),
     canEstimate: true,
     // Which rate filled the gaps — the client's own watch, or the formula. Worth
     // keeping: if a coach ever queries a number, this is the first thing to look at.
@@ -13908,12 +13942,15 @@ export default function BodyMorph() {
       if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting (tracked)`);
       // Say plainly that this part was not measured, and WHY — "watch off 7h 20m" is
       // the difference between a number the client trusts and a number they argue with.
-      if (e.estimated > 0) {
+      if (e.restingEst > 0) {
         const h = Math.floor(e.untrackedMin / 60), m = e.untrackedMin % 60;
         const off = h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
-        parts.push(`${e.estimated.toLocaleString()} resting (estimated)`);
+        parts.push(`${e.restingEst.toLocaleString()} resting (estimated)`);
         parts.push(`watch off ${off}`);
       }
+      // Separate line on purpose: "my watch was charging" and "I walked and got no
+      // credit for it" are different problems with different fixes.
+      if (e.activeEst > 0) parts.push(`${e.activeEst.toLocaleString()} from ${e.uncreditedKm} km walked`);
       showFlash({
         emoji: "\u{1F525}", title: "CALORIES BURNED", color: "#ff9d5c",
         total: e.total.toLocaleString(),

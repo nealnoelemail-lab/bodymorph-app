@@ -131,6 +131,8 @@ export async function todayEnergyBurned() {
       active: r.activeKcal >= 0 ? Math.max(0, parseInt(r.activeKcal) || 0) : null,
       resting: r.restingKcal >= 0 ? Math.max(0, parseInt(r.restingKcal) || 0) : null,
       restingByHour: Array.isArray(r.restingByHour) ? r.restingByHour.map(n => Math.max(0, parseInt(n) || 0)) : null,
+      activeByHour: Array.isArray(r.activeByHour) ? r.activeByHour.map(n => Math.max(0, parseInt(n) || 0)) : null,
+      distanceByHour: Array.isArray(r.distanceByHour) ? r.distanceByHour.map(n => Math.max(0, parseFloat(n) || 0)) : null,
     };
   } catch (e) { return { ok: false, reason: "error", detail: e?.message || String(e) }; }
 }
