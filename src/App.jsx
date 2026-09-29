@@ -16,7 +16,7 @@ import { fetchRole, redeemCoachAccess, redeemCoachInvite, clientHasCoach, genera
   listEvents, addEvent, deleteEvent,
   listCoachCues, saveCoachCue, deleteCoachCue, fetchMyCoachCues, summarizeWeek,
   fetchCoachProfile, updateCoachProfile, resolveAtRisk, getPhotoSharing, setPhotoSharing,
-  pushHealthSummary, pushDailyBurn, fetchDailyBurn, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
+  pushHealthSummary, pushDailyBurn, burnPeriods, fetchBranding, saveBranding, fetchMyCoachBranding } from "./coach";
 import { uploadPhoto, signedPhotoUrl, isStoragePath } from "./storage";
 import { myCoachId, fetchThread, sendMessage, markThreadRead, unreadByClient, unreadForClient, subscribeThread, threadForPrompt, listConversations } from "./messaging";
 import { syncHealth, healthInsights, healthDaily, todayEnergyBurned } from "./healthkit";
@@ -13055,6 +13055,9 @@ function CoachCuesEditor({ coachId, clientId }) {
 }
 
 function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee, onFeeSaved, onOpenChat }) {
+  // Which window the burn panel is showing. Weekly by default — that's the report
+  // this sits in — but the same data rolls into 30/90/365 without another fetch.
+  const [burnPeriod, setBurnPeriod] = useState("week");
   const [fee, setFee] = useState(clientFee == null ? "" : String(clientFee));
   const [feeSaved, setFeeSaved] = useState(false);
   useEffect(() => { setFee(clientFee == null ? "" : String(clientFee)); }, [clientFee, clientId]);
@@ -13172,6 +13175,55 @@ function CoachClientView({ coachId, clientId, detail, loading, onBack, clientFee
                 <WeekTile key={t.label} value={t.value} label={t.label}
                   sub={t.d ? t.d.txt : null} color={t.d ? (t.d.good ? C.green : "#ff9d5c") : undefined} />
               ))}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ── CALORIES BURNED, over any window ──────────────────────────────────
+          Neal wanted this to roll into monthly, quarterly and annual reports, so the
+          period is a switch rather than four separate panels. Burn is what Net
+          Calories is built on, and a coach adjusting someone's intake is really
+          adjusting the gap between this number and what they ate.
+
+          THE ESTIMATED SHARE IS SHOWN, ALWAYS. Apple only records resting energy
+          while a watch is worn, so the app fills the charging hours from the client's
+          own resting rate. That fill is defensible precisely because it is never
+          hidden — a coach cutting calories on a figure that is 60% inferred deserves
+          to know before they do it, not after. */}
+      {detail.burn?.length > 0 && (() => {
+        const P = [["week","7 days"],["month","30 days"],["quarter","90 days"],["year","12 months"]];
+        const b = burnPeriods(detail.burn)[burnPeriod];
+        if (!b) return null;
+        // Thin data is a finding, not something to average over quietly.
+        const thin = b.coverage < 60;
+        const heavy = b.estimatedPct >= 40;
+        return (
+          <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:8 }}>
+              <div style={S.inputLabel}>Calories burned</div>
+              <div style={{ display:"flex", gap:4 }}>
+                {P.map(([k,lbl]) => (
+                  <button key={k} onClick={()=>setBurnPeriod(k)}
+                    style={{ background: burnPeriod===k ? "#e8ff00" : "transparent", color: burnPeriod===k ? "#000" : C.muted,
+                             border:`1px solid ${burnPeriod===k ? "#e8ff00" : C.border}`, borderRadius:99,
+                             padding:"3px 9px", fontSize:11.5, cursor:"pointer", fontWeight:600 }}>{lbl}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(92px, 1fr))", gap:8, marginBottom:8 }}>
+              <WeekTile value={b.avgTotal.toLocaleString()} label="Avg / day" />
+              <WeekTile value={b.avgMoving.toLocaleString()} label="Moving" />
+              <WeekTile value={b.avgResting.toLocaleString()} label="Resting" />
+              <WeekTile value={`${b.estimatedPct}%`} label="Estimated"
+                color={heavy ? "#ff9d5c" : C.green} />
+            </div>
+            <div style={{ fontSize:12, color: thin || heavy ? "#ff9d5c" : C.muted, marginBottom:18, lineHeight:1.45 }}>
+              {thin
+                ? `Only ${b.days} of ${b.windowDays} days have data — treat this as a sample, not an average.`
+                : heavy
+                  ? `${b.estimatedPct}% of this is estimated — their device was off for about ${b.avgUntrackedHrs}h a day. Usable as a trend, not as a basis for a calorie change.`
+                  : `${b.days} days of data · device off about ${b.avgUntrackedHrs}h a day.`}
             </div>
           </>
         );

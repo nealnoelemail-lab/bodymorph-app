@@ -113,7 +113,7 @@ export async function resolveAtRisk(coachId, clientId, outcome, note) {
 // data so the existing chart transforms apply directly.
 export async function fetchClientDetail(clientId) {
   if (!supabase || !clientId) return null;
-  const [profile, body, steps, sleep, logs, food, rewards, rel, watch] = await Promise.all([
+  const [profile, body, steps, sleep, logs, food, rewards, rel, watch, burn] = await Promise.all([
     supabase.from("profiles").select("first_name, last_name, email, phone, extra").eq("id", clientId).maybeSingle(),
     supabase.from("body_entries").select("*").eq("user_id", clientId),
     supabase.from("step_entries").select("*").eq("user_id", clientId),
@@ -123,6 +123,13 @@ export async function fetchClientDetail(clientId) {
     supabase.from("rewards").select("*").eq("user_id", clientId).maybeSingle(),
     supabase.from("relationships").select("share_photos").eq("client_id", clientId).maybeSingle(), // RLS scopes to this coach's row
     supabase.from("health_summaries").select("data").eq("user_id", clientId).order("week_start", { ascending: false }).limit(1).maybeSingle(),
+    // A year of burn: one row per day, so this is a few hundred rows at most. Pulled
+    // once here and sliced into week/month/quarter/year rather than fetched four times.
+    supabase.from("daily_burn")
+      .select("day, active_kcal, resting_kcal, active_est, resting_est, total_kcal, untracked_min, est_source")
+      .eq("user_id", clientId)
+      .gte("day", new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10))
+      .order("day", { ascending: true }),
   ]);
   const bodyEntries = (body.data || [])
     .map(r => ({ date: r.day, weight: r.weight, bodyFat: r.body_fat, photos: r.photos || {} }))
@@ -141,7 +148,79 @@ export async function fetchClientDetail(clientId) {
     lastActive: maxDay(bodyEntries.slice(-1)[0]?.date, [...stepEntries].map(s => s.date).sort().slice(-1)[0], workoutDays.slice(-1)[0]),
     sharePhotos: !!rel.data?.share_photos,  // client consent — photos render only when true
     watch: watch.data?.data || null,        // latest weekly watch summary (null = no watch)
+    burn: burn.data || [],                  // daily burn, measured + estimated, last 365d
   };
+}
+
+// ── Burn, rolled up over any window ─────────────────────────────────────────────
+// One roll-up used by every report length. Neal: "make it available to roll into a
+// monthly, quarterly, annual report" — so the period is a parameter, not four copies
+// of the same arithmetic diverging over time.
+//
+// THE ESTIMATED SHARE TRAVELS WITH THE NUMBER, always. A burn figure that omits the
+// hours a watch spent charging is incomplete, and one that silently includes a filled
+// estimate is misleading — the only honest version carries both and says which is
+// which. A coach reading "2,400 a day" needs to know whether that is measured or
+// half-inferred before they cut anyone's calories on the strength of it.
+//
+// `days` is how many days actually have data, NOT the length of the window. A client
+// who wore nothing for three weeks of a quarter should show a thin quarter, not a
+// confident average over the fortnight they did wear it.
+export function summarizeBurn(rows, windowDays) {
+  const cut = new Date(Date.now() - (windowDays - 1) * 86400000).toISOString().slice(0, 10);
+  const win = (rows || []).filter(r => r.day >= cut);
+  if (!win.length) return null;
+
+  const sum = (f) => win.reduce((t, r) => t + (Number(f(r)) || 0), 0);
+  const total    = sum(r => r.total_kcal);
+  const measured = sum(r => (r.active_kcal || 0) + (r.resting_kcal || 0));
+  const est      = sum(r => (r.active_est || 0) + (r.resting_est || 0));
+  const n = win.length;
+
+  return {
+    windowDays,
+    days: n,                                        // days with data, not days in window
+    coverage: Math.round((n / windowDays) * 100),   // how much of the window we can speak to
+    avgTotal:    Math.round(total / n),
+    avgMeasured: Math.round(measured / n),
+    avgEstimated: Math.round(est / n),
+    avgMoving:   Math.round(sum(r => (r.active_kcal || 0) + (r.active_est || 0)) / n),
+    avgResting:  Math.round(sum(r => (r.resting_kcal || 0) + (r.resting_est || 0)) / n),
+    // The number that decides how much weight to put on any of the above.
+    estimatedPct: total > 0 ? Math.round((est / total) * 100) : 0,
+    avgUntrackedHrs: Math.round((sum(r => r.untracked_min) / n / 60) * 10) / 10,
+    totalKcal: total,
+  };
+}
+
+// Week / month / quarter / year off ONE fetch. The rows are small (one per day), so a
+// year is a few hundred — cheaper to pull once and slice than to round-trip four times.
+export function burnPeriods(rows) {
+  return {
+    week:    summarizeBurn(rows, 7),
+    month:   summarizeBurn(rows, 30),
+    quarter: summarizeBurn(rows, 90),
+    year:    summarizeBurn(rows, 365),
+  };
+}
+
+// Monthly means for charting a long report — a year of daily points is unreadable,
+// and the month is the unit a client actually feels progress in.
+export function burnByMonth(rows) {
+  const by = {};
+  for (const r of rows || []) {
+    const m = (r.day || "").slice(0, 7);            // YYYY-MM
+    if (!m) continue;
+    (by[m] = by[m] || []).push(r);
+  }
+  return Object.keys(by).sort().map((m) => {
+    const d = by[m];
+    const avg = (f) => Math.round(d.reduce((t, r) => t + (Number(f(r)) || 0), 0) / d.length);
+    const est = avg(r => (r.active_est || 0) + (r.resting_est || 0));
+    const tot = avg(r => r.total_kcal);
+    return { month: m, days: d.length, avgTotal: tot, avgEstimated: est,
+             estimatedPct: tot > 0 ? Math.round((est / tot) * 100) : 0 };
+  });
 }
 
 // ── Progress-photo sharing consent (client side) ─────────────────────────────────
@@ -291,9 +370,15 @@ export function buildReportData(detail) {
   ["goal", "focus", "days", "time", "pace", "paceMode", "deadlineWeeks", "targetWeight",
    "goalWeight", "activity", "gender"].forEach(k => { if (p[k] != null && p[k] !== "") goal[k] = p[k]; });
 
+  // Burn at every length, so the same report object serves a weekly briefing and a
+  // quarterly review without a second shape to maintain.
+  const burn = burnPeriods(detail.burn || []);
+
   return {
     week,
     goal,
+    burn,
+    burnByMonth: (detail.burn || []).length ? burnByMonth(detail.burn) : [],
     weightByWeek,
     workoutsByWeek,
     daysFoodLogged14d: food14.length,
@@ -319,7 +404,10 @@ export async function generateClientSummary(detail) {
     ' "highlights": ["2-4 short bullets on what went WELL, each citing a real number"],\n' +
     ' "watchouts": ["1-3 short bullets on what needs attention, each citing a real number; empty array if the week was clean"],\n' +
     ' "adjustments": [{"area": "training|nutrition|recovery|engagement", "action": "specific change the coach should make or discuss", "why": "one sentence tying it to the data"}]}\n\n' +
-    "Rules: use ONLY numbers present in the data (never invent values); null/missing means not tracked — skip it, don't call it a problem; a resting heart rate DROP is good; weightByWeek direction should be judged against the stated goal; 1-3 adjustments, ranked most important first; write for a busy coach — punchy and concrete, no hedging.\n\n" +
+    "Rules: use ONLY numbers present in the data (never invent values); null/missing means not tracked — skip it, don't call it a problem; a resting heart rate DROP is good; weightByWeek direction should be judged against the stated goal; 1-3 adjustments, ranked most important first; write for a busy coach — punchy and concrete, no hedging.\n" +
+    // Burn is partly inferred whenever a watch was off the wrist, and a coach who cuts
+    // someone's calories on a number that was half-filled is being misled by us.
+    "BURN: `burn.week/month/quarter/year` each carry `estimatedPct` — the share of that burn the app filled in for hours no device was recording (a watch on its charger). Treat burn with estimatedPct above 40 as indicative only: you may mention it, but never base a calorie adjustment on it without saying the figure is partly estimated. `coverage` below 60 means most of the window has no data at all — say so rather than averaging the few days that do. Never present an estimated figure as measured.\n\n" +
     `Client: ${detail.name}\nData: ${JSON.stringify(data)}`;
   try {
     const res = await anthropicFetch({ model: "claude-sonnet-4-6", max_tokens: 900, messages: [{ role: "user", content: prompt }] });
