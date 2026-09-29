@@ -4385,7 +4385,20 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                   style={{ ...cell, cursor:"pointer", WebkitAppearance:"none", font:"inherit", textAlign:"center" }}>
             <span style={lbl}>&#128293; CALORIES<br/>BURNED</span>
             <span style={big(burned == null ? "#4a4a6a" : "#ff9d5c")}>{burned == null ? "—" : burned.toLocaleString()}</span>
-            <span style={sub}>{burned == null ? (BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health")) : "total today"}</span>
+            {/* The SPLIT, not "total today". A single burn number hides which half is
+                wrong, and the halves come from different places: resting is your body
+                ticking over, active is movement Apple actually credited. Without a watch
+                on the wrist, steps from a pocketed phone produce NO active energy at all
+                — so "7,699 steps but 90 active" is a visible, explainable gap instead of
+                a total that just looks too small. Net Calories is built on this, so it
+                has to be legible. */}
+            <span style={sub}>
+              {burned == null
+                ? (BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health"))
+                : (burnedToday?.active != null
+                    ? `${burnedToday.active.toLocaleString()} from moving`
+                    : "total today")}
+            </span>
           </button>
 
           {/* NET CALORIES — intake minus burned. Negative = deficit (green). Tap shows
