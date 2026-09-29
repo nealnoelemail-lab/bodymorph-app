@@ -14179,11 +14179,27 @@ export default function BodyMorph() {
       // "estimated", not "resting · est." — see the note below, which explains it.
       if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "estimated", muted: true });
 
-      // The one piece of context the figures can't carry: how long the watch was off.
+      // WHAT THE ESTIMATE IS BUILT ON. Neal asked whether it was BMI — it isn't, and
+      // that question is the answer to why this line should say so. BMI is weight over
+      // height squared, a ratio with no energy in it at all.
+      //
+      // Two possible bases, and which one was used matters:
+      //   observed — the client's OWN resting rate, taken from the hours their watch
+      //              did record today. Their real physiology, not a population average.
+      //   formula  — Mifflin-St Jeor from height, weight, age and sex, used only when
+      //              there is no recorded hour to learn from.
+      //
+      // This replaces "watch off 7h 40m" at Neal's request. The duration said how big
+      // the gap was; this says why the number filling it can be trusted, which is the
+      // question anyone looking at an estimate is actually asking.
       const lines = [];
       if (e.restingEst > 0) {
-        const h = Math.floor(e.untrackedMin / 60), m = e.untrackedMin % 60;
-        lines.push(`watch off ${h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`}`);
+        // Short and parallel. "based on your resting rate" clipped the circle at both
+        // edges — the note sits at the bottom, where a circle is narrowest — and
+        // wrapping it left the word "rate" stranded on a line of its own.
+        lines.push(e.estimateSource === "observed"
+          ? "your resting rate"
+          : "your BMR");
       }
       showFlash({
         id: "burn", emoji: "\u{1F525}", color: "#ff9d5c",
