@@ -1636,6 +1636,33 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         sum(.activeEnergyBurned) { active = $0 }
         sum(.basalEnergyBurned) { basal = $0 }
 
+        // WHEN was the watch actually recording? Resting energy is only written while
+        // it's on the wrist, so an hour with nothing in it is an hour nobody measured —
+        // not an hour the client didn't burn anything. JS tops those hours up to the
+        // client's BMR floor; it can't do that without knowing which hours they are.
+        //
+        // Hourly buckets rather than a single total, because wear is ragged: on at 6:40,
+        // off at 21:15, a gap while it charges over lunch. A bucket that is partly
+        // filled gets partly topped up.
+        var restByHour = [Double](repeating: 0, count: 24)
+        if let bt = HKObjectType.quantityType(forIdentifier: .basalEnergyBurned) {
+            group.enter()
+            let q = HKStatisticsCollectionQuery(
+                quantityType: bt, quantitySamplePredicate: pred,
+                options: .cumulativeSum, anchorDate: start,
+                intervalComponents: DateComponents(hour: 1))
+            q.initialResultsHandler = { _, collection, _ in
+                collection?.enumerateStatistics(from: start, to: Date()) { stat, _ in
+                    let h = Calendar.current.component(.hour, from: stat.startDate)
+                    if h >= 0 && h < 24 {
+                        restByHour[h] = stat.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+                    }
+                }
+                group.leave()
+            }
+            self.store.execute(q)
+        }
+
         group.notify(queue: .main) {
             let a = active >= 0 ? active : 0
             let b = basal >= 0 ? basal : 0
@@ -1643,7 +1670,12 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve([
                 "activeKcal": active >= 0 ? Int(a.rounded()) : -1,
                 "restingKcal": basal >= 0 ? Int(b.rounded()) : -1,
+                // MEASURED ONLY. The native layer stays purely factual — it reports what
+                // Apple recorded and nothing else. Filling the gaps needs the client's
+                // height, weight, age and sex, which live on the JS side, and keeping the
+                // estimate there means there is exactly one BMR formula in the app.
                 "totalKcal": haveAny ? Int((a + b).rounded()) : -1,
+                "restingByHour": restByHour.map { Int($0.rounded()) },
             ])
         }
     }

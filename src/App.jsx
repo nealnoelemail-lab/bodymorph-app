@@ -591,6 +591,99 @@ function isQuickHit(profile) {
   return !tl || tl.weeks <= 6;
 }
 
+// ── BRIDGING MEASURED AND UNMEASURED BURN ──────────────────────────────────────
+// Neal: "you can't wear your watch 24 hours a day... of course you're burning calories
+// overnight. So you're going to have to use height and weight to average the burn for
+// the time the watch is not on your wrist."
+//
+// A watch measures burn; a charger does not. Apple only writes resting energy while the
+// watch is ON THE WRIST, so a day's recorded burn silently omits every hour it spent
+// charging — for most people the whole night, and for anyone on a 10-hour battery a
+// chunk of the evening too. Neal's own numbers: a full day read 835 kcal, of which his
+// walk was 456. Nearly a thousand calories of simply being alive were never written
+// down, and Net Calories is intake MINUS burn, so every client looked like they were
+// eating a surplus they weren't.
+//
+// THE RULE IS: FILL THE FLOOR, NEVER THE MOVEMENT.
+//
+// Resting energy is the one thing that can be asserted without observing it — a living
+// body burns at least its BMR whether or not anything was watching. Movement is the
+// opposite: if the watch was charging and they carried the shopping in, nobody knows,
+// and inventing a number for it would be exactly the fabrication Neal rejected when he
+// said "I want the accurate numbers, I don't want estimated numbers."
+//
+// So an hour with no recorded resting energy gets topped up to the BMR floor, an hour
+// that is partly recorded gets topped up by the difference, and ACTIVE energy is never
+// touched. That makes the estimate deliberately conservative: it under-counts anyone
+// who was busy off-wrist, which is the safe direction for a coaching app — it will
+// never tell someone they have room to eat that they haven't earned.
+//
+// Returns the measured and estimated parts SEPARATELY. Nothing downstream is allowed to
+// show the sum without being able to say how much of it was measured.
+function bridgeBurn(energy, profile) {
+  const measuredActive  = energy?.active  ?? null;
+  const measuredResting = energy?.resting ?? null;
+  const base = { ...energy, measured: energy?.total ?? 0, estimated: 0, untrackedMin: 0, canEstimate: false };
+
+  const hours = energy?.restingByHour;
+  if (!Array.isArray(hours) || !profile) return base;
+
+  const now = new Date();
+  const hourNow = now.getHours();
+
+  // WHICH RESTING RATE TO FILL WITH.
+  //
+  // Mifflin-St Jeor off height/weight/age/sex is the fallback, and it's the same formula
+  // the nutrition targets use — one formula in the app, because two would drift apart
+  // and nobody would notice which was wrong.
+  //
+  // But when the watch HAS been recording, the client's own observed rate is better than
+  // any population formula, and it removes a seam that would otherwise show: Neal's watch
+  // implies ~143 kcal/hr resting, where Mifflin might say 85. Filling at 85 next to
+  // measured hours at 143 puts a visible step in his own day.
+  //
+  // The estimator is the MAX of the complete hours. Partial wear can only ever pull an
+  // hour's total DOWN — there is no mechanism that inflates basal energy — so the largest
+  // complete hour is the fully-worn rate rather than an outlier.
+  let perHourObserved = 0;
+  for (let h = 0; h < hourNow && h < 24; h++) perHourObserved = Math.max(perHourObserved, hours[h] || 0);
+
+  const bmr = calorieTargets(profile, profile.deficit)?.bmr;
+  const plausible = perHourObserved > 20 && perHourObserved < 300;   // guard against a junk sample
+  const perMin = plausible ? perHourObserved / 60 : (bmr > 0 ? bmr / 1440 : 0);
+  if (!perMin) return base;
+  let estimated = 0, untrackedMin = 0;
+
+  for (let h = 0; h <= hourNow && h < 24; h++) {
+    // The current hour is only partly over — never bill a client for time that hasn't
+    // happened yet, or at 9am they'd be shown a full day's resting burn.
+    const minutes = h < hourNow ? 60 : now.getMinutes();
+    if (minutes <= 0) continue;
+    const expected = perMin * minutes;
+    const recorded = hours[h] || 0;
+    const shortfall = expected - recorded;
+    if (shortfall > 0) {
+      estimated += shortfall;
+      // How much of the hour the watch missed, for the "watch was off for 7h" line.
+      untrackedMin += minutes * Math.min(1, shortfall / expected);
+    }
+  }
+
+  return {
+    ...energy,
+    active: measuredActive,
+    resting: measuredResting,
+    measured: energy?.total ?? 0,
+    estimated: Math.round(estimated),
+    untrackedMin: Math.round(untrackedMin),
+    total: (energy?.total ?? 0) + Math.round(estimated),
+    canEstimate: true,
+    // Which rate filled the gaps — the client's own watch, or the formula. Worth
+    // keeping: if a coach ever queries a number, this is the first thing to look at.
+    estimateSource: plausible ? "observed" : "formula",
+  };
+}
+
 function macrosFor(profile, dietId) {
   const w = parseFloat(profile.weight) || 170;
   const goal = profile.goal || "";
@@ -4392,12 +4485,17 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                 — so "7,699 steps but 90 active" is a visible, explainable gap instead of
                 a total that just looks too small. Net Calories is built on this, so it
                 has to be legible. */}
+            {/* The headline is the honest total — measured burn plus the resting floor
+                for the hours the watch was charging. The sub-label never lets that sum
+                pass as fully measured: if any of it was filled in, it says how much. */}
             <span style={sub}>
               {burned == null
                 ? (BURN_STATE_LABEL[burnState] || (IS_NATIVE ? "tap to connect" : "Apple Health"))
-                : (burnedToday?.active != null
-                    ? `${burnedToday.active.toLocaleString()} from moving`
-                    : "total today")}
+                : burnedToday?.estimated > 0
+                  ? `incl. ${burnedToday.estimated.toLocaleString()} est.`
+                  : (burnedToday?.active != null
+                      ? `${burnedToday.active.toLocaleString()} from moving`
+                      : "total today")}
             </span>
           </button>
 
@@ -13401,6 +13499,11 @@ export default function BodyMorph() {
   }, [user?.id]);
   const [pendingPhone, setPendingPhone] = useState(""); // phone captured at signup, awaiting one-time verification
   const userRef = useRef(null);                       // mirror of `user` for the auth listener to dedupe echoes
+  // Same reason: the Health sync is a useCallback([]) and needs height/weight/age/sex
+  // to fill the hours the watch wasn't worn. Closing over `profile` would freeze it at
+  // whatever it was on first render.
+  const profileRef = useRef(null);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
   const [subscription, setSubscription] = useState(null); // Stripe subscription row (null = none / billing off)
   const [role, setRole] = useState(null);                 // 'coach' routes to the dashboard; else client flow
   const [inviteSeed, setInviteSeed] = useState(null);     // intake from a coach invite, to pre-fill the wizard
@@ -13766,7 +13869,9 @@ export default function BodyMorph() {
       // Today's TOTAL burn (active + resting) for the hero grid. null = unavailable
       // or permission denied -> the tile shows a dash rather than a fake number.
       const energy = await todayEnergyBurned();
-      setBurnedToday(energy?.ok ? energy : null);
+      // Measured burn alone omits every hour the watch spent charging. Bridge it here,
+      // once, so every consumer — tile, Net Calories, the coach — sees the same number.
+      setBurnedToday(energy?.ok ? bridgeBurn(energy, profileRef.current) : null);
       setBurnState(energy?.ok ? null : (energy?.reason || "error"));
       if (insights && userRef.current?.id) {
         setWatchInsights(insights);
@@ -13789,7 +13894,8 @@ export default function BodyMorph() {
     // the RESULT. (It also used to hang around forever: moving the result to the Voice
     // Coach flash dropped the line that cleared it.) setToast(null) clears any stale one.
     setToast(null);
-    const e = await todayEnergyBurned();
+    const e0 = await todayEnergyBurned();
+    const e = e0?.ok ? bridgeBurn(e0, profileRef.current) : e0;
     if (e?.ok) {
       setBurnedToday(e);
       setBurnState(null);
@@ -13799,7 +13905,15 @@ export default function BodyMorph() {
       // you check it against the Fitness app's Move ring, which counts active only.
       const parts = [];
       if (e.active != null) parts.push(`${e.active.toLocaleString()} active`);
-      if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting`);
+      if (e.resting != null) parts.push(`${e.resting.toLocaleString()} resting (tracked)`);
+      // Say plainly that this part was not measured, and WHY — "watch off 7h 20m" is
+      // the difference between a number the client trusts and a number they argue with.
+      if (e.estimated > 0) {
+        const h = Math.floor(e.untrackedMin / 60), m = e.untrackedMin % 60;
+        const off = h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+        parts.push(`${e.estimated.toLocaleString()} resting (estimated)`);
+        parts.push(`watch off ${off}`);
+      }
       showFlash({
         emoji: "\u{1F525}", title: "CALORIES BURNED", color: "#ff9d5c",
         total: e.total.toLocaleString(),

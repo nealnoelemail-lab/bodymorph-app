@@ -130,6 +130,7 @@ export async function todayEnergyBurned() {
       total: Math.max(0, parseInt(r.totalKcal) || 0),
       active: r.activeKcal >= 0 ? Math.max(0, parseInt(r.activeKcal) || 0) : null,
       resting: r.restingKcal >= 0 ? Math.max(0, parseInt(r.restingKcal) || 0) : null,
+      restingByHour: Array.isArray(r.restingByHour) ? r.restingByHour.map(n => Math.max(0, parseInt(n) || 0)) : null,
     };
   } catch (e) { return { ok: false, reason: "error", detail: e?.message || String(e) }; }
 }
