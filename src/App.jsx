@@ -4633,12 +4633,16 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                   once there are 4+ lines rather than let text spill past the edge. */}
               {(() => {
                 const n = (dashFlash.lines || []).length + (dashFlash.rows || []).length;
-                const dense = n >= 4;
+                const hasRows = !!(dashFlash.rows && dashFlash.rows.length);
+                // Neal: "it's written too small, you can barely read it — increase the
+                // font, but keep everything bottled into that window without it bleeding
+                // out." These are the sizes that survived that test.
+                const dense = hasRows ? false : n >= 4;
                 return (
-              <div style={{ width:196, height:196, boxSizing:"border-box", padding:dense?11:14, borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3, animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+              <div style={{ width:196, height:196, boxSizing:"border-box", padding:hasRows?9:(dense?11:14), borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:hasRows?2:(dense?1:3), overflow:"hidden", animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
                 {/* Emoji only where a tile actually carries one (the burn flame Neal
                     asked for). No decorative default. */}
-                {dashFlash.emoji && <span style={{ fontSize:dense?18:24, lineHeight:1 }}>{dashFlash.emoji}</span>}
+                {dashFlash.emoji && <span style={{ fontSize:hasRows?20:(dense?18:24), lineHeight:1 }}>{dashFlash.emoji}</span>}
                 {/* With rows, the TITLE is dropped. Neal: "instead of repeating what's
                     there, show the three basic lines where the calories came from."
                     The tile that was just tapped already said what this is; the circle's
@@ -4647,21 +4651,23 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                   <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title}</span>
                 )}
                 {dashFlash.total && (
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:hasRows?1.02:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
                 )}
                 {/* ROWS — number right-aligned in its own column so the values stack and
                     visibly ADD UP to the figure above them. Centred text can't do that,
                     and "do these add up to the total" is the exact question a coach is
                     asking when they open this. */}
                 {dashFlash.rows && (
-                  <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:3 }}>
+                  <div style={{ display:"flex", flexDirection:"column", gap:3, marginTop:2 }}>
                     {dashFlash.rows.map((r) => (
-                      <div key={r.label} style={{ display:"flex", alignItems:"baseline", gap:7 }}>
-                        <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:600, fontSize:dense?13:14,
-                                       color:r.muted ? "#7a7a95" : "#dcdcf0", minWidth:42, textAlign:"right" }}>
+                      <div key={r.label} style={{ display:"flex", alignItems:"baseline", gap:8 }}>
+                        <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:600, fontSize:18,
+                                       color:r.muted ? "#8a8aa5" : "#f0f0f8", minWidth:46, textAlign:"right" }}>
                           {r.value}
                         </span>
-                        <span style={{ color:"#9898b8", fontSize:dense?11:11.5, lineHeight:1.2 }}>{r.label}</span>
+                        {/* nowrap: a label that wraps pushes the column out of the circle,
+                            which is the failure this whole pass was about. */}
+                        <span style={{ color:"#a8a8c0", fontSize:13.5, lineHeight:1.15, whiteSpace:"nowrap" }}>{r.label}</span>
                       </div>
                     ))}
                   </div>
@@ -4669,7 +4675,7 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                 {/* One per line — a single "X active + Y resting" row runs to the circle's
                     edge at four digits and reads cramped. */}
                 {(dashFlash.lines || []).map((s) => (
-                  <span key={s} style={{ color:"#9898b8", fontSize:dense?11.5:12.5, lineHeight:1.25, maxWidth:dense?150:164, textAlign:"center" }}>{s}</span>
+                  <span key={s} style={{ color:"#9898b8", fontSize:hasRows?12:(dense?11.5:12.5), lineHeight:1.2, maxWidth:hasRows?170:(dense?150:164), textAlign:"center" }}>{s}</span>
                 ))}
               </div>
                 );
@@ -13538,18 +13544,32 @@ export default function BodyMorph() {
   const [watchDaily, setWatchDaily] = useState(null);     // daily watch history for the trend charts
   const [burnedToday, setBurnedToday] = useState(null);   // {total, active, resting} | null
   const [burnState, setBurnState]     = useState(null);   // why there's no number, for the tile's sub-label
-  const [dashFlash, setDashFlash]     = useState(null);   // 5s readout over the Voice Coach circle
+  const [dashFlash, setDashFlash]     = useState(null);   // readout over the Voice Coach circle
   const flashTimer = useRef(null);
-  // Re-tapping restarts the 5s rather than letting the first timer cut the second one short.
+  const dashFlashRef = useRef(null);                      // for the async tile handlers
+  // FIFTEEN seconds, not five. Neal: "it goes and looks at it for about five seconds,
+  // then it flips back." Five is fine for a single number you glance at; the burn
+  // breakdown is three figures you're expected to add up, and it was gone before you'd
+  // finished reading it.
+  const FLASH_MS = 15000;
+  // Re-tapping restarts the clock rather than letting the first timer cut the second short.
   const showFlash = (payload) => {
     clearTimeout(flashTimer.current);
+    // TAP ON, TAP OFF. Tapping the same tile a second time closes it, so there are two
+    // ways out and neither requires waiting: tap the tile again, tap the circle itself,
+    // or leave it and it goes on its own.
+    if (payload?.id && dashFlashRef.current?.id === payload.id) {
+      dashFlashRef.current = null; setDashFlash(null); return;
+    }
+    dashFlashRef.current = payload;
     setDashFlash(payload);
-    flashTimer.current = setTimeout(() => setDashFlash(null), 5000);
+    flashTimer.current = setTimeout(() => { dashFlashRef.current = null; setDashFlash(null); }, FLASH_MS);
   };
   // Tapping the flash dismisses it — and when the flash IS the "turn it on in Health"
   // message, the tap is also the shortcut there, since that's the only real fix.
   const closeFlash = (flash) => {
     clearTimeout(flashTimer.current);
+    dashFlashRef.current = null;
     setDashFlash(null);
     if (flash?.health) window.open("x-apple-health://", "_system");
   };
@@ -14024,6 +14044,8 @@ export default function BodyMorph() {
     // the RESULT. (It also used to hang around forever: moving the result to the Voice
     // Coach flash dropped the line that cleared it.) setToast(null) clears any stale one.
     setToast(null);
+    // Second tap on the tile closes the breakdown instead of re-querying Health.
+    if (dashFlashRef.current?.id === "burn") { closeFlash(); return; }
     const e0 = await todayEnergyBurned();
     const e = e0?.ok ? bridgeBurn(e0, profileRef.current) : e0;
     if (e?.ok) {
@@ -14048,7 +14070,7 @@ export default function BodyMorph() {
       const rows = [];
       const moving = (e.active || 0) + (e.activeEst || 0);
       if (moving > 0)     rows.push({ value: moving.toLocaleString(),        label: "moving" });
-      if (e.resting)      rows.push({ value: e.resting.toLocaleString(),     label: "resting · tracked" });
+      if (e.resting)      rows.push({ value: e.resting.toLocaleString(),     label: "resting" });
       if (e.restingEst)   rows.push({ value: e.restingEst.toLocaleString(),  label: "resting · est.", muted: true });
 
       // The one piece of context the figures can't carry: how long the watch was off.
@@ -14058,7 +14080,7 @@ export default function BodyMorph() {
         lines.push(`watch off ${h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`}`);
       }
       showFlash({
-        emoji: "\u{1F525}", color: "#ff9d5c",
+        id: "burn", emoji: "\u{1F525}", color: "#ff9d5c",
         total: e.total.toLocaleString(),
         rows: rows.length ? rows : null,
         lines: rows.length ? lines : ["from Apple Health"],
@@ -14077,7 +14099,7 @@ export default function BodyMorph() {
       unsupported: { title:"IPHONE ONLY",     lines:["open the iPhone app"] },
       notlinked:   { title:"NOT LINKED",      lines:["close BodyMorph fully", "and reopen it"] },
     };
-    showFlash(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] });
+    showFlash({ id:"burn", ...(FAIL[e?.reason] || { title:"HEALTH ERROR", lines:[e?.detail || "unknown"] }) });
   }, [syncAppleHealth]);
 
   // Keep the login token alive across backgrounding (see startAuthKeepAlive).
