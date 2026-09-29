@@ -4639,7 +4639,7 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                 // out." These are the sizes that survived that test.
                 const dense = hasRows ? false : n >= 4;
                 return (
-              <div style={{ width:196, height:196, boxSizing:"border-box", padding:hasRows?9:(dense?11:14), borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:hasRows?2:(dense?1:3), overflow:"hidden", animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
+              <div style={{ width:196, height:196, boxSizing:"border-box", padding:hasRows?9:(dense?11:14), borderRadius:"50%", background:"rgba(12,12,20,0.97)", border:`1px solid ${dashFlash.color || "#ff9d5c"}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:hasRows?5:(dense?1:3), overflow:"hidden", animation:"fadeIn 0.25s ease", boxShadow:"0 8px 30px rgba(0,0,0,0.6)" }}>
                 {/* Emoji only where a tile actually carries one (the burn flame Neal
                     asked for). No decorative default. */}
                 {dashFlash.emoji && <span style={{ fontSize:hasRows?20:(dense?18:24), lineHeight:1 }}>{dashFlash.emoji}</span>}
@@ -4651,23 +4651,23 @@ function Home({ burnedToday, burnState, dashFlash, onFlash, onCloseFlash, onConn
                   <span style={{ fontFamily:"'Bebas Neue'", fontSize:dense?15:17, letterSpacing:1.2, color:"#dcdcf0" }}>{dashFlash.title}</span>
                 )}
                 {dashFlash.total && (
-                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:dense?27:36, lineHeight:hasRows?1.02:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
+                  <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:700, fontSize:hasRows?38:(dense?27:36), lineHeight:hasRows?1.02:1.05, color:dashFlash.color || "#ff9d5c" }}>{dashFlash.total}</span>
                 )}
                 {/* ROWS — number right-aligned in its own column so the values stack and
                     visibly ADD UP to the figure above them. Centred text can't do that,
                     and "do these add up to the total" is the exact question a coach is
                     asking when they open this. */}
                 {dashFlash.rows && (
-                  <div style={{ display:"flex", flexDirection:"column", gap:3, marginTop:2 }}>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:6 }}>
                     {dashFlash.rows.map((r) => (
                       <div key={r.label} style={{ display:"flex", alignItems:"baseline", gap:8 }}>
-                        <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:600, fontSize:18,
-                                       color:r.muted ? "#8a8aa5" : "#f0f0f8", minWidth:46, textAlign:"right" }}>
+                        <span style={{ fontFamily:"'Oswald',sans-serif", fontWeight:600, fontSize:20,
+                                       color:r.muted ? "#8a8aa5" : "#f0f0f8", minWidth:54, textAlign:"right" }}>
                           {r.value}
                         </span>
                         {/* nowrap: a label that wraps pushes the column out of the circle,
                             which is the failure this whole pass was about. */}
-                        <span style={{ color:"#a8a8c0", fontSize:13.5, lineHeight:1.15, whiteSpace:"nowrap" }}>{r.label}</span>
+                        <span style={{ color:"#a8a8c0", fontSize:15, lineHeight:1.15, whiteSpace:"nowrap" }}>{r.label}</span>
                       </div>
                     ))}
                   </div>
@@ -14203,12 +14203,11 @@ export default function BodyMorph() {
       // This replaces "watch off 7h 40m" at Neal's request. The duration said how big
       // the gap was; this says why the number filling it can be trusted, which is the
       // question anyone looking at an estimate is actually asking.
-      // What went into that combined figure. Only shown when some of it actually WAS
-      // estimated — on a day the watch never came off, claiming an estimate that
-      // doesn't exist would be its own small lie.
+      // No footnote. Two figures and the total, and that is the whole readout — the
+      // measured/estimated composition lives in the report panels, where a coach is
+      // the one asking and there is room to answer properly. On a dashboard the
+      // question is "what did I burn", not "how do you know".
       const lines = [];
-      const est = (e.restingEst || 0) + (e.activeEst || 0);
-      if (est > 0) lines.push("measured and estimated");
       showFlash({
         id: "burn", emoji: "\u{1F525}", color: "#ff9d5c",
         total: e.total.toLocaleString(),
