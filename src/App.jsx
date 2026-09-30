@@ -6230,7 +6230,16 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
           if (e.type === "audio")     log(e.text);
           if (e.type === "user")      { log(`you: ${e.text}`); rtRemember("user", e.text); }
           if (e.type === "coach")     { log(`coach: ${e.text}`); rtRemember("assistant", e.text); setState("listening"); }
-          if (e.type === "action")    { setLogConfirm(`\u2713 ${e.result}`); setTimeout(() => setLogConfirm(null), 2200); }
+          if (e.type === "action")    {
+            // Reads return an OBJECT, writes return a confirmation string, and a failed
+            // call returns an error — three shapes through one line. Interpolating an
+            // object gave "[object Object]" on screen, and a throw here would have
+            // stranded the model, so it is stringified defensively and marked.
+            const txt = typeof e.result === "string" ? e.result
+                      : (e.ok ? `Read ${e.name}` : `${e.name} failed`);
+            setLogConfirm(`${e.ok ? "\u2713" : "\u26a0"} ${txt}`);
+            setTimeout(() => setLogConfirm(null), 2200);
+          }
           // A call took the mic. The conversation is intact, so don't tear anything
           // down or alarm them — just stop pretending to listen.
           if (e.type === "paused")    { log(`paused: ${e.reason}`); setState("idle"); }

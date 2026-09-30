@@ -221,13 +221,63 @@ export async function startRealtimeCoach({ instructions, voice, model, userId, h
   if (!token) throw new Error("No realtime token returned.");
 
   await clearListeners();
+  // ── TOOL CALLS: THE MODEL MUST ALWAYS GET AN ANSWER ──────────────────────────
+  // The Realtime API blocks after a function_call until it receives the matching
+  // function_call_output. If that never arrives the model does not error, retry or
+  // time out — it simply never speaks again, for the rest of the session.
+  //
+  // Neal, 2026-09-30, mid-conversation: the coach asked about his supplements, he
+  // answered, and it went silent. Six more turns from him were transcribed — so the
+  // socket was alive and the audio was flowing — and not one got a reply. It was
+  // still waiting for a tool result that had never been sent.
+  //
+  // The old shape had three ways to reach that state, and no way out of any of them:
+  // runTool() ran OUTSIDE the try, so a throw in any handler skipped the send; the
+  // send's own catch was empty, so a genuine failure looked identical to success;
+  // and a handler that simply never returned hung the whole thing silently.
+  //
+  // Now: every path ends in a sent result. A failure reports itself to the model as a
+  // failure — which it can say out loud — rather than as an eternal wait.
   listeners.push(RealtimeVoice.addListener("rtToolCall", async (e) => {
+    const t0 = Date.now();
     let args = {};
-    try { args = JSON.parse(e.arguments || "{}"); } catch { /* malformed — run with nothing */ }
-    const result = runTool(e.name, args, handlers);
-    onEvent && onEvent({ type: "action", name: e.name, args, result });
-    try { await RealtimeVoice.sendToolResult({ callId: e.callId, output: JSON.stringify({ ok: true, detail: result }) }); }
-    catch { /* socket already closed */ }
+    try { args = JSON.parse(e.arguments || "{}"); }
+    catch { rtLog(`tool ${e.name}: unparseable args ${String(e.arguments).slice(0, 120)}`); }
+    rtLog(`tool -> ${e.name} ${JSON.stringify(args)}`);
+
+    let payload;
+    let timer;
+    try {
+      // A handler that never settles is as fatal as one that throws, so it gets a
+      // deadline. These are all local state writes; four seconds is a lifetime.
+      const result = await Promise.race([
+        Promise.resolve(runTool(e.name, args, handlers)),
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("handler timed out")), 4000); }),
+      ]);
+      payload = { ok: true, detail: result };
+      rtLog(`tool <- ${e.name} ok ${JSON.stringify(result).slice(0, 160)} (${Date.now() - t0}ms)`);
+    } catch (err) {
+      payload = { ok: false, error: String(err?.message || err) };
+      rtLog(`tool !! ${e.name} FAILED: ${payload.error} (${Date.now() - t0}ms)`);
+    } finally { clearTimeout(timer); }
+
+    // The UI notification is NOT allowed to block the send. It is the one part of this
+    // that touches React, and a render error here would strand the model exactly the
+    // way a handler throw used to.
+    try { onEvent && onEvent({ type: "action", name: e.name, args, ok: payload.ok, result: payload.ok ? payload.detail : payload.error }); }
+    catch (err) { rtLog(`tool ui error (non-fatal): ${err?.message || err}`); }
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await RealtimeVoice.sendToolResult({ callId: e.callId, output: JSON.stringify(payload) });
+        rtLog(`tool => ${e.name} result sent${attempt > 1 ? " (retry)" : ""}`);
+        return;
+      } catch (err) {
+        rtLog(`tool XX ${e.name} send failed (try ${attempt}): ${err?.message || err}`);
+      }
+    }
+    // If this line is ever printed, the conversation is dead and this is the reason.
+    rtLog(`tool XX ${e.name} RESULT NEVER SENT — the coach cannot reply again this session`);
   }));
   listeners.push(RealtimeVoice.addListener("rtCoachSaid", (e) => { rtLog(`coach: ${e.text}`); onEvent && onEvent({ type: "coach", text: e.text }); }));
   // Whisper invents text when handed a near-empty segment, and it invents in whatever
