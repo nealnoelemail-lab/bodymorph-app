@@ -21,6 +21,29 @@ const IS_NATIVE = (() => { try { return Capacitor.isNativePlatform(); } catch { 
 // expressed as real function calls instead.
 export const REALTIME_TOOLS = [
   {
+    // THE ONLY READ TOOL. Every other one writes.
+    //
+    // Neal, 2026-09-30, after telling the coach five times that his breakfast wasn't
+    // showing: "Stop recording from memory. Look at the log. What do you have in the
+    // log for breakfast?" The coach answered "three eggs, one toast, four strips of
+    // bacon, and coffee with three creams and one sugar — that's the full tally." It
+    // was fabricated. It had no way to look, so it recited what he had said out loud
+    // earlier and presented it as a record.
+    //
+    // Two things made that inevitable. There was no read tool at all, and the opening
+    // prompt is sent ONCE per session — so anything logged during the conversation was
+    // invisible to it. This tool closes both: it reads live state at the moment it is
+    // called, item by item.
+    type: "function", name: "get_food_log",
+    description: "Read what is ACTUALLY in the client's food log right now, item by item. Call this whenever they ask what is logged, say something is missing or wrong, or whenever you are about to state what they have eaten. Never answer those from memory — memory is what they told you, not what is recorded.",
+    parameters: {
+      type: "object",
+      properties: {
+        slot: { type: "string", enum: ["breakfast", "lunch", "dinner", "snacks"], description: "One meal. Omit for the whole day." },
+      },
+    },
+  },
+  {
     type: "function", name: "log_food",
     description: "Log a food the client says they ate. Use their own words for the name.",
     parameters: {
@@ -36,8 +59,11 @@ export const REALTIME_TOOLS = [
   },
   {
     type: "function", name: "remove_food",
-    description: "Undo the last food logged for a meal when the client says they misspoke.",
-    parameters: { type: "object", properties: { slot: { type: "string", enum: ["breakfast","lunch","dinner","snacks"] } }, required: ["slot"] },
+    description: "Remove ONE food item from a meal when the client says they misspoke. Without a name it drops the most recent item. It never clears a whole meal — to remove several, call it once per item, and read the log back first so you know what is actually there.",
+    parameters: { type: "object", properties: {
+      slot: { type: "string", enum: ["breakfast","lunch","dinner","snacks"] },
+      name: { type: "string", description: "The item to remove, e.g. \"bacon\". Omit to remove the last one logged." },
+    }, required: ["slot"] },
   },
   {
     type: "function", name: "add_water",
@@ -99,6 +125,11 @@ A RANGE IS NOT A NUMBER EITHER. "Three or four slices" means you ask which — n
 
 IF YOU DIDN'T HEAR IT CLEARLY, SAY SO. Audio drops words. If you're piecing a number together from a fragment, or you only half-caught it, ask again — "say that again for me?" is always better than a confident guess. A number you made up goes into their permanent record and into their coach's report, and it corrupts everything built on it.
 
+NEVER DESCRIBE THEIR LOG FROM MEMORY. CALL get_food_log AND READ IT.
+Everything above protects what you WRITE. This protects what you SAY BACK. What the client told you and what is actually recorded are two different things, and only one of them is the log. The moment they ask what is logged, tell you something is missing, or you are about to state what they have eaten — call get_food_log first and answer from what comes back. It reads the live log at that instant, so it also catches anything added since you started talking.
+
+IF THE LOG IS EMPTY, SAY IT IS EMPTY. Do not fill the silence with what they told you earlier. "It's only showing the coffee — the eggs and bacon didn't save" is a useful answer. Reciting the meal back as though you had read it is not, and it is worse than useless, because they will trust it and stop checking. If the tool comes back with an error, say you could not read it — never treat that as nothing logged. And if what they see disagrees with what the tool returns, believe THEM and say so; the screen in their hand is the record, not your side of the conversation.
+
 And if you do get something wrong, say so plainly and fix it. Never explain away a mistake with a story about how you knew — that is worse than the mistake.`;
 
 // OpenAI ships a fixed set of voices and does NOT clone. The app stores the coach's
@@ -122,6 +153,11 @@ const clearListeners = async () => {
 // coach drives through its text tags, so both engines change the app identically.
 function runTool(name, args, h) {
   switch (name) {
+    // Reads return DATA, not a confirmation string. If the handler is missing, say so
+    // rather than returning an empty log — "I couldn't read it" and "it's empty" are
+    // opposite answers and the coach must never confuse them.
+    case "get_food_log":
+      return h.onGetFoodLog ? h.onGetFoodLog(args || {}) : { error: "food log unavailable" };
     case "log_food":    h.onLogFood && h.onLogFood(args); return `Logged ${args.name || "food"}`;
     case "remove_food": h.onRemoveFood && h.onRemoveFood(args); return "Removed";
     case "add_water":   h.onAddWater && h.onAddWater(args.cups); return "Water logged";

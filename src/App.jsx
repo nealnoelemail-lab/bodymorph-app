@@ -6150,6 +6150,34 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
   // call. Speech-to-speech has no message array to replay, so the recap goes into the
   // instructions instead — and condensed rather than verbatim, because every token of
   // it is re-sent on every turn of the session and audio time is already the bill.
+  // The day's data, mirrored into a ref. The realtime handlers are captured ONCE when
+  // the session opens; a handler closing over `companionData` would answer from the
+  // moment the client tapped the button. That staleness is half of why the coach
+  // fabricated a breakfast — anything logged mid-conversation was invisible to it.
+  const companionDataRef = useRef(null);
+  useEffect(() => { companionDataRef.current = companionData; }, [companionData]);
+
+  // READ THE LOG. Returns what is in it at the instant of the call, item by item.
+  // Shapes the answer so the three cases a coach must never blur stay distinct:
+  // nothing logged, something logged, and "I couldn't read it".
+  const onGetFoodLog = useCallback((args = {}) => {
+    const cd = companionDataRef.current;
+    if (!cd || !cd.meals) return { error: "couldn't read the log" };
+    const slots = args.slot ? [args.slot] : ["breakfast", "lunch", "dinner", "snacks"];
+    const out = {};
+    let total = 0;
+    for (const slot of slots) {
+      const info = cd.meals[slot];
+      if (info && info.logged) {
+        out[slot] = { items: info.items || [], cal: info.cal || 0 };
+        total += info.cal || 0;
+      } else {
+        out[slot] = { items: [], cal: 0, empty: true };   // explicit: looked, found nothing
+      }
+    }
+    return { day: ymdLocal(), slots: out, totalCal: total };
+  }, []);
+
   const rtHistoryRef = useRef([]);
   const rtRecap = () => {
     try {
@@ -6193,7 +6221,7 @@ Start by greeting ${profile.name} warmly by name as their Coach (e.g. "Alright $
         instructions: buildSysPrompt() + rtRecap(),
         voice: voiceId || undefined,
         userId,
-        handlers: { onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo },
+        handlers: { onLogSet, onRemoveSet, onLogFood, onRemoveFood, onAddWater, onSetWater, onLogSteps, onLogSleep, onCheckTodo, onGetFoodLog },
         onEvent: (e) => {
           if (closedRef.current) return;
           if (e.type === "open")      { log("realtime: connected"); setState("listening"); }
@@ -14322,34 +14350,64 @@ export default function BodyMorph() {
     });
   };
 
+  // Every slot is a LIST. Read a slot in whatever shape it was stored in — early
+  // entries were bare objects, snacks were always arrays — and hand back an array.
+  const slotList = (raw) => (Array.isArray(raw) ? [...raw] : (raw ? [raw] : []));
+
   // Voice companion: log a food item the client reports eating.
+  //
+  // ⚠️ THIS OVERWROTE THE SLOT. Snacks appended; breakfast, lunch and dinner replaced
+  // the whole slot with the single item just logged. So a spoken breakfast of eggs,
+  // then bacon, then toast, then coffee ended as: coffee. Neal, 2026-09-30: "I just
+  // see the coffee, that's it." Every item before the last had been silently thrown
+  // away as it was spoken, and the coach — which had no way to read the log — kept
+  // insisting the whole meal was there.
+  //
+  // The manual logger twenty lines above always appended, with a comment explaining
+  // that each food must land as its own row so a single wrong item stays removable.
+  // The voice path simply never got the same treatment. It does now: one behaviour
+  // for every slot and every route in.
   const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
     const todayStr = ymdLocal();
-    const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
+    const s = FOOD_SLOT_IDS.includes(slot) ? slot : "snacks";
     const entry = { food: name || "Logged item", cal:String(Math.round(cal||0)), protein:String(Math.round(protein||0)), carbs:String(Math.round(carbs||0)), fats:String(Math.round(fats||0)), logged:true };
     setFoodLog(prev => {
       const updated = { ...(prev||{}) };
       const dayLog = { ...(updated[todayStr]||{}) };
-      if (s === "snacks") {
-        const arr = Array.isArray(dayLog.snacks) ? [...dayLog.snacks] : (dayLog.snacks ? [dayLog.snacks] : []);
-        arr.push(entry); dayLog.snacks = arr;
-      } else { dayLog[s] = entry; }
+      dayLog[s] = [...slotList(dayLog[s]), entry];
       updated[todayStr] = dayLog;
       return updated;
     });
   };
-  // Voice companion: undo a logged meal. Main meals clear the slot; snacks drop the last one.
-  const removeFoodFromVoice = ({ slot }) => {
+
+  // Voice companion: undo a logged item.
+  //
+  // ⚠️ THIS DELETED THE WHOLE SLOT for main meals, while its own tool description
+  // promised "undo the LAST food logged". With the overwrite bug above that looked
+  // harmless — a main-meal slot only ever held one item. Now that slots hold real
+  // lists it would wipe a whole logged meal on one ambiguous word, so it honours the
+  // contract it always advertised: drop ONE item.
+  //
+  // `name` removes a specific item when the client names it ("take the bacon off");
+  // without it, the last one goes, which is what "scratch that" means. The slot is
+  // deleted only once it is genuinely empty.
+  const removeFoodFromVoice = ({ slot, name }) => {
     const todayStr = ymdLocal();
-    const s = ["breakfast","lunch","dinner","snacks"].includes(slot) ? slot : "snacks";
+    const s = FOOD_SLOT_IDS.includes(slot) ? slot : "snacks";
     setFoodLog(prev => {
       const updated = { ...(prev||{}) };
       const dayLog = { ...(updated[todayStr]||{}) };
-      if (s === "snacks") {
-        const arr = Array.isArray(dayLog.snacks) ? [...dayLog.snacks] : (dayLog.snacks ? [dayLog.snacks] : []);
-        arr.pop();
-        if (arr.length) dayLog.snacks = arr; else delete dayLog.snacks;
-      } else { delete dayLog[s]; }
+      const arr = slotList(dayLog[s]);
+      if (!arr.length) return prev;                       // nothing to undo
+      let idx = arr.length - 1;
+      if (name) {
+        const want = String(name).toLowerCase().trim();
+        const hit = arr.map((x,i)=>[x,i]).reverse()
+          .find(([x]) => String(x?.food || "").toLowerCase().includes(want));
+        if (hit) idx = hit[1];
+      }
+      arr.splice(idx, 1);
+      if (arr.length) dayLog[s] = arr; else delete dayLog[s];
       updated[todayStr] = dayLog;
       return updated;
     });
@@ -14753,7 +14811,16 @@ export default function BodyMorph() {
       const items = Array.isArray(e) ? e : [e];
       const done = items.filter(x => x && x.logged);
       if (!done.length) return { logged:false };
-      return { logged:true, name: done.map(x=>x.food).filter(Boolean).join(", ") || slot, cal: Math.round(done.reduce((s,x)=>s+(parseFloat(x.cal)||0),0)) };
+      return {
+        logged: true,
+        name: done.map(x=>x.food).filter(Boolean).join(", ") || slot,
+        cal: Math.round(done.reduce((s,x)=>s+(parseFloat(x.cal)||0),0)),
+        // ITEM BY ITEM, for the get_food_log read tool. The joined `name` above is what
+        // the opening prompt shows, and it is a snapshot — fine for "has breakfast been
+        // logged", useless when the client is standing there asking what is actually in
+        // the log right now. The tool answers from this.
+        items: done.map(x => ({ name: x.food || "item", cal: Math.round(parseFloat(x.cal) || 0) })),
+      };
     };
     // Same shared engine as Home + Nutrition, so what the coach says out loud can
     // never contradict what the screen shows.
