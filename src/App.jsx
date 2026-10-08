@@ -339,32 +339,6 @@ const EX = {
   ],
 };
 
-// Pose name -> video filename slug. Clips live at /stretches/<slug>.mp4 (bundled in public/).
-const POSE_SLUG = {
-  "Child's Pose": "childs-pose",
-  "Cobra Pose": "cobra",
-  "Downward Dog": "downward-dog",
-  "Low Lunge (Hip Flexor)": "low-lunge",
-  "Seated Forward Fold": "seated-forward-fold",
-  "Seated Spinal Twist": "seated-spinal-twist",
-  "Figure-4 Glute Stretch": "figure-4-glute",
-  "Supine Knee-to-Chest": "supine-knee-to-chest",
-  "Doorway Chest Stretch": "doorway-chest",
-  "Cross-Body Shoulder Stretch": "cross-body-shoulder",
-  "Lat Hang Stretch": "lat-hang",
-  "Seated Twist": "seated-twist",
-  "Overhead Triceps Stretch": "overhead-triceps",
-  "Hip Flexor Lunge Stretch": "hip-flexor-lunge",
-  "Seated Hamstring Stretch": "seated-hamstring",
-  "Standing Calf Stretch": "standing-calf",
-  "Lying Knee-to-Chest": "lying-knee-to-chest",
-  "Frog Stretch": "frog",
-};
-function poseVideoSrc(name) {
-  const slug = POSE_SLUG[name];
-  return slug ? ("/stretches/" + slug + ".mp4") : null;
-}
-
 const STRETCHES = {
   upper: [
     { name:"Doorway Chest Stretch", secs:60, perSide:true, duration:"60s each side", timing:"Post-workout", benefit:"Opens tight pecs and improves pressing posture", coachCue:"Place forearm on the frame and rotate your torso away until you feel the pec lengthen." , video:"doorway-chest" },
@@ -2580,7 +2554,13 @@ function ytEmbedSrc(videoId, autoplay = false) {
   return `https://www.youtube.com/embed/${videoId}?autoplay=${ap}&playsinline=1`;
 }
 
-function VideoPanel({ exName, gender, videoOverrides, onSaveVideo }) {
+// ⚠️ `onClose` MUST stay declared even though no caller passes it. close() below
+// guards with `if (onClose)`, and on an UNDECLARED identifier that guard does not
+// protect anything — a bare reference throws ReferenceError on contact. The ✕ and
+// "✕ Close" buttons were therefore dead: the handler threw before reaching a single
+// setState, so the panel simply refused to close. It reads as safe because a declared
+// prop that is merely absent IS safe; an undeclared one is not.
+function VideoPanel({ exName, gender, videoOverrides, onSaveVideo, onClose }) {
   const vpAccent = gender === "Female" ? APP_PINK : "#e8ff00";
   // NOTE: the pin key stays the raw exercise name. The search query is machine-aware,
   // but a client's saved video is filed under the exercise as the program names it —
@@ -7636,216 +7616,6 @@ function Cardio({ profile, onSaveSession, stepEntries, onSaveSteps, cardioPlan, 
 // ── STRETCH ROUTINE ───────────────────────────────────────────────────────────
 // Pick Full Body / Upper / Lower, then either run a guided auto-advancing timer
 // or just read the list. Each routine is ~10 minutes of stretching.
-// Original SVG silhouette pose figures for the stretch flow chart.
-// Each returns a simple stick/silhouette figure showing the body position.
-// Legal & original (drawn in code) — no external images.
-function PoseFigure({ name, size = 64 }) {
-  const stroke = "#0a0a0f";
-  const skin = "#3d8eff";
-  // shared props for limbs
-  const L = { stroke: skin, strokeWidth: 5, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
-  const head = (cx, cy, r=7) => <circle cx={cx} cy={cy} r={r} fill={skin} />;
-
-  const figures = {
-    "Child's Pose": (
-      <g>
-        {/* kneeling, folded forward, arms ahead */}
-        <path d="M14 60 Q30 58 46 60" {...L} />
-        <path d="M46 60 L40 46 L30 44" {...L} />
-        <path d="M30 44 L14 42" {...L} />
-        {head(12, 42, 6)}
-      </g>
-    ),
-    "Cobra Pose": (
-      <g>
-        {/* lying on belly, chest pressed up */}
-        <path d="M12 56 L34 58 L52 56" {...L} />
-        <path d="M34 58 Q40 40 50 30" {...L} />
-        {head(52, 26, 6)}
-        <path d="M40 48 L42 60" {...L} />
-      </g>
-    ),
-    "Downward Dog": (
-      <g>
-        {/* inverted V */}
-        <path d="M12 58 L34 22 L56 58" {...L} />
-        {head(34, 20, 6)}
-      </g>
-    ),
-    "Low Lunge (Hip Flexor)": (
-      <g>
-        {/* deep lunge */}
-        <path d="M10 58 L26 40 L26 24" {...L} />
-        <path d="M26 40 L44 52 L56 58" {...L} />
-        {head(26, 18, 6)}
-        <path d="M26 28 L40 34" {...L} />
-      </g>
-    ),
-    "Hip Flexor Lunge Stretch": (
-      <g>
-        <path d="M10 58 L26 40 L26 24" {...L} />
-        <path d="M26 40 L44 52 L56 58" {...L} />
-        {head(26, 18, 6)}
-        <path d="M26 28 L40 34" {...L} />
-      </g>
-    ),
-    "Seated Forward Fold": (
-      <g>
-        {/* seated, legs out, folding to toes */}
-        <path d="M12 50 L52 50" {...L} />
-        <path d="M12 50 Q16 36 26 34" {...L} />
-        <path d="M26 34 L44 44" {...L} />
-        {head(48, 46, 6)}
-      </g>
-    ),
-    "Seated Hamstring Stretch": (
-      <g>
-        <path d="M12 50 L52 50" {...L} />
-        <path d="M12 50 Q16 36 26 34" {...L} />
-        <path d="M26 34 L44 44" {...L} />
-        {head(48, 46, 6)}
-      </g>
-    ),
-    "Seated Spinal Twist": (
-      <g>
-        {/* seated, torso rotated */}
-        <path d="M16 58 L44 58" {...L} />
-        <path d="M30 58 L30 32" {...L} />
-        {head(30, 24, 6)}
-        <path d="M30 38 L46 44" {...L} />
-        <path d="M30 38 L18 34" {...L} />
-      </g>
-    ),
-    "Seated Twist": (
-      <g>
-        <path d="M16 58 L44 58" {...L} />
-        <path d="M30 58 L30 32" {...L} />
-        {head(30, 24, 6)}
-        <path d="M30 38 L46 44" {...L} />
-        <path d="M30 38 L18 34" {...L} />
-      </g>
-    ),
-    "Figure-4 Glute Stretch": (
-      <g>
-        {/* lying on back, ankle over knee */}
-        <path d="M10 50 L40 50" {...L} />
-        <path d="M40 50 L48 38" {...L} />
-        <path d="M48 38 L40 30" {...L} />
-        <path d="M34 50 L46 44" {...L} />
-        {head(10, 46, 6)}
-      </g>
-    ),
-    "Supine Knee-to-Chest": (
-      <g>
-        {/* on back, both knees hugged in */}
-        <path d="M10 52 L34 52" {...L} />
-        <path d="M34 52 L44 40 L34 32" {...L} />
-        {head(10, 48, 6)}
-      </g>
-    ),
-    "Lying Knee-to-Chest": (
-      <g>
-        <path d="M10 52 L36 52" {...L} />
-        <path d="M36 52 L46 42" {...L} />
-        <path d="M46 42 L38 34" {...L} />
-        <path d="M36 52 L52 52" {...L} />
-        {head(10, 48, 6)}
-      </g>
-    ),
-    "Doorway Chest Stretch": (
-      <g>
-        {/* standing, arm back on frame */}
-        <path d="M30 60 L30 30" {...L} />
-        {head(30, 22, 6)}
-        <path d="M30 34 L16 28" {...L} />
-        <path d="M30 34 L44 40" {...L} />
-        <path d="M44 20 L44 56" stroke="#3a3a4d" strokeWidth="3" />
-      </g>
-    ),
-    "Cross-Body Shoulder Stretch": (
-      <g>
-        {/* standing, arm pulled across */}
-        <path d="M30 60 L30 30" {...L} />
-        {head(30, 22, 6)}
-        <path d="M30 34 L46 38 L18 40" {...L} />
-      </g>
-    ),
-    "Lat Hang Stretch": (
-      <g>
-        {/* hanging from bar */}
-        <path d="M14 18 L50 18" stroke="#3a3a4d" strokeWidth="3" />
-        <path d="M32 18 L32 30" {...L} />
-        {head(32, 36, 6)}
-        <path d="M32 42 L32 58" {...L} />
-      </g>
-    ),
-    "Overhead Triceps Stretch": (
-      <g>
-        {/* standing, elbow overhead */}
-        <path d="M30 60 L30 30" {...L} />
-        {head(30, 22, 6)}
-        <path d="M30 32 L40 18 L28 22" {...L} />
-      </g>
-    ),
-    "Standing Calf Stretch": (
-      <g>
-        {/* staggered stance, leaning */}
-        <path d="M18 58 L34 30" {...L} />
-        {head(36, 24, 6)}
-        <path d="M30 38 L44 34" {...L} />
-        <path d="M34 44 L48 58" {...L} />
-        <path d="M18 58 L10 58" {...L} />
-      </g>
-    ),
-    "Frog Stretch": (
-      <g>
-        {/* knees wide, on all fours */}
-        <path d="M14 58 L24 44 L40 44 L50 58" {...L} />
-        <path d="M24 44 L34 38 L40 44" {...L} />
-        {head(14, 40, 6)}
-      </g>
-    ),
-  };
-
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" style={{ display:"block" }}>
-      <rect x="0" y="0" width="64" height="64" rx="10" fill="#0e0e16" />
-      {figures[name] || (
-        <g>
-          <path d="M32 20 L32 44" {...L} />
-          {head(32, 14, 6)}
-          <path d="M32 28 L20 36" {...L} />
-          <path d="M32 28 L44 36" {...L} />
-          <path d="M32 44 L24 58" {...L} />
-          <path d="M32 44 L40 58" {...L} />
-        </g>
-      )}
-    </svg>
-  );
-}
-
-// Plays a bundled pose clip inline. If the file isn't present yet, it hides
-// itself gracefully (no broken player) so videos can be added one at a time.
-// Drop video files into: public/stretches/<slug>.mp4
-// Plays a bundled pose clip inline; if the file is missing or fails to load,
-// falls back to the YouTube demo link so every pose still has video help.
-function PoseVideo({ name, gender }) {
-  const src = poseVideoSrc(name);
-  const [failed, setFailed] = useState(!src);
-  if (failed || !src) {
-    return <YTButton query={name + " stretch"} gender={gender} />;
-  }
-  return (
-    <video
-      src={src}
-      controls
-      playsInline
-      preload="metadata"
-      onError={() => setFailed(true)}
-      style={{ width:"100%", marginTop:8, borderRadius:10, background:"#000", maxHeight:220 }}
-    />
-  );
-}
 
 // Original SVG pose silhouettes for each stretch/yoga type. Drawn in code (legal),
 // showing a figure performing that specific movement. Yellow on dark, ~28px.
@@ -8283,222 +8053,6 @@ function StretchPlanner({ plan, onSave, routines, onSaveRoutines, onBack, gender
   );
 }
 
-function StretchRoutine({ onBack, gender, videoOverrides, onSaveVideo }) {
-  const [pick, setPick] = useState(null);     // null | "full" | "upper" | "lower"
-  const [running, setRunning] = useState(false);
-
-  const ROUTINES = [
-    { id:"full",  label:"Full Body", desc:"Head-to-toe reset" },
-    { id:"upper", label:"Upper Body", desc:"Chest, back, shoulders, arms" },
-    { id:"lower", label:"Lower Body", desc:"Hips, hamstrings, glutes, calves" },
-  ];
-
-  // Flatten a routine into timer "segments" (per-side stretches become two segments).
-  function segmentsFor(routineId) {
-    const list = STRETCHES[routineId] || [];
-    const segs = [];
-    list.forEach(s => {
-      if (s.perSide) {
-        segs.push({ name:s.name, secs:s.secs, side:"Right side", coachCue:s.coachCue, benefit:s.benefit });
-        segs.push({ name:s.name, secs:s.secs, side:"Left side", coachCue:s.coachCue, benefit:s.benefit });
-      } else {
-        segs.push({ name:s.name, secs:s.secs, side:null, coachCue:s.coachCue, benefit:s.benefit });
-      }
-    });
-    return segs;
-  }
-
-  function totalMinutes(routineId) {
-    const secs = (STRETCHES[routineId]||[]).reduce((s,x)=> s + x.secs*(x.perSide?2:1), 0);
-    return Math.round(secs/60);
-  }
-
-  // ── Selection screen ──
-  if (!pick) {
-    return (
-      <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
-        <style>{GLOBAL_CSS}</style>
-        <WatermarkPlain />
-        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-          <BackBtn onClick={onBack} />
-          <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>STRETCH</div>
-        </div>
-
-        <div style={{ padding:"10px 20px 0" }}>
-          <div style={{ color:"#d6d6ec", fontSize:14, lineHeight:1.6, marginBottom:18 }}>
-            Pick a routine. Each one is about 10 minutes &mdash; run the guided timer, or just read the list and go at your own pace.
-          </div>
-        </div>
-
-        <div style={{ display:"flex", flexDirection:"column", gap:12, padding:"0 20px" }}>
-          {ROUTINES.map(r => (
-            <button key={r.id} onClick={()=>{ setPick(r.id); setRunning(false); }} style={{ textAlign:"left", background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:16, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div>
-                <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{r.label}</div>
-                <div style={{ color:"#d6d6ec", fontSize:14, marginTop:2 }}>{r.desc}</div>
-                <div style={{ color:"#c8c8e0", fontSize:13, marginTop:4, fontFamily:"'Oswald', sans-serif" }}>~{totalMinutes(r.id)} min &middot; {STRETCHES[r.id].length} stretches</div>
-              </div>
-              <span style={{ color:"#e8ff00", fontSize:22 }}>&#8250;</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Guided timer screen ──
-  if (running) {
-    return <StretchTimer segments={segmentsFor(pick)} routineLabel={ROUTINES.find(r=>r.id===pick).label} onExit={()=>setRunning(false)} gender={gender} />;
-  }
-
-  // ── Routine detail / list screen ──
-  const list = STRETCHES[pick] || [];
-  const label = ROUTINES.find(r=>r.id===pick).label;
-  return (
-    <div style={{ minHeight:"100vh", background:"transparent", paddingBottom:40, position:"relative" }}>
-      <style>{GLOBAL_CSS}</style>
-      <WatermarkPlain />
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 8px" }}>
-        <BackBtn onClick={()=>setPick(null)} />
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:22, letterSpacing:1 }}>{label.toUpperCase()} STRETCH</div>
-      </div>
-
-      {/* Start guided timer */}
-      <div style={{ padding:"10px 20px 0" }}>
-        <button onClick={()=>setRunning(true)} style={{ width:"100%", background:"#e8ff00", color:"#000", border:"none", borderRadius:14, padding:"16px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:3, fontSize:24 }}>
-          &#9654; START GUIDED TIMER
-        </button>
-        <div style={{ color:"#c8c8e0", fontSize:13, textAlign:"center", marginTop:8 }}>Auto-advances through each stretch. Or just read the list below.</div>
-        <button onClick={()=>onStartRoutine && onStartRoutine(gender)} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, width:"100%", color:"#3d8eff", fontSize:14, fontWeight:600, background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:10, padding:"10px", cursor:"pointer" }}>&#9654; View Stretch Routines &amp; Videos</button>
-        <a href={"https://www.youtube.com/results?search_query=" + encodeURIComponent("10 minute " + label.toLowerCase() + " stretch routine follow along" + (gender === "Male" ? " " + MALE_DEMO_BIAS : ""))} target="_blank" rel="noopener noreferrer" style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, color:"#3d8eff", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:10, padding:"10px" }}>
-          &#9654; Watch a full follow-along routine
-        </a>
-      </div>
-
-      {/* Flow intro */}
-      <div style={{ padding:"16px 20px 0" }}>
-        <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, padding:14, color:"#d6d6ec", fontSize:14, lineHeight:1.6 }}>
-          Follow the flow from top to bottom &mdash; each move leads into the next. The figure shows the position; tap the video on any step for a full demo.
-        </div>
-      </div>
-
-      {/* Flow chart */}
-      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"18px 20px 0" }}>
-        {list.map((s,i) => (
-          <div key={i} style={{ width:"100%", maxWidth:520 }}>
-            <div style={{ background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:14, padding:14, display:"flex", gap:14, alignItems:"flex-start" }}>
-              {/* Pose figure + step number */}
-              <div style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-                <PoseFigure name={s.name} size={64} />
-                <div style={{ background:"#e8ff00", color:"#000", fontFamily:"'Bebas Neue'", fontSize:16, letterSpacing:1, width:26, height:26, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</div>
-              </div>
-              {/* Details */}
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
-                  <div style={{ fontWeight:700, fontSize:15 }}>{s.name}</div>
-                  <div style={{ color:"#e8ff00", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:13.5, whiteSpace:"nowrap" }}>{s.duration}</div>
-                </div>
-                <div style={{ color:"#d6d6ec", fontSize:13, marginTop:3, lineHeight:1.5 }}>{s.benefit}</div>
-                <CoachCue text={s.coachCue} />
-                <VideoPanel exName={s.name} gender={gender} videoOverrides={videoOverrides} onSaveVideo={onSaveVideo} />
-              </div>
-            </div>
-            {/* Connector arrow to next step */}
-            {i < list.length-1 && (
-              <div style={{ display:"flex", justifyContent:"center", color:"#e8ff00", fontSize:22, lineHeight:1, padding:"6px 0" }}>&#8595;</div>
-            )}
-          </div>
-        ))}
-        {/* End marker */}
-        <div style={{ marginTop:14, color:"#3ddc84", fontFamily:"'Bebas Neue'", fontSize:18, letterSpacing:2 }}>&#10003; ROUTINE COMPLETE</div>
-      </div>
-    </div>
-  );
-}
-
-// Full-screen guided timer that auto-advances through stretch segments.
-function StretchTimer({ segments, routineLabel, onExit, gender }) {
-  const [idx, setIdx] = useState(0);
-  const [remaining, setRemaining] = useState(segments[0]?.secs || 30);
-  const [paused, setPaused] = useState(false);
-  const [done, setDone] = useState(false);
-
-  useEffect(() => { setRemaining(segments[idx]?.secs || 30); }, [idx, segments]);
-
-  useEffect(() => {
-    if (paused || done) return;
-    if (remaining <= 0) {
-      if (idx < segments.length - 1) { setIdx(i=>i+1); }
-      else { setDone(true); }
-      return;
-    }
-    const t = setTimeout(() => setRemaining(r => r - 1), 1000);
-    return () => clearTimeout(t);
-  }, [remaining, paused, done, idx, segments]);
-
-  const seg = segments[idx] || {};
-  const totalSegs = segments.length;
-  const pct = seg.secs ? ((seg.secs - remaining) / seg.secs) * 100 : 0;
-
-  if (done) {
-    return (
-      <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20, padding:24, position:"relative" }}>
-        <style>{GLOBAL_CSS}</style>
-        <div style={{ fontSize:60 }}>&#129496;</div>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:2, color:"#3d8eff" }}>STRETCH COMPLETE</div>
-        <div style={{ color:"#d6d6ec", fontSize:15, textAlign:"center" }}>Nice work. Your {routineLabel.toLowerCase()} routine is done &mdash; muscles recovered and mobility maintained.</div>
-        <button onClick={onExit} style={{ background:"#e8ff00", color:"#000", border:"none", borderRadius:12, padding:"14px 32px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:2, fontSize:20 }}>DONE</button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", padding:"20px 20px 32px", position:"relative" }}>
-      <style>{GLOBAL_CSS}</style>
-
-      {/* Header */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ color:"#c8c8e0", fontSize:14, fontFamily:"'Oswald', sans-serif" }}>Stretch {idx+1} of {totalSegs}</div>
-        <button onClick={onExit} style={{ background:"transparent", border:"1px solid #2a2a3d", borderRadius:8, color:"#c8c8e0", padding:"6px 12px", cursor:"pointer", fontSize:13 }}>Exit</button>
-      </div>
-
-      {/* Progress dots */}
-      <div style={{ display:"flex", gap:4, marginTop:12, flexWrap:"wrap" }}>
-        {segments.map((_,i)=>(
-          <div key={i} style={{ height:5, flex:1, minWidth:8, borderRadius:3, background: i<idx ? "#e8ff00" : i===idx ? "#9b8f00" : "#2a2a3d" }} />
-        ))}
-      </div>
-
-      {/* Main timer */}
-      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:18 }}>
-        <div style={{ fontFamily:"'Bebas Neue'", fontSize:34, letterSpacing:1, textAlign:"center", lineHeight:1.05 }}>{seg.name}</div>
-        {seg.side && <div style={{ color:"#e8ff00", fontFamily:"'Oswald', sans-serif", fontWeight:600, fontSize:18, letterSpacing:1 }}>{seg.side.toUpperCase()}</div>}
-
-        {/* Circular countdown */}
-        <div style={{ position:"relative", width:200, height:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <svg width="200" height="200" style={{ position:"absolute", transform:"rotate(-90deg)" }}>
-            <circle cx="100" cy="100" r="90" fill="none" stroke="#2a2a3d" strokeWidth="10" />
-            <circle cx="100" cy="100" r="90" fill="none" stroke="#e8ff00" strokeWidth="10" strokeLinecap="round"
-              strokeDasharray={2*Math.PI*90} strokeDashoffset={2*Math.PI*90*(1 - pct/100)} style={{ transition:"stroke-dashoffset 1s linear" }} />
-          </svg>
-          <div style={{ fontFamily:"'Oswald', sans-serif", fontWeight:700, fontSize:56, color:"#e8ff00" }}>{remaining}</div>
-        </div>
-
-        <div style={{ maxWidth:340, textAlign:"center", color:"#d2d2ec", fontSize:14, lineHeight:1.6, background:"rgba(232,255,0,0.05)", borderRadius:10, padding:"10px 14px" }}>{seg.coachCue}</div>
-        <a href={demoSearchUrl(seg.name + " stretch", gender)} target="_blank" rel="noopener noreferrer" onClick={()=>setPaused(true)} style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:10, color:"#3d8eff", fontSize:14, fontWeight:600, textDecoration:"none", background:"rgba(61,142,255,0.06)", border:"1px solid rgba(61,142,255,0.2)", borderRadius:8, padding:"6px 14px" }}>
-          &#9654; Watch Demo (pauses timer)
-        </a>
-      </div>
-
-      {/* Controls */}
-      <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-        <button onClick={()=>{ if(idx>0){ setIdx(i=>i-1);} }} disabled={idx===0} style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, color: idx===0?"#3a3a52":"#f0f0f8", padding:"14px", cursor: idx===0?"not-allowed":"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:16 }}>&#8249; PREV</button>
-        <button onClick={()=>setPaused(p=>!p)} style={{ flex:1.4, background: paused ? "#e8ff00" : "#2a2a3d", color: paused ? "#000" : "#e8ff00", border:"none", borderRadius:12, padding:"14px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:16 }}>{paused ? "\u25B6 RESUME" : "\u23F8 PAUSE"}</button>
-        <button onClick={()=>{ if(idx<segments.length-1){ setIdx(i=>i+1);} else { setDone(true);} }} style={{ flex:1, background:"#1a1a26", border:"1px solid #2a2a3d", borderRadius:12, color:"#f0f0f8", padding:"14px", cursor:"pointer", fontFamily:"'Bebas Neue'", letterSpacing:1, fontSize:16 }}>SKIP &#8250;</button>
-      </div>
-    </div>
-  );
-}
 
 // ── NUTRITION ─────────────────────────────────────────────────────────────────
 // ── DIET STYLES ───────────────────────────────────────────────────────────────
@@ -14376,14 +13930,50 @@ export default function BodyMorph() {
   // that each food must land as its own row so a single wrong item stays removable.
   // The voice path simply never got the same treatment. It does now: one behaviour
   // for every slot and every route in.
-  const logFoodFromVoice = ({ slot, name, cal, protein, carbs, fats }) => {
+  const logFoodFromVoice = ({ slot, items, name, cal, protein, carbs, fats }) => {
     const todayStr = ymdLocal();
     const s = FOOD_SLOT_IDS.includes(slot) ? slot : "snacks";
-    const entry = { food: name || "Logged item", cal:String(Math.round(cal||0)), protein:String(Math.round(protein||0)), carbs:String(Math.round(carbs||0)), fats:String(Math.round(fats||0)), logged:true };
+    const row = (f) => ({
+      food: f.name || "Logged item",
+      cal:String(Math.round(f.cal||0)), protein:String(Math.round(f.protein||0)),
+      carbs:String(Math.round(f.carbs||0)), fats:String(Math.round(f.fats||0)),
+      logged:true,
+    });
+
+    // `items` is the shape the tool now asks for. The flat fields are the fallback,
+    // both for a single food and because the model sometimes still reaches for them.
+    let incoming = Array.isArray(items) && items.length
+      ? items.filter(Boolean).map(row)
+      : (name ? [row({ name, cal, protein, carbs, fats })] : []);
+
+    // SAFETY NET. The schema asks for separate entries and the prompt says so twice,
+    // but a model that has just heard "three eggs, toast and coffee" will sometimes
+    // still hand back one line with the whole meal in it. One row reading
+    // "Three eggs, one toast, four strips of bacon, coffee with three creams and one
+    // sugar" is what started all of this. If a single entry is clearly a list, split
+    // it — the calories divide evenly, which is wrong per item but right in total, and
+    // a visible approximation beats an unsplittable lump the client cannot edit.
+    // COMMAS ONLY. Splitting on "and" too turned "coffee with three creams and one
+    // sugar" into two foods — one drink became a coffee and a sugar. A comma is a list
+    // separator; "and" is just as often part of a single item's name.
+    if (incoming.length === 1 && incoming[0].food.includes(",") && incoming[0].food.length > 24) {
+      const parts = incoming[0].food.split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        const n = parts.length;
+        const split = (v) => String(Math.round((parseFloat(v) || 0) / n));
+        incoming = parts.map(pName => ({
+          food: pName, cal: split(incoming[0].cal), protein: split(incoming[0].protein),
+          carbs: split(incoming[0].carbs), fats: split(incoming[0].fats),
+          logged: true, approx: true,      // marked: the macros here were divided, not measured
+        }));
+      }
+    }
+    if (!incoming.length) return;
+
     setFoodLog(prev => {
       const updated = { ...(prev||{}) };
       const dayLog = { ...(updated[todayStr]||{}) };
-      dayLog[s] = [...slotList(dayLog[s]), entry];
+      dayLog[s] = [...slotList(dayLog[s]), ...incoming];
       updated[todayStr] = dayLog;
       return updated;
     });

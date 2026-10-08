@@ -44,17 +44,39 @@ export const REALTIME_TOOLS = [
     },
   },
   {
+    // ⚠️ THE OLD SHAPE CAUSED THE BUG. One `name` and one `cal` meant a four-food
+    // breakfast had nowhere to go but into a single string, and that is exactly what
+    // the model did: Neal's log holds one row reading "Three eggs, one toast, four
+    // strips of bacon, coffee with three creams and one sugar" at 540 calories. Not a
+    // model mistake — the schema asked for one food and he had eaten four.
+    //
+    // `items` is now the shape, so the natural call is already itemised. The flat
+    // fields stay for a single food and because the model will sometimes still reach
+    // for them.
     type: "function", name: "log_food",
-    description: "Log a food the client says they ate. Use their own words for the name.",
+    description: "Log what the client ate. Put EVERY food in `items` as its own entry — three eggs, toast and coffee are three entries, never one line reading 'eggs, toast and coffee'. Separate rows are what let them see the meal on screen and delete one wrong item without losing the rest. Use their own words for each name, and give each its own calories and macros.",
     parameters: {
       type: "object",
       properties: {
         slot: { type: "string", enum: ["breakfast", "lunch", "dinner", "snacks"] },
-        name: { type: "string" },
+        items: {
+          type: "array",
+          description: "One entry per food. Always prefer this, even for a single item.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "One food only, in their words — 'three eggs', not 'eggs and toast'." },
+              cal: { type: "number" }, protein: { type: "number" },
+              carbs: { type: "number" }, fats: { type: "number" },
+            },
+            required: ["name", "cal", "protein", "carbs", "fats"],
+          },
+        },
+        name: { type: "string", description: "Legacy single-food form. Use `items` instead." },
         cal: { type: "number" }, protein: { type: "number" },
         carbs: { type: "number" }, fats: { type: "number" },
       },
-      required: ["slot", "name", "cal", "protein", "carbs", "fats"],
+      required: ["slot"],
     },
   },
   {
@@ -125,6 +147,9 @@ A RANGE IS NOT A NUMBER EITHER. "Three or four slices" means you ask which — n
 
 IF YOU DIDN'T HEAR IT CLEARLY, SAY SO. Audio drops words. If you're piecing a number together from a fragment, or you only half-caught it, ask again — "say that again for me?" is always better than a confident guess. A number you made up goes into their permanent record and into their coach's report, and it corrupts everything built on it.
 
+ONE FOOD PER ENTRY, ALWAYS. A meal is not a line, it is a list.
+When they tell you breakfast was three eggs, toast and a coffee, that is THREE entries in the items list — never one entry reading "three eggs, toast and a coffee". Separate rows are what let them see the meal on their screen and delete the one wrong thing without losing the other two. Give each food its own calories and macros; you are expected to know roughly what a food costs, and that is not the same as inventing something they never said.
+
 NEVER DESCRIBE THEIR LOG FROM MEMORY. CALL get_food_log AND READ IT.
 Everything above protects what you WRITE. This protects what you SAY BACK. What the client told you and what is actually recorded are two different things, and only one of them is the log. The moment they ask what is logged, tell you something is missing, or you are about to state what they have eaten — call get_food_log first and answer from what comes back. It reads the live log at that instant, so it also catches anything added since you started talking.
 
@@ -158,7 +183,14 @@ function runTool(name, args, h) {
     // opposite answers and the coach must never confuse them.
     case "get_food_log":
       return h.onGetFoodLog ? h.onGetFoodLog(args || {}) : { error: "food log unavailable" };
-    case "log_food":    h.onLogFood && h.onLogFood(args); return `Logged ${args.name || "food"}`;
+    case "log_food": {
+      h.onLogFood && h.onLogFood(args);
+      const n = Array.isArray(args.items) ? args.items.length : (args.name ? 1 : 0);
+      const what = Array.isArray(args.items) && args.items.length
+        ? args.items.map(i => i && i.name).filter(Boolean).join(", ")
+        : (args.name || "food");
+      return `Logged ${n} item${n === 1 ? "" : "s"}: ${what}`;
+    }
     case "remove_food": h.onRemoveFood && h.onRemoveFood(args); return "Removed";
     case "add_water":   h.onAddWater && h.onAddWater(args.cups); return "Water logged";
     case "set_water":   h.onSetWater && h.onSetWater(args.cups); return "Water set";
