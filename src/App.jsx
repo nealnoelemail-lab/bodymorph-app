@@ -5430,19 +5430,34 @@ ${resumeAt
       const mealDone = (info) => !!(info && info.logged);
       const chk = (done) => done ? "x" : " ";
       const otherTodos = todos.filter(t => !/^(breakfast|lunch|dinner|snacks|gym workout|cardio)/i.test(t.label));
+      // KNOWN vs ASK, marked explicitly on every line.
+      //
+      // Neal, mid-conversation: the coach asked "how many steps you at right now?" when
+      // the answer was already in this checklist. He pushed back — "come on coach,
+      // you're not paying attention, look at the step count" — and it produced 7,006
+      // instantly, because it had always had it.
+      //
+      // The cause was this list being ambiguous rather than the model being careless.
+      // "[ ] = OPEN" was the only signal, and OPEN was doing two incompatible jobs:
+      // "not yet finished" and "I don't know this". Steps at 7,006 of 9,000 is open AND
+      // known; sleep that was never logged is open and genuinely unknown. One marker
+      // cannot carry both, so the model guessed, and guessing wrong makes a coach look
+      // like it isn't listening — which is worse than any wrong number.
+      const K = "  [KNOWN]";   // the figure on this line is real — state it, never ask
+      const A = "  [ASK]";     // genuinely not recorded — this one is a question
       const checklistLines = [
-        `  [${chk(cd.sleep != null)}] SLEEP — ${cd.sleep != null ? `${cd.sleep}h logged` : "not logged yet — ask how they slept"}`,
-        `  [${chk(h.cups >= h.goal)}] WATER — ${h.cups} of ${h.goal} cups`,
-        `  [${chk(mealDone(m.breakfast))}] BREAKFAST — ${mealDone(m.breakfast) ? m.breakfast.name : "not logged yet"}`,
-        `  [${chk(mealDone(m.lunch))}] LUNCH — ${mealDone(m.lunch) ? m.lunch.name : "not logged yet"}`,
-        `  [${chk(mealDone(m.dinner))}] DINNER — ${mealDone(m.dinner) ? m.dinner.name : "not logged yet"}`,
-        `  [${chk(mealDone(m.snacks))}] SNACKS — ${mealDone(m.snacks) ? m.snacks.name : "none logged yet"}`,
-        `  [${chk((cd.steps||0) >= (cd.stepGoal||12000))}] STEPS — ${cd.steps||0} of ${cd.stepGoal||12000}`,
+        `  [${chk(cd.sleep != null)}] SLEEP — ${cd.sleep != null ? `${cd.sleep}h logged${K}` : `not recorded${A}`}`,
+        `  [${chk(h.cups >= h.goal)}] WATER — ${h.cups} of ${h.goal} cups${K}`,
+        `  [${chk(mealDone(m.breakfast))}] BREAKFAST — ${mealDone(m.breakfast) ? m.breakfast.name + K : `not logged${A}`}`,
+        `  [${chk(mealDone(m.lunch))}] LUNCH — ${mealDone(m.lunch) ? m.lunch.name + K : `not logged${A}`}`,
+        `  [${chk(mealDone(m.dinner))}] DINNER — ${mealDone(m.dinner) ? m.dinner.name + K : `not logged${A}`}`,
+        `  [${chk(mealDone(m.snacks))}] SNACKS — ${mealDone(m.snacks) ? m.snacks.name + K : `none logged${A}`}`,
+        `  [${chk((cd.steps||0) >= (cd.stepGoal||12000))}] STEPS — ${cd.steps||0} of ${cd.stepGoal||12000}${K}`,
         cd.workout
           ? `  [${chk(cd.workout.done)}] WORKOUT — ${cd.workout.type}${cd.workout.focus?` (${cd.workout.focus})`:""} — ${cd.workout.done ? "done ✓" : "NOT done yet"}`
           : `  [x] WORKOUT — rest day, nothing scheduled`,
         cd.cardio?.planned ? `  [${chk(cd.cardio.done)}] CARDIO — ${cd.cardio.planned} — ${cd.cardio.done ? "done ✓" : "NOT done yet"}` : null,
-        `  [${chk(cal.total >= cal.goal * 0.85)}] CALORIES/MACROS — ${cal.total||0} of ${cal.goal||0} cal, ${pro.total||0}/${pro.goal||0}g protein`,
+        `  [${chk(cal.total >= cal.goal * 0.85)}] CALORIES/MACROS — ${cal.total||0} of ${cal.goal||0} cal, ${pro.total||0}/${pro.goal||0}g protein${K}`,
         ...otherTodos.map(t => `  [${chk(t.done)}] ${t.label.toUpperCase()}  (key: ${t.key})`),
       ].filter(Boolean).join("\n");
 
@@ -5469,6 +5484,9 @@ ${recentSummaryRef.current.map(e => `• ${e.date}: ${e.text}`).join("\n")}
 ` : ""}
 HOW TO COACH FROM THE CHECKLIST — this is the whole job; if you don't visibly work the list, ${profile.name} doesn't feel coached:
 • [x] = DONE. Drop it — never re-ask, never nudge. At most celebrate it once, briefly, then move on.
+• [KNOWN] = THE NUMBER ON THAT LINE IS REAL AND CURRENT. State it; never ask for it. "You're at 7,006, about 2,000 short" — not "how many steps are you at?". Asking for something you were just handed is the single fastest way to look like you aren't listening, and ${profile.name} will tell you so.
+• [ASK] = genuinely not recorded yet. These are the only things you may ask for.
+• USE THE EXACT FIGURES. The goals on these lines are this client's real targets, calculated for them. Never round one to a tidier number — 9,000 steps does not become "10K". A rounded goal is a goal belonging to somebody else, and the arithmetic you build on it is wrong even when it looks right.
 • [ ] = OPEN. Open items drive the conversation — but WEAVE them in like a friend catching up, one per turn, casual ("you sleep okay?" / "gettin' your water in?" / "make it to the gym yet?" / "what'd you end up eating?") — NEVER back-to-back like a survey; react to their answer like a person before the next nudge. Pick the items that fit the hour: morning → sleep, water, AM supplements, breakfast, today's plan (if some water/meals are already logged, acknowledge them — only nudge from zero); midday → lunch, steps, workout; evening → dinner, PM supplements, closing out steps, wind-down.
 • ALMOST THERE = its own state: when a number is close, push to FINISH it with the actual gap ("6 of 8 cups — two more and it's done", "1,200 steps left — that's one lap around the block").
 • THE DAY HAS AN ARC: early on most items are open — lay out the whole day. As items get checked off, the list shrinks — talk ONLY about what's left. By evening you're closing the last few and celebrating what got done.
