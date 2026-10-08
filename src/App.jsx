@@ -159,13 +159,21 @@ const USDA_KEY = import.meta.env.VITE_USDA_KEY || "DEMO_KEY";
 // ── Voice provider abstraction ──────────────────────────────────────────────
 // One switch selects the whole voice stack so we're never vendor-locked:
 //   "cartesia" → Cartesia Ink-Whisper (STT) + Sonic (TTS)   [RETIRED — direct-key, no proxy]
-//   "grok"     → xAI Grok STT + TTS (+ cloning) via proxy    [current]
+//   "grok"     → xAI Grok STT + TTS (+ cloning) via proxy    [CURRENT]
 const VOICE_PROVIDER = (import.meta.env.VITE_VOICE_PROVIDER || "legacy").toLowerCase();
 const USE_CARTESIA = false;   // retired: Cartesia ran on a bundled key; proxy-only now
 const USE_GROK = VOICE_PROVIDER === "grok" && USE_PROXY; // Grok runs entirely through the proxy
-// "openai" → OpenAI Realtime speech-to-speech (EXPERIMENTAL). One model hears and
-// answers in audio, replacing STT + brain + TTS at once. Selecting it PARKS the Grok
-// stack rather than removing it — set VITE_VOICE_PROVIDER back to "grok" to return.
+// "openai" → OpenAI Realtime speech-to-speech. One model hears and answers in audio,
+// replacing STT + brain + TTS at once. TRIALLED Sep-Oct 2026 and REVERTED, and the
+// reason was not quality — it is that OpenAI ships a fixed set of voices and does not
+// clone. Neal: "one of the things OpenAI speech-to-speech does not allow us to do is
+// clone the coach's voice... that turned out to be important to the coaches." A coach
+// selling their own programme wants their own voice in the client's ear, and that is
+// the product, not a nicety. Grok does clone, so Grok wins on a feature axis no amount
+// of latency tuning could offset.
+//
+// Left PARKED, not deleted — exactly as it was parked the first time, which is how we
+// got back here in one line. Set VITE_VOICE_PROVIDER=openai to trial it again.
 const USE_OPENAI_RT = VOICE_PROVIDER === "openai" && USE_PROXY;
 const CARTESIA_VERSION = "2026-03-01";
 const CARTESIA_TTS_MODEL = "sonic-3.5";
